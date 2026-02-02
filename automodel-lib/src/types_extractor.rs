@@ -420,7 +420,7 @@ async fn extract_input_types(
                 } else {
                     (custom_type.as_str(), true)
                 };
-                
+
                 rust_type = RustType {
                     rust_type: clean_type.to_string(),
                     is_nullable: false,
@@ -584,7 +584,7 @@ async fn extract_output_types(
                 } else {
                     (custom_type.as_str(), true)
                 };
-                
+
                 RustType {
                     rust_type: clean_type.to_string(),
                     is_nullable: base_rust_type.is_nullable,
