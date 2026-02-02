@@ -3,7 +3,7 @@
 use sqlx::Row;
 
 /// Constraint violations specific to this query
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum UserContentConstraints {
     /// Constraint: users_email_key on table users
     UsersEmailKey,

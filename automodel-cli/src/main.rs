@@ -109,6 +109,7 @@ async fn generate_command(matches: &ArgMatches) -> Result<()> {
             include_sql: telemetry_include_sql,
         },
         ensure_indexes: ensure_indexes,
+        derives: Default::default(),
     };
 
     println!("Loading queries from: {}", queries_dir);

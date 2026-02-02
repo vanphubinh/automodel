@@ -6,6 +6,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             include_sql: true,
         },
         ensure_indexes: true,
+        derives: automodel::DefaultsDerivesConfig {
+            return_type: vec!["Clone".to_string()],
+            parameters_type: vec!["Clone".to_string()],
+            conditions_type: vec!["Clone".to_string()],
+            error_type: vec!["Clone".to_string()],
+        },
     };
     automodel::AutoModel::generate(
         || {

@@ -29,7 +29,7 @@ pub async fn get_version(executor: impl sqlx::Executor<'_, Database = sqlx::Post
 }
 
 /// Constraint violations specific to this query
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum InsertAllTypesTestConstraints {
     /// Constraint: all_types_test_pkey on table all_types_test
     AllTypesTestPkey,

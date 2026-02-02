@@ -108,6 +108,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             include_sql: true,
         },
         ensure_indexes: true,
+        derives: automodel::DefaultsDerivesConfig {
+            return_type: vec!["Clone".to_string()],
+            parameters_type: vec!["Clone".to_string()],
+            conditions_type: vec!["Clone".to_string()],
+            error_type: vec!["Clone".to_string()],
+        },
     };
     automodel::AutoModel::generate(
         || {
@@ -273,6 +279,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             include_sql: true,
         },
         ensure_indexes: true,
+        derives: automodel::DefaultsDerivesConfig {
+            return_type: vec!["Clone".to_string()],
+            parameters_type: vec!["Clone".to_string()],
+            conditions_type: vec!["Clone".to_string()],
+            error_type: vec!["Clone".to_string()],
+        },
     };
     automodel::AutoModel::generate(
         || {
@@ -360,29 +372,39 @@ SELECT id, name FROM users WHERE id = #{id}
 
 Controls how the query is executed and what it returns:
 
-```yaml
-expect: "exactly_one"    # fetch_one() -> Result<T, Error> - Fails if 0 or >1 rows
-expect: "possible_one"   # fetch_optional() -> Result<Option<T>, Error> - 0 or 1 row
-expect: "at_least_one"   # fetch_all() -> Result<Vec<T>, Error> - Fails if 0 rows
-expect: "multiple"       # fetch_all() -> Result<Vec<T>, Error> - 0 or more rows (default for collections)
+```sql
+-- @automodel
+--    expect: exactly_one    # fetch_one() -> Result<T, Error> - Fails if 0 or >1 rows
+-- @end
+
+-- @automodel
+--    expect: possible_one   # fetch_optional() -> Result<Option<T>, Error> - 0 or 1 row
+-- @end
+
+-- @automodel
+--    expect: at_least_one   # fetch_all() -> Result<Vec<T>, Error> - Fails if 0 rows
+-- @end
+
+-- @automodel
+--    expect: multiple       # fetch_all() -> Result<Vec<T>, Error> - 0 or more rows (default for collections)
+-- @end
 ```
 
 ### Custom Type Mappings
 
 Override PostgreSQL-to-Rust type mappings for specific fields:
 
-```yaml
-types:
-  # For input parameters and output fields with this name
-  "profile": "crate::models::UserProfile"
-  
-  # For output fields from specific table (when using JOINs)
-  "users.profile": "crate::models::UserProfile"
-  "posts.metadata": "crate::models::PostMetadata"
-  
-  # Custom enum types
-  "status": "UserStatus"
-  "category": "crate::enums::Category"
+```sql
+-- @automodel
+--    types:
+--      profile: "crate::models::UserProfile"  # For input parameters and output fields with this name
+--      users.profile: "crate::models::UserProfile"  # For output fields from specific table (when using JOINs)
+--      posts.metadata: "crate::models::PostMetadata"
+--      status: "UserStatus"  # Custom enum types
+--      category: "crate::enums::Category"
+-- @end
+
+SELECT id, name, profile FROM users WHERE id = #{id}
 ```
 
 **Note:** Custom types must implement appropriate serialization traits:
@@ -393,15 +415,17 @@ types:
 
 Use `#{parameter_name}` syntax in SQL queries:
 
-```yaml
-sql: "SELECT * FROM users WHERE id = #{user_id} AND status = #{status}"
+```sql
+SELECT * FROM users WHERE id = #{user_id} AND status = #{status}
 ```
 
 **Optional Parameters:**
 Add `?` suffix for optional parameters that become `Option<T>`:
 
-```yaml
-sql: "SELECT * FROM posts WHERE user_id = #{user_id} AND (#{category?} IS NULL OR category = #{category?})"
+```sql
+SELECT * FROM posts 
+WHERE user_id = #{user_id} 
+  AND (#{category?} IS NULL OR category = #{category?})
 ```
 
 ### Per-Query Telemetry Configuration
@@ -611,20 +635,31 @@ pub async fn find_users_complex(
 ### Best Practices
 
 1. **Use `WHERE 1=1`** as a base condition when all WHERE clauses are conditional:
-   ```yaml
-   sql: "SELECT * FROM users WHERE 1=1 #[AND name = #{name?}] #[AND age > #{min_age?}]"
+   ```sql
+   SELECT * FROM users 
+   WHERE 1=1 
+     #[AND name = #{name?}] 
+     #[AND age > #{min_age?}]
    ```
 
 ### Conditional UPDATE Statements
 
 Conditional syntax is also useful for UPDATE statements where you want to update only certain fields based on which parameters are provided:
 
-```yaml
-- name: update_user_fields
-  sql: "UPDATE users SET updated_at = NOW() #[, name = #{name?}] #[, email = #{email?}] #[, age = #{age?}] WHERE id = #{user_id} RETURNING id, name, email, age, updated_at"
-  description: "Update user fields conditionally - only updates fields that are provided (not None)"
-  module: "users"
-  expect: "exactly_one"
+`queries/users/update_user_fields.sql`:
+```sql
+-- @automodel
+--    description: Update user fields conditionally - only updates fields that are provided (not None)
+--    expect: exactly_one
+-- @end
+
+UPDATE users 
+SET updated_at = NOW() 
+  #[, name = #{name?}] 
+  #[, email = #{email?}] 
+  #[, age = #{age?}] 
+WHERE id = #{user_id} 
+RETURNING id, name, email, age, updated_at
 ```
 
 This generates a function that allows partial updates:
@@ -670,10 +705,15 @@ Group all query parameters into a single struct instead of passing them individu
 
 **Basic Usage:**
 
-```yaml
-- name: insert_user_structured
-  sql: "INSERT INTO users (name, email, age) VALUES (#{name}, #{email}, #{age}) RETURNING id"
-  parameters_type: true  # Generates InsertUserStructuredParams
+`queries/users/insert_user_structured.sql`:
+```sql
+-- @automodel
+--    parameters_type: true  # Generates InsertUserStructuredParams
+-- @end
+
+INSERT INTO users (name, email, age) 
+VALUES (#{name}, #{email}, #{age}) 
+RETURNING id
 ```
 
 **Generated Code:**
@@ -707,17 +747,22 @@ insert_user_structured(executor, &params).await?;
 
 Specify an existing struct name to reuse it across queries:
 
-```yaml
-queries:
-  # First query generates the struct
-  - name: get_user_by_id_and_email
-    sql: "SELECT id, name, email FROM users WHERE id = #{id} AND email = #{email}"
-    parameters_type: true  # Generates GetUserByIdAndEmailParams
-  
-  # Second query reuses the same struct
-  - name: delete_user_by_id_and_email
-    sql: "DELETE FROM users WHERE id = #{id} AND email = #{email} RETURNING id"
-    parameters_type: "GetUserByIdAndEmailParams"  # Reuses existing struct
+`queries/users/get_user_by_id_and_email.sql`:
+```sql
+-- @automodel
+--    parameters_type: true  # Generates GetUserByIdAndEmailParams
+-- @end
+
+SELECT id, name, email FROM users WHERE id = #{id} AND email = #{email}
+```
+
+`queries/users/delete_user_by_id_and_email.sql`:
+```sql
+-- @automodel
+--    parameters_type: "GetUserByIdAndEmailParams"  # Reuses existing struct
+-- @end
+
+DELETE FROM users WHERE id = #{id} AND email = #{email} RETURNING id
 ```
 
 Only one struct definition is generated, shared by both functions.
@@ -728,10 +773,17 @@ For queries with conditional SQL (`#[...]` blocks), generate a struct and compar
 
 **Basic Usage:**
 
-```yaml
-- name: update_user_fields_diff
-  sql: "UPDATE users SET updated_at = NOW() #[, name = #{name?}] #[, email = #{email?}] WHERE id = #{user_id}"
-  conditions_type: true  # Generates UpdateUserFieldsDiffParams
+`queries/users/update_user_fields_diff.sql`:
+```sql
+-- @automodel
+--    conditions_type: true  # Generates UpdateUserFieldsDiffParams
+-- @end
+
+UPDATE users 
+SET updated_at = NOW() 
+  #[, name = #{name?}] 
+  #[, email = #{email?}] 
+WHERE id = #{user_id}
 ```
 
 **Generated Code:**
@@ -773,15 +825,30 @@ update_user_fields_diff(executor, &old, &new, 42).await?;
 
 **Struct Reuse:**
 
-```yaml
-queries:
-  - name: update_user_profile_diff
-    sql: "UPDATE users SET updated_at = NOW() #[, name = #{name?}] #[, email = #{email?}] WHERE id = #{user_id}"
-    conditions_type: true
-  
-  - name: update_user_metadata_diff
-    sql: "UPDATE users SET updated_at = NOW() #[, name = #{name?}] #[, email = #{email?}] WHERE id = #{user_id}"
-    conditions_type: "UpdateUserProfileDiffParams"  # Reuses existing diff struct
+`queries/users/update_user_profile_diff.sql`:
+```sql
+-- @automodel
+--    conditions_type: true
+-- @end
+
+UPDATE users 
+SET updated_at = NOW() 
+  #[, name = #{name?}] 
+  #[, email = #{email?}] 
+WHERE id = #{user_id}
+```
+
+`queries/users/update_user_metadata_diff.sql`:
+```sql
+-- @automodel
+--    conditions_type: "UpdateUserProfileDiffParams"  # Reuses existing diff struct
+-- @end
+
+UPDATE users 
+SET updated_at = NOW() 
+  #[, name = #{name?}] 
+  #[, email = #{email?}] 
+WHERE id = #{user_id}
 ```
 
 ### return_type: Custom Return Type Names
@@ -790,10 +857,13 @@ Customize the name of return type structs (generated for multi-column SELECT que
 
 **Basic Usage:**
 
-```yaml
-- name: get_user_summary
-  sql: "SELECT id, name, email FROM users WHERE id = #{user_id}"
-  return_type: "UserSummary"  # Custom name instead of GetUserSummaryItem
+`queries/users/get_user_summary.sql`:
+```sql
+-- @automodel
+--    return_type: "UserSummary"  # Custom name instead of GetUserSummaryItem
+-- @end
+
+SELECT id, name, email FROM users WHERE id = #{user_id}
 ```
 
 **Generated Code:**
@@ -816,32 +886,34 @@ pub async fn get_user_summary(
 
 Multiple queries returning the same columns can share the same struct:
 
-```yaml
-queries:
-  - name: get_user_summary
-    sql: "SELECT id, name, email FROM users WHERE id = #{user_id}"
-    return_type: "UserSummary"  # Generates the struct
-  
-  - name: get_user_info_by_email
-    sql: "SELECT id, name, email FROM users WHERE email = #{email}"
-    return_type: "UserSummary"  # Reuses the struct
-  
-  - name: get_all_user_summaries
-    sql: "SELECT id, name, email FROM users ORDER BY name"
-    return_type: "UserSummary"  # Reuses the struct
+`queries/users/get_user_summary.sql`:
+```sql
+-- @automodel
+--    return_type: "UserSummary"  # Generates the struct
+-- @end
+
+SELECT id, name, email FROM users WHERE id = #{user_id}
+```
+
+`queries/users/get_user_info_by_email.sql`:
+```sql
+-- @automodel
+--    return_type: "UserSummary"  # Reuses the struct
+-- @end
+
+SELECT id, name, email FROM users WHERE email = #{email}
+```
+
+`queries/users/get_all_user_summaries.sql`:
+```sql
+-- @automodel
+--    return_type: "UserSummary"  # Reuses the struct
+-- @end
+
+SELECT id, name, email FROM users ORDER BY name
 ```
 
 Only one `UserSummary` struct is generated, shared by all three functions.
-
-**Disable Custom Struct:**
-
-Set to `false` to use the default `{QueryName}Item` naming:
-
-```yaml
-- name: get_user_count
-  sql: "SELECT COUNT(*) as count FROM users"
-  return_type: false  # Uses GetUserCountItem
-```
 
 ### Cross-Struct Reuse
 
@@ -850,17 +922,22 @@ You can reuse struct names across queries. AutoModel will:
 2. **Reuse** if the struct already exists (from a previous query in the same module)
 3. **Validate** that fields match exactly when reusing
 
-```yaml
-queries:
-  # First use: generates UserInfo struct from return columns
-  - name: get_user_info
-    sql: "SELECT id, name, email FROM users WHERE id = #{user_id}"
-    return_type: "UserInfo"
-  
-  # Second use: reuses existing UserInfo struct for parameters
-  - name: update_user_info
-    sql: "UPDATE users SET name = #{name}, email = #{email} WHERE id = #{id}"
-    parameters_type: "UserInfo"  # Reuses the return type struct
+`queries/users/get_user_info.sql`:
+```sql
+-- @automodel
+--    return_type: "UserInfo"  # First use: generates UserInfo struct from return columns
+-- @end
+
+SELECT id, name, email FROM users WHERE id = #{user_id}
+```
+
+`queries/users/update_user_info.sql`:
+```sql
+-- @automodel
+--    parameters_type: "UserInfo"  # Second use: reuses existing UserInfo struct for parameters
+-- @end
+
+UPDATE users SET name = #{name}, email = #{email} WHERE id = #{id}
 ```
 
 **Usage:**
@@ -879,7 +956,29 @@ update_user_info(executor, &updated).await?;
 
 ### Custom Derive Traits
 
-Add additional derive traits to generated structs and enums using `*_derives` options:
+Add additional derive traits to generated structs and enums using `*_derives` options. These are combined with the global defaults configured in your `build.rs`.
+
+#### Global Default Derives
+
+Configure derive traits that apply to all generated types in your `build.rs`:
+
+```rust
+let defaults = automodel::DefaultsConfig {
+    // ... other config ...
+    derives: automodel::DefaultsDerivesConfig {
+        return_type: vec!["Clone".to_string()],
+        parameters_type: vec!["Clone".to_string()],
+        conditions_type: vec!["Clone".to_string()],
+        error_type: vec!["Clone".to_string()],
+    },
+};
+```
+
+This ensures all generated structs include `Clone` in addition to the always-present `Debug` trait.
+
+#### Per-Query Additional Derives
+
+Add query-specific derive traits that append to the global defaults:
 
 ```sql
 -- @automodel
@@ -903,13 +1002,19 @@ pub struct UserId {
 }
 ```
 
+Note: `Clone` comes from global defaults, `serde` traits and `PartialEq`/`Eq` from per-query config.
+
 **Available Options:**
 - `conditions_type_derives` - For conditions struct (used with `conditions_type`)
 - `parameters_type_derives` - For parameters struct (used with `parameters_type`)  
 - `return_type_derives` - For return type struct
 - `error_type_derives` - For constraint error enum
 
-Default derives (`Debug`, `Clone`, etc.) are always included. Empty list means no additional derives.
+**Trait Merging:**
+- Global defaults are applied first
+- Per-query derives are appended
+- Duplicates are automatically removed
+- `Debug` is always included by default
 
 ### Build-Time Validation
 
@@ -963,27 +1068,44 @@ Structs can be generated from three sources:
 
 ### Complete Example
 
-```yaml
-queries:
-  # Define a common return type
-  - name: get_user_summary
-    sql: "SELECT id, name, email FROM users WHERE id = #{user_id}"
-    return_type: "UserSummary"
-  
-  # Reuse it in other queries
-  - name: search_users
-    sql: "SELECT id, name, email FROM users WHERE name ILIKE #{pattern}"
-    return_type: "UserSummary"
-  
-  # Use it as input parameters
-  - name: update_user_contact
-    sql: "UPDATE users SET name = #{name}, email = #{email} WHERE id = #{id}"
-    parameters_type: "UserSummary"
-  
-  # Conditional update with custom struct
-  - name: partial_update_user
-    sql: "UPDATE users SET updated_at = NOW() #[, name = #{name?}] #[, email = #{email?}] WHERE id = #{user_id}"
-    conditions_type: true  # Generates PartialUpdateUserParams
+`queries/users/get_user_summary.sql`:
+```sql
+-- @automodel
+--    return_type: "UserSummary"  # Define a common return type
+-- @end
+
+SELECT id, name, email FROM users WHERE id = #{user_id}
+```
+
+`queries/users/search_users.sql`:
+```sql
+-- @automodel
+--    return_type: "UserSummary"  # Reuse it in other queries
+-- @end
+
+SELECT id, name, email FROM users WHERE name ILIKE #{pattern}
+```
+
+`queries/users/update_user_contact.sql`:
+```sql
+-- @automodel
+--    parameters_type: "UserSummary"  # Use it as input parameters
+-- @end
+
+UPDATE users SET name = #{name}, email = #{email} WHERE id = #{id}
+```
+
+`queries/users/partial_update_user.sql`:
+```sql
+-- @automodel
+--    conditions_type: true  # Generates PartialUpdateUserParams
+-- @end
+
+UPDATE users 
+SET updated_at = NOW() 
+  #[, name = #{name?}] 
+  #[, email = #{email?}] 
+WHERE id = #{user_id}
 ```
 
 **Generated Code:**
@@ -1314,7 +1436,7 @@ println!("Upserted {} users", results.len());
 
 ### Commands
 
-- **`generate`** - Generate Rust code from YAML definitions
+- **`generate`** - Generate Rust code from SQL query files
 
 ### CLI Options
 
@@ -1384,12 +1506,17 @@ impl From<sqlx::Error> for ErrorReadOnly {
 ```
 
 **Example Usage:**
-```yaml
-- name: get_user_by_id
-  sql: "SELECT id, name, email FROM users WHERE id = #{user_id}"
-  expect: "exactly_one"
+
+`queries/users/get_user_by_id.sql`:
+```sql
+-- @automodel
+--    expect: exactly_one
+-- @end
+
+SELECT id, name, email FROM users WHERE id = #{user_id}
 ```
 
+**Generated function:**
 ```rust
 pub async fn get_user_by_id(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
@@ -1468,10 +1595,16 @@ pub enum Error<C: TryFrom<ErrorConstraintInfo>> {
 By default, AutoModel generates error type names based on the query name (e.g., `InsertUserConstraints`). You can customize this using the `error_type` configuration option.
 
 **Basic Usage:**
-```yaml
-- name: insert_user
-  sql: "INSERT INTO users (email, name, age) VALUES (#{email}, #{name}, #{age}) RETURNING id"
-  error_type: "UserError"  # Custom name instead of InsertUserConstraints
+
+`queries/users/insert_user.sql`:
+```sql
+-- @automodel
+--    error_type: "UserError"  # Custom name instead of InsertUserConstraints
+-- @end
+
+INSERT INTO users (email, name, age) 
+VALUES (#{email}, #{name}, #{age}) 
+RETURNING id
 ```
 
 **Generated Code:**
@@ -1504,25 +1637,40 @@ pub async fn insert_user(
 Multiple queries that operate on the same table(s) can reuse the same error type. AutoModel validates at build time that the constraints match exactly.
 
 **Example:**
-```yaml
-queries:
-  # First query generates the error type
-  - name: insert_user
-    sql: "INSERT INTO users (email, name, age) VALUES (#{email}, #{name}, #{age}) RETURNING id"
-    error_type: "UserError"
-  
-  # Second query reuses the same error type
-  - name: update_user_email
-    sql: "UPDATE users SET email = #{email} WHERE id = #{user_id} RETURNING id"
-    error_type: "UserError"  # Reuses UserError - constraints must match
-  
-  # Third query also reuses it
-  - name: upsert_user
-    sql: |
-      INSERT INTO users (email, name, age) VALUES (#{email}, #{name}, #{age})
-      ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, age = EXCLUDED.age
-      RETURNING id
-    error_type: "UserError"  # Reuses UserError
+
+`queries/users/insert_user.sql`:
+```sql
+-- @automodel
+--    error_type: "UserError"  # First query generates the error type
+-- @end
+
+INSERT INTO users (email, name, age) 
+VALUES (#{email}, #{name}, #{age}) 
+RETURNING id
+```
+
+`queries/users/update_user_email.sql`:
+```sql
+-- @automodel
+--    error_type: "UserError"  # Reuses UserError - constraints must match
+-- @end
+
+UPDATE users SET email = #{email} 
+WHERE id = #{user_id} 
+RETURNING id
+```
+
+`queries/users/upsert_user.sql`:
+```sql
+-- @automodel
+--    error_type: "UserError"  # Reuses UserError
+-- @end
+
+INSERT INTO users (email, name, age) 
+VALUES (#{email}, #{name}, #{age})
+ON CONFLICT (email) 
+DO UPDATE SET name = EXCLUDED.name, age = EXCLUDED.age
+RETURNING id
 ```
 
 **Build-Time Validation:**

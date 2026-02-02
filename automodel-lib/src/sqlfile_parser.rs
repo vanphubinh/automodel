@@ -357,10 +357,27 @@ async fn parse_sql_file(
         parameters_type: metadata.parameters_type.unwrap_or_default(),
         return_type: metadata.return_type,
         error_type: metadata.error_type,
-        conditions_type_derives: metadata.conditions_type_derives,
-        parameters_type_derives: metadata.parameters_type_derives,
-        return_type_derives: metadata.return_type_derives,
-        error_type_derives: metadata.error_type_derives,
+        // Merge global defaults with per-query derives (global first, per-query appends)
+        conditions_type_derives: {
+            let mut derives = defaults.derives.conditions_type.clone();
+            derives.extend(metadata.conditions_type_derives);
+            derives
+        },
+        parameters_type_derives: {
+            let mut derives = defaults.derives.parameters_type.clone();
+            derives.extend(metadata.parameters_type_derives);
+            derives
+        },
+        return_type_derives: {
+            let mut derives = defaults.derives.return_type.clone();
+            derives.extend(metadata.return_type_derives);
+            derives
+        },
+        error_type_derives: {
+            let mut derives = defaults.derives.error_type.clone();
+            derives.extend(metadata.error_type_derives);
+            derives
+        },
     })
 }
 

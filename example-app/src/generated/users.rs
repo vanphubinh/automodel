@@ -57,7 +57,7 @@ impl<'q> sqlx::Encode<'q, sqlx::Postgres> for UserStatus {
 
 
 /// Constraint violations specific to this query
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum InsertUserConstraints {
     /// Constraint: users_email_key on table users
     UsersEmailKey,
@@ -124,7 +124,7 @@ pub async fn insert_user(executor: impl sqlx::Executor<'_, Database = sqlx::Post
 }
 
 /// Constraint violations specific to this query
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum InsertUsersBatchConstraints {
     /// Constraint: users_email_key on table users
     UsersEmailKey,
@@ -274,7 +274,7 @@ pub async fn find_user_by_email(executor: impl sqlx::Executor<'_, Database = sql
 }
 
 /// Constraint violations specific to this query
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum UpdateUserProfileConstraints {
     /// Constraint: users_email_key on table users
     UsersEmailKey,
@@ -507,9 +507,9 @@ pub struct GetActiveUsersByAgeRangeItem {
 /// Get active public.users within an age range - must return at least one user or fails
 ///
 /// Query Plan:
-/// Index Scan using idx_users_age on users
-///   Index Cond: ((age >= 0) AND (age <= 0))
-///   Filter: (updated_at > (now - '30 days'::interval))
+/// Index Scan using idx_users_updated_at on users
+///   Index Cond: (updated_at > (now - '30 days'::interval))
+///   Filter: ((age >= 0) AND (age <= 0))
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, age, profile, created_at \nFROM public.users \nWHERE age BETWEEN #{min_age} AND #{max_age} \nAND updated_at > NOW() - INTERVAL '30 days'"))]
 pub async fn get_active_users_by_age_range(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, min_age: i32, max_age: i32) -> Result<Vec<GetActiveUsersByAgeRangeItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
@@ -740,7 +740,7 @@ pub async fn get_users_by_status(executor: impl sqlx::Executor<'_, Database = sq
 }
 
 /// Constraint violations specific to this query
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum UpdateUserStatusConstraints {
     /// Constraint: users_email_key on table users
     UsersEmailKey,
@@ -800,7 +800,7 @@ pub async fn update_user_status(executor: impl sqlx::Executor<'_, Database = sql
 }
 
 /// Constraint violations specific to this query
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum UpdateUserFieldsConstraints {
     /// Constraint: users_email_key on table users
     UsersEmailKey,
@@ -921,7 +921,7 @@ RETURNING id, name, email, age, updated_at".to_string();
 }
 
 /// Constraint violations specific to this query
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum UpdateUserFieldsDiffConstraints {
     /// Constraint: users_email_key on table users
     UsersEmailKey,
@@ -1049,7 +1049,7 @@ RETURNING id, name, email, age, updated_at".to_string();
 }
 
 /// Constraint violations specific to this query
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum InsertUserStructuredConstraints {
     /// Constraint: users_email_key on table users
     UsersEmailKey,
@@ -1295,7 +1295,7 @@ pub async fn get_user_by_id_and_email(executor: impl sqlx::Executor<'_, Database
 }
 
 /// Constraint violations specific to this query
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum DeleteUserByIdAndEmailConstraints {
     /// Constraint: users_email_key on table users
     UsersEmailKey,
@@ -1354,7 +1354,7 @@ pub async fn delete_user_by_id_and_email(executor: impl sqlx::Executor<'_, Datab
 }
 
 /// Constraint violations specific to this query
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum UpdateUserContactInfoConstraints {
     /// Constraint: users_email_key on table users
     UsersEmailKey,
@@ -1417,7 +1417,7 @@ pub async fn update_user_contact_info(executor: impl sqlx::Executor<'_, Database
 }
 
 /// Constraint violations specific to this query
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum UpdateUserProfileDiffConstraints {
     /// Constraint: users_email_key on table users
     UsersEmailKey,
@@ -1535,7 +1535,7 @@ RETURNING id, name, email, profile, updated_at".to_string();
 }
 
 /// Constraint violations specific to this query
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum UpdateUserMetadataDiffConstraints {
     /// Constraint: users_email_key on table users
     UsersEmailKey,

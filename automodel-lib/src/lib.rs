@@ -25,6 +25,11 @@ pub struct DefaultsConfig {
     /// Whether to analyze query performance and warn about sequential scans
     /// Defaults to false
     pub ensure_indexes: bool,
+    /// Global default derive traits applied to all generated structs
+    /// These traits are appended by per-query derives configurations
+    /// e.g., vec!["Clone".to_string(), "PartialEq".to_string()]
+    /// Defaults to empty vec
+    pub derives: DefaultsDerivesConfig,
 }
 
 /// Default configuration for telemetry and analysis
@@ -35,6 +40,23 @@ pub struct DefaultsTelemetryConfig {
     /// Whether to include SQL queries as fields in spans by default
     /// Defaults to false
     pub include_sql: bool,
+}
+
+/// Default derive traits configuration for all generated types
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DefaultsDerivesConfig {
+    /// Derive traits for return type structs
+    /// Defaults to empty vec (Debug is always added)
+    pub return_type: Vec<String>,
+    /// Derive traits for parameters structs
+    /// Defaults to empty vec (Debug is always added)
+    pub parameters_type: Vec<String>,
+    /// Derive traits for conditions structs
+    /// Defaults to empty vec (Debug is always added)
+    pub conditions_type: Vec<String>,
+    /// Derive traits for error constraint enums
+    /// Defaults to empty vec (Debug is always added)
+    pub error_type: Vec<String>,
 }
 
 /// Main entry point for the automodel library
