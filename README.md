@@ -431,6 +431,25 @@ WHERE user_id = #{user_id}
   AND (#{category?} IS NULL OR category = #{category?})
 ```
 
+**Array Parameters with Nullable Elements:**
+Use `??` suffix for array parameters where individual elements can be NULL, resulting in `Vec<Option<T>>`:
+
+```sql
+INSERT INTO users (name, email, age)
+SELECT * FROM UNNEST(
+  #{names}::text[],
+  #{emails}::text[],
+  #{ages??}::int4[]  -- Vec<Option<i32>>: array where elements can be NULL
+)
+```
+
+**Comparison:**
+- `#{param}` → `T` - Regular parameter
+- `#{param?}` → `Option<T>` - Optional parameter (entire value can be NULL)
+- `#{param}::type[]` → `Vec<T>` - Array parameter
+- `#{param?}::type[]` → `Option<Vec<T>>` - Optional array (entire array can be NULL)
+- `#{param??}::type[]` → `Vec<Option<T>>` - Array with nullable elements
+
 ### Per-Query Telemetry Configuration
 
 Override global telemetry settings for specific queries in the metadata block:
@@ -1224,6 +1243,58 @@ insert_users_batch(
         },
     ]
 ).await?;
+```
+
+### Nullable Elements in Batch Inserts
+
+Both with and without `multiunzip`, you can use the `??` suffix to indicate array elements can be NULL:
+
+**Without multiunzip:**
+```sql
+-- @automodel
+--    expect: multiple
+-- @end
+INSERT INTO users (name, email, age)
+SELECT * FROM UNNEST(
+  #{names}::text[],
+  #{emails}::text[],
+  #{ages??}::int4[]  -- Array where individual elements can be NULL
+)
+```
+
+Generated function signature:
+```rust
+pub async fn insert_users(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    names: Vec<String>,
+    emails: Vec<String>,
+    ages: Vec<Option<i32>>  // Elements can be NULL
+) -> Result<Vec<InsertUsersItem>, super::Error<InsertUsersConstraints>>
+```
+
+**With multiunzip:**
+```sql
+-- @automodel
+--    expect: multiple
+--    multiunzip: true
+-- @end
+INSERT INTO users (name, email, age)
+SELECT * FROM UNNEST(
+  #{name}::text[],
+  #{email}::text[],
+  #{age?}::int4[]  -- Use ? in struct field for optional
+)
+```
+
+Generated struct with optional field:
+```rust
+pub struct InsertUsersRecord {
+    pub name: String,
+    pub email: String,
+    pub age: Option<i32>,  // Field is optional
+}
+
+// Unpacks to Vec<Option<i32>> via multiunzip
 ```
 
 ### How `multiunzip` Works

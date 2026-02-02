@@ -38,8 +38,10 @@ pub fn generate_input_params_with_names(
         let default_name = format!("param_{}", i + 1);
         let raw_param_name = param_names.get(i).unwrap_or(&default_name);
 
-        // Strip the ? suffix for optional parameters when generating function parameter names
-        let clean_param_name = if raw_param_name.ends_with('?') {
+        // Strip the ?? or ? suffix for parameters when generating function parameter names
+        let clean_param_name = if raw_param_name.ends_with("??") {
+            raw_param_name[..raw_param_name.len() - 2].to_string()
+        } else if raw_param_name.ends_with('?') {
             raw_param_name.trim_end_matches('?').to_string()
         } else {
             raw_param_name.clone()
@@ -47,7 +49,16 @@ pub fn generate_input_params_with_names(
 
         // Only add if we haven't seen this parameter name before
         if !unique_params.contains_key(&clean_param_name) {
-            let final_type = if rust_type.is_nullable || rust_type.is_optional {
+            let final_type = if rust_type.is_nullable_elements {
+                // For arrays with nullable elements: Vec<i32> -> Vec<Option<i32>>
+                if rust_type.rust_type.starts_with("Vec<") && rust_type.rust_type.ends_with(">") {
+                    let inner_type = &rust_type.rust_type[4..rust_type.rust_type.len() - 1];
+                    format!("Vec<Option<{}>>", inner_type)
+                } else {
+                    // Shouldn't happen, but fallback
+                    rust_type.rust_type.clone()
+                }
+            } else if rust_type.is_nullable || rust_type.is_optional {
                 format!("Option<{}>", rust_type.rust_type)
             } else {
                 rust_type.rust_type.clone()

@@ -1943,3 +1943,158 @@ pub async fn get_user_id_raw(executor: impl sqlx::Executor<'_, Database = sqlx::
     Ok(row.try_get::<i32, _>("id")?)
 }
 
+/// Constraint violations specific to this query
+#[derive(Debug, Clone)]
+pub enum TestOptionalMultiunzipConstraints {
+    /// Constraint: users_email_key on table users
+    UsersEmailKey,
+    /// Constraint: users_pkey on table users
+    UsersPkey,
+    /// Constraint: users_referrer_id_fkey on table users
+    UsersReferrerIdFkey,
+    /// Constraint: users_id_not_null on table users
+    UsersIdNotNull,
+    /// Constraint: users_name_not_null on table users
+    UsersNameNotNull,
+    /// Constraint: users_email_not_null on table users
+    UsersEmailNotNull,
+}
+
+impl TryFrom<super::ErrorConstraintInfo> for TestOptionalMultiunzipConstraints {
+    type Error = ();
+
+    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
+        match info.constraint_name.as_str() {
+            "users_email_key" => Ok(Self::UsersEmailKey),
+            "users_pkey" => Ok(Self::UsersPkey),
+            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
+            "users_id_not_null" => Ok(Self::UsersIdNotNull),
+            "users_name_not_null" => Ok(Self::UsersNameNotNull),
+            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TestOptionalMultiunzipRecord {
+    pub name: String,
+    pub email: String,
+    pub age: Option<i32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TestOptionalMultiunzipItem {
+    pub id: i32,
+    pub name: String,
+    pub email: String,
+    pub age: Option<i32>,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Test batch insert with optional parameter (age is nullable)
+#[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.users (name, email, age)\nSELECT name, email, age\nFROM UNNEST(\n        #{name}::text [],\n        #{email}::text [],\n        #{age?}::int4 []\n    ) AS t(name, email, age)\nRETURNING id, name, email, age, created_at"))]
+pub async fn test_optional_multiunzip(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, items: Vec<TestOptionalMultiunzipRecord>) -> Result<Vec<TestOptionalMultiunzipItem>, super::Error<TestOptionalMultiunzipConstraints>> {
+    use itertools::Itertools;
+    let query = sqlx::query(
+        r"INSERT INTO public.users (name, email, age)
+        SELECT name, email, age
+        FROM UNNEST(
+            $1::text [],
+            $2::text [],
+            $3::int4 []
+          ) AS t(name, email, age)
+        RETURNING id, name, email, age, created_at"
+    );
+    let (name, email, age): (Vec<_>, Vec<_>, Vec<_>) =
+        items
+            .into_iter()
+            .map(|item| (item.name, item.email, item.age))
+            .multiunzip();
+    let query = query.bind(name);
+    let query = query.bind(email);
+    let query = query.bind(age);
+    let rows = query.fetch_all(executor).await?;
+    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
+        Ok(TestOptionalMultiunzipItem {
+        id: row.try_get::<i32, _>("id")?,
+        name: row.try_get::<String, _>("name")?,
+        email: row.try_get::<String, _>("email")?,
+        age: row.try_get::<Option<i32>, _>("age")?,
+        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
+    })
+    }).collect();
+    result.map_err(Into::into)
+}
+
+/// Constraint violations specific to this query
+#[derive(Debug, Clone)]
+pub enum TestOptionalWithoutMultiunzipConstraints {
+    /// Constraint: users_email_key on table users
+    UsersEmailKey,
+    /// Constraint: users_pkey on table users
+    UsersPkey,
+    /// Constraint: users_referrer_id_fkey on table users
+    UsersReferrerIdFkey,
+    /// Constraint: users_id_not_null on table users
+    UsersIdNotNull,
+    /// Constraint: users_name_not_null on table users
+    UsersNameNotNull,
+    /// Constraint: users_email_not_null on table users
+    UsersEmailNotNull,
+}
+
+impl TryFrom<super::ErrorConstraintInfo> for TestOptionalWithoutMultiunzipConstraints {
+    type Error = ();
+
+    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
+        match info.constraint_name.as_str() {
+            "users_email_key" => Ok(Self::UsersEmailKey),
+            "users_pkey" => Ok(Self::UsersPkey),
+            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
+            "users_id_not_null" => Ok(Self::UsersIdNotNull),
+            "users_name_not_null" => Ok(Self::UsersNameNotNull),
+            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TestOptionalWithoutMultiunzipItem {
+    pub id: i32,
+    pub name: String,
+    pub email: String,
+    pub age: Option<i32>,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Test batch insert with nullable array elements (not entire array optional)
+#[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.users (name, email, age)\nSELECT name, email, age\nFROM UNNEST(\n        #{name}::text [],\n        #{email}::text [],\n        #{age??}::int4 []\n    ) AS t(name, email, age)\nRETURNING id, name, email, age, created_at"))]
+pub async fn test_optional_without_multiunzip(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, name: Vec<String>, email: Vec<String>, age: Vec<Option<i32>>) -> Result<Vec<TestOptionalWithoutMultiunzipItem>, super::Error<TestOptionalWithoutMultiunzipConstraints>> {
+    let query = sqlx::query(
+        r"INSERT INTO public.users (name, email, age)
+        SELECT name, email, age
+        FROM UNNEST(
+            $1::text [],
+            $2::text [],
+            $3::int4 []
+          ) AS t(name, email, age)
+        RETURNING id, name, email, age, created_at"
+    );
+    let query = query.bind(name);
+    let query = query.bind(email);
+    let query = query.bind(age);
+    let rows = query.fetch_all(executor).await?;
+    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
+        Ok(TestOptionalWithoutMultiunzipItem {
+        id: row.try_get::<i32, _>("id")?,
+        name: row.try_get::<String, _>("name")?,
+        email: row.try_get::<String, _>("email")?,
+        age: row.try_get::<Option<i32>, _>("age")?,
+        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
+    })
+    }).collect();
+    result.map_err(Into::into)
+}
+

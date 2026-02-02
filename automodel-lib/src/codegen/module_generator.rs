@@ -12,6 +12,17 @@ use crate::types_extractor::{
 use crate::utils::{to_pascal_case, to_snake_case};
 use anyhow::Result;
 
+/// Helper function to strip parameter suffixes (? or []?) from parameter names
+fn strip_param_suffix(param_name: &str) -> String {
+    if param_name.ends_with("??") {
+        param_name[..param_name.len() - 2].to_string()
+    } else if param_name.ends_with('?') {
+        param_name.trim_end_matches('?').to_string()
+    } else {
+        param_name.to_string()
+    }
+}
+
 pub fn generate_root_module(modules: &Vec<String>, source_hash: u64) -> String {
     let mut mod_content = String::new();
 
@@ -511,13 +522,7 @@ pub fn generate_function_code_without_enums(
     let original_param_names = parse_parameter_names_from_sql(&query.sql);
     let clean_param_names: Vec<String> = original_param_names
         .iter()
-        .map(|name| {
-            if name.ends_with('?') {
-                name.trim_end_matches('?').to_string()
-            } else {
-                name.clone()
-            }
-        })
+        .map(|name| strip_param_suffix(name))
         .collect();
 
     let use_multiunzip = query.multiunzip;
@@ -809,13 +814,7 @@ fn generate_static_function_body(
             let original_param_names = parse_parameter_names_from_sql(&query.sql);
             let clean_param_names: Vec<String> = original_param_names
                 .iter()
-                .map(|name| {
-                    if name.ends_with('?') {
-                        name.trim_end_matches('?').to_string()
-                    } else {
-                        name.clone()
-                    }
-                })
+                .map(|name| strip_param_suffix(name))
                 .collect();
 
             // Generate the tuple pattern based on number of types
@@ -890,6 +889,9 @@ fn generate_static_function_body(
                         var
                     ));
                 } else {
+                    // For optional parameters, multiunzip produces Vec<Option<T>>
+                    // This is correct for PostgreSQL arrays which support NULL elements
+                    // sqlx handles Vec<Option<T>> -> ARRAY[...] with NULLs correctly
                     body.push_str(&format!("    let query = query.bind({});\n", var));
                 }
             }
@@ -940,11 +942,7 @@ fn generate_static_function_body(
         } else {
             // Use meaningful parameter names from SQL
             for (i, name) in param_names.iter().enumerate() {
-                let clean_name = if name.ends_with('?') {
-                    name.trim_end_matches('?').to_string()
-                } else {
-                    name.clone()
-                };
+                let clean_name = strip_param_suffix(name);
 
                 let rust_type_info = &type_info.input_types[i];
                 let param_type = &rust_type_info.rust_type;

@@ -36,12 +36,14 @@ pub struct QueryTypeInfo {
 /// Represents a Rust type mapping from PostgreSQL types
 #[derive(Debug, Clone)]
 pub struct RustType {
-    /// The Rust type name (e.g., "i32", "String", "Option<i64>")
+    /// The Rust type name (e.g., "i32", "String")
     pub rust_type: String,
     /// Whether this type is nullable
     pub is_nullable: bool,
     /// Whether this type is optional (conditional) parameter in a query
     pub is_optional: bool,
+    /// Whether this is an array with nullable elements (Vec<Option<T>>)
+    pub is_nullable_elements: bool,
     /// Whether this is a custom type that needs JSON wrapper
     pub needs_json_wrapper: bool,
     /// If this is an enum type, contains the enum variants
@@ -371,13 +373,24 @@ async fn extract_input_types(
     let mut input_types = Vec::new();
 
     for (i, param_type) in params.iter().enumerate() {
-        // Check if this parameter has the optional suffix ?
+        // Check if this parameter has special suffixes
         let param_name = param_names.get(i).map(|s| s.as_str()).unwrap_or("");
-        let is_optional_param = param_name.ends_with('?');
+        
+        // Check for ?? suffix (array with nullable elements)
+        let is_nullable_elements = param_name.ends_with("??");
+        
+        // Check for ? suffix (optional parameter)
+        let is_optional_param = if is_nullable_elements {
+            false // ?? takes precedence over ?
+        } else {
+            param_name.ends_with('?')
+        };
 
-        // Get clean parameter name (without ? suffix)
-        let clean_param_name = if is_optional_param {
-            &param_name[..param_name.len() - 1]
+        // Get clean parameter name (without ?, or ?? suffix)
+        let clean_param_name = if is_nullable_elements {
+            &param_name[..param_name.len() - 2] // Remove ??
+        } else if is_optional_param {
+            &param_name[..param_name.len() - 1] // Remove ?
         } else {
             param_name
         };
@@ -400,6 +413,7 @@ async fn extract_input_types(
                     rust_type: custom_type,
                     is_nullable: false,
                     is_optional: is_optional_param,
+                    is_nullable_elements,
                     needs_json_wrapper: true, // Custom input parameters need JSON serialization
                     enum_variants: None,
                     pg_type_name: None,
@@ -408,11 +422,17 @@ async fn extract_input_types(
                 // If it's an optional parameter but no custom type, mark as nullable
                 rust_type.is_nullable = false;
                 rust_type.is_optional = true;
+            } else if is_nullable_elements {
+                // Mark as array with nullable elements
+                rust_type.is_nullable_elements = true;
             }
         } else if is_optional_param {
             // If no mappings and it's optional parameter, mark as nullable
             rust_type.is_nullable = false;
             rust_type.is_optional = true;
+        } else if is_nullable_elements {
+            // Mark as array with nullable elements
+            rust_type.is_nullable_elements = true;
         }
 
         input_types.push(rust_type);
@@ -545,6 +565,7 @@ async fn extract_output_types(
                     rust_type: custom_type, // Store base type without Option<>
                     is_nullable: base_rust_type.is_nullable,
                     is_optional: false,
+                    is_nullable_elements: false,
                     needs_json_wrapper: true, // Custom types need JSON wrapper
                     enum_variants: None,
                     pg_type_name: None,
@@ -742,6 +763,7 @@ async fn pg_type_to_rust_type(
                     rust_type: enum_name,
                     is_nullable,
                     is_optional: false,
+                    is_nullable_elements: false,
                     needs_json_wrapper: false,
                     enum_variants: Some(enum_info.variants),
                     pg_type_name: Some(enum_info.type_name), // Keep fully-qualified for SQL
@@ -751,6 +773,7 @@ async fn pg_type_to_rust_type(
                 rust_type: format!("/* Unknown type: {} */ String", pg_type.name()),
                 is_nullable,
                 is_optional: false,
+                is_nullable_elements: false,
                 needs_json_wrapper: false,
                 enum_variants: None,
                 pg_type_name: None,
@@ -762,6 +785,7 @@ async fn pg_type_to_rust_type(
         rust_type: base_type.to_string(),
         is_nullable,
         is_optional: false,
+        is_nullable_elements: false,
         needs_json_wrapper: false,
         enum_variants: None,
         pg_type_name: None,
