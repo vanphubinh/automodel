@@ -110,6 +110,7 @@ async fn generate_command(matches: &ArgMatches) -> Result<()> {
         },
         ensure_indexes: ensure_indexes,
         derives: Default::default(),
+        multiunzip_crate: Default::default(),
     };
 
     println!("Loading queries from: {}", queries_dir);

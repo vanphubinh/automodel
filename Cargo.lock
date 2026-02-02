@@ -573,6 +573,7 @@ dependencies = [
  "chrono",
  "itertools",
  "mac_address",
+ "many-unzip",
  "rust_decimal",
  "serde",
  "serde_json",
@@ -1133,6 +1134,12 @@ dependencies = [
  "nix",
  "winapi",
 ]
+
+[[package]]
+name = "many-unzip"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80649c7c76ead3cc944c4fef1d0249af01c8ee7aebbf35032bbb853fa1e0f25a"
 
 [[package]]
 name = "md-5"

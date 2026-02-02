@@ -12,6 +12,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             conditions_type: vec!["Clone".to_string()],
             error_type: vec!["Clone".to_string()],
         },
+        // Use itertools for multiunzip (default, supports up to 12 parameters)
+        // Change to ManyUnzip for queries with 13-196 parameters
+        multiunzip_crate: automodel::MultiunzipCrate::Itertools,
     };
     automodel::AutoModel::generate(
         || {

@@ -17,6 +17,21 @@ pub use query_definition::TelemetryLevel;
 
 use crate::codegen::generate_root_module;
 
+/// Crate to use for multiunzip operations in batch inserts
+#[derive(Debug, Clone, PartialEq)]
+pub enum MultiunzipCrate {
+    /// Use itertools::multiunzip (supports up to 12 parameters)
+    Itertools,
+    /// Use many-unzip crate (no parameter limit)
+    ManyUnzip,
+}
+
+impl Default for MultiunzipCrate {
+    fn default() -> Self {
+        MultiunzipCrate::Itertools
+    }
+}
+
 /// Default configuration for telemetry and analysis
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DefaultsConfig {
@@ -30,6 +45,11 @@ pub struct DefaultsConfig {
     /// e.g., vec!["Clone".to_string(), "PartialEq".to_string()]
     /// Defaults to empty vec
     pub derives: DefaultsDerivesConfig,
+    /// Crate to use for multiunzip operations in batch inserts
+    /// - Itertools: supports up to 12 parameters (default)
+    /// - ManyUnzip: no parameter limit, requires many-unzip dependency
+    /// Defaults to Itertools
+    pub multiunzip_crate: MultiunzipCrate,
 }
 
 /// Default configuration for telemetry and analysis
@@ -62,6 +82,7 @@ pub struct DefaultsDerivesConfig {
 /// Main entry point for the automodel library
 pub struct AutoModel {
     queries: Vec<QueryDefinition>,
+    defaults: DefaultsConfig,
 }
 
 impl AutoModel {
@@ -69,9 +90,9 @@ impl AutoModel {
     /// with explicit defaults configuration (no YAML file required)
     pub async fn new<P: AsRef<Path>>(queries_dir: P, defaults: DefaultsConfig) -> Result<Self> {
         // Scan SQL files from the queries directory
-        let queries = scan_sql_files(queries_dir.as_ref(), defaults).await?;
+        let queries = scan_sql_files(queries_dir.as_ref(), defaults.clone()).await?;
 
-        Ok(Self { queries })
+        Ok(Self { queries, defaults })
     }
 
     /// Build script helper for automatically generating code at build time.
@@ -290,8 +311,11 @@ impl AutoModel {
 
         // PHASE 2: Generate code from analyzed queries (no DB access)
         for module in &modules {
-            let (module_code, module_warnings) =
-                crate::codegen::generate_code_for_module(&analyzed_queries, module)?;
+            let (module_code, module_warnings) = crate::codegen::generate_code_for_module(
+                &analyzed_queries,
+                module,
+                &self.defaults,
+            )?;
             let module_file = output_path.join(format!("{}.rs", module));
             fs::write(&module_file, &module_code)?;
 

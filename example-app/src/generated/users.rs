@@ -507,9 +507,9 @@ pub struct GetActiveUsersByAgeRangeItem {
 /// Get active public.users within an age range - must return at least one user or fails
 ///
 /// Query Plan:
-/// Index Scan using idx_users_updated_at on users
-///   Index Cond: (updated_at > (now - '30 days'::interval))
-///   Filter: ((age >= 0) AND (age <= 0))
+/// Index Scan using idx_users_age on users
+///   Index Cond: ((age >= 0) AND (age <= 0))
+///   Filter: (updated_at > (now - '30 days'::interval))
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, age, profile, created_at \nFROM public.users \nWHERE age BETWEEN #{min_age} AND #{max_age} \nAND updated_at > NOW() - INTERVAL '30 days'"))]
 pub async fn get_active_users_by_age_range(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, min_age: i32, max_age: i32) -> Result<Vec<GetActiveUsersByAgeRangeItem>, super::ErrorReadOnly> {
     let query = sqlx::query(

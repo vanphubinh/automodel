@@ -478,6 +478,7 @@ pub fn generate_function_code_without_enums(
     emitted_struct_names: &mut std::collections::HashSet<String>,
     constraints: &[crate::types_extractor::ConstraintInfo],
     performance_analysis: &Option<crate::query_definition_rt::PerformanceAnalysis>,
+    defaults: &crate::DefaultsConfig,
 ) -> Result<String> {
     let mut code = String::new();
 
@@ -728,7 +729,7 @@ pub fn generate_function_code_without_enums(
     ));
 
     // Generate function body
-    let function_body = generate_function_body(query, type_info, &base_return_type)?;
+    let function_body = generate_function_body(query, type_info, &base_return_type, defaults)?;
     code.push_str(&function_body);
 
     code.push_str("}\n");
@@ -743,16 +744,24 @@ fn generate_function_body(
     query: &QueryDefinition,
     type_info: &QueryTypeInfo,
     return_type: &str,
+    defaults: &crate::DefaultsConfig,
 ) -> Result<String> {
     let mut body = String::new();
 
     // Check if this query has conditional blocks
     if let Some(parsed_sql) = &type_info.parsed_sql {
         // Generate dynamic SQL building for conditional queries
-        generate_conditional_function_body(&mut body, query, type_info, parsed_sql, return_type)?;
+        generate_conditional_function_body(
+            &mut body,
+            query,
+            type_info,
+            parsed_sql,
+            return_type,
+            defaults,
+        )?;
     } else {
         // Generate standard static SQL
-        generate_static_function_body(&mut body, query, type_info, return_type)?;
+        generate_static_function_body(&mut body, query, type_info, return_type, defaults)?;
     }
 
     Ok(body)
@@ -764,13 +773,21 @@ fn generate_static_function_body(
     query: &QueryDefinition,
     type_info: &QueryTypeInfo,
     return_type: &str,
+    defaults: &crate::DefaultsConfig,
 ) -> Result<()> {
     let use_multiunzip = query.multiunzip;
     let use_conditional_diff = query.conditions_type.is_enabled();
     let use_structured_params = query.parameters_type.is_enabled() && !use_conditional_diff;
-    // Add itertools import if using multiunzip
+    // Add import for multiunzip based on configuration
     if use_multiunzip {
-        body.push_str("    use itertools::Itertools;\n");
+        match defaults.multiunzip_crate {
+            crate::MultiunzipCrate::Itertools => {
+                body.push_str("    use itertools::Itertools;\n");
+            }
+            crate::MultiunzipCrate::ManyUnzip => {
+                body.push_str("    use many_unzip::ManyUnzip;\n");
+            }
+        }
     }
 
     // Get pre-computed converted SQL and param names from first variant (base query)
@@ -803,6 +820,27 @@ fn generate_static_function_body(
 
             // Generate the tuple pattern based on number of types
             let num_types = type_info.input_types.len();
+
+            // Validate parameter count against multiunzip limits
+            match defaults.multiunzip_crate {
+                crate::MultiunzipCrate::Itertools => {
+                    if num_types > 12 {
+                        return Err(anyhow::anyhow!(
+                            "Query '{}' uses multiunzip with {} parameters, but itertools::multiunzip only supports up to 12 parameters.\n\nTo fix this, you have two options:\n1. Configure AutoModel to use many-unzip in your build.rs:\n   multiunzip_crate: automodel::MultiunzipCrate::ManyUnzip\n2. Reduce the number of columns in your batch insert to 12 or fewer",
+                            query.name, num_types
+                        ));
+                    }
+                }
+                crate::MultiunzipCrate::ManyUnzip => {
+                    if num_types > 196 {
+                        return Err(anyhow::anyhow!(
+                            "Query '{}' uses multiunzip with {} parameters, but many_unzip::ManyUnzip only supports up to 196 parameters.\n\nTo fix this, reduce the number of columns in your batch insert to 196 or fewer.",
+                            query.name, num_types
+                        ));
+                    }
+                }
+            }
+
             let tuple_vars: Vec<String> = clean_param_names
                 .iter()
                 .map(|name| {
@@ -830,7 +868,12 @@ fn generate_static_function_body(
                     .join(", ")
             ));
 
-            body.push_str("            .multiunzip();\n");
+            // Use the appropriate method name based on the configured crate
+            let unzip_method = match defaults.multiunzip_crate {
+                crate::MultiunzipCrate::Itertools => "multiunzip",
+                crate::MultiunzipCrate::ManyUnzip => "many_unzip",
+            };
+            body.push_str(&format!("            .{}();\n", unzip_method));
 
             // Bind each array
             for (i, var) in tuple_vars.iter().enumerate() {
@@ -934,6 +977,7 @@ fn generate_conditional_function_body(
     type_info: &QueryTypeInfo,
     parsed_sql: &crate::types_extractor::ParsedSql,
     return_type: &str,
+    _defaults: &crate::DefaultsConfig,
 ) -> Result<()> {
     use crate::types_extractor::parse_parameter_names_from_sql;
 
@@ -1413,6 +1457,7 @@ pub fn validate_struct_reference(
 pub fn generate_code_for_module(
     analyzed_queries: &[QueryDefinitionRuntime],
     module: &str,
+    defaults: &crate::DefaultsConfig,
 ) -> Result<(String, Vec<String>)> {
     let mut generated_code = String::new();
     let mut warnings = Vec::new();
@@ -1706,6 +1751,7 @@ pub fn generate_code_for_module(
             &mut emitted_struct_names,
             &analyzed.constraints,
             &analyzed.performance_analysis,
+            defaults,
         )?;
         generated_code.push_str(&function_code);
         generated_code.push('\n');

@@ -285,6 +285,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             conditions_type: vec!["Clone".to_string()],
             error_type: vec!["Clone".to_string()],
         },
+        // Use itertools for multiunzip (default, supports up to 12 parameters)
+        // Change to ManyUnzip for queries with more than 12 parameters in batch inserts
+        multiunzip_crate: automodel::MultiunzipCrate::Itertools,
     };
     automodel::AutoModel::generate(
         || {
@@ -1255,6 +1258,34 @@ let query = query.bind(name);
 let query = query.bind(email);
 let query = query.bind(age);
 ```
+
+### Multiunzip Crate Selection
+
+By default, AutoModel uses `itertools::multiunzip()` which supports up to 12 parameters. For batch inserts with more than 12 columns, you can configure AutoModel to use the `many-unzip` crate instead, which supports up to 196 parameters.
+
+Configure in your `build.rs`:
+
+```rust
+let defaults = automodel::DefaultsConfig {
+    // ... other config ...
+    multiunzip_crate: automodel::MultiunzipCrate::ManyUnzip,  // Use many-unzip instead of itertools
+};
+```
+
+**When to use which:**
+- `MultiunzipCrate::Itertools` (default): For queries with up to 12 parameters. Most common use case.
+- `MultiunzipCrate::ManyUnzip`: For queries with 13-196 parameters. Requires adding `many-unzip` to your `Cargo.toml`:
+
+```toml
+[dependencies]
+many-unzip = "0.1"  # or latest version
+```
+
+The generated code automatically uses the correct trait based on your configuration:
+- **Itertools**: `use itertools::Itertools;`
+- **ManyUnzip**: `use many_unzip::ManyUnzip;`
+
+Both crates provide the same `.multiunzip()` method, so the rest of the generated code remains identical.
 
 ### Complete Example
 
