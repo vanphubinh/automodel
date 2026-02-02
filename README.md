@@ -410,9 +410,21 @@ Override PostgreSQL-to-Rust type mappings for specific fields:
 SELECT id, name, profile FROM users WHERE id = #{id}
 ```
 
-**Note:** Custom types must implement appropriate serialization traits:
-- **Input parameters:** `serde::Serialize` (for JSON serialization)
-- **Output fields:** `serde::Deserialize` (for JSON deserialization)
+**JSON Wrapper Control:**
+
+By default, custom types use JSON serialization. Control this with suffixes:
+
+```sql
+-- @automodel
+--    types:
+--      profile: "UserProfile@json"        # Force JSON wrapper (default)
+--      uuid: "MyUuid@native"              # No wrapper - type implements sqlx traits
+--      data: "Vec<Option<i32>>@native"    # Native binding for complex types
+-- @end
+```
+
+- **`@native`**: Type implements `sqlx::Encode`/`Decode` (or `tokio_postgres::ToSql`/`FromSql`)
+- **`@json`** or no suffix: Uses JSON serialization (requires `serde::Serialize`/`Deserialize`)
 
 ### Named Parameters
 

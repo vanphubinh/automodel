@@ -1945,6 +1945,146 @@ pub async fn get_user_id_raw(executor: impl sqlx::Executor<'_, Database = sqlx::
 
 /// Constraint violations specific to this query
 #[derive(Debug, Clone)]
+pub enum TestExplicitNativeMultiunzipConstraints {
+    /// Constraint: users_email_key on table users
+    UsersEmailKey,
+    /// Constraint: users_pkey on table users
+    UsersPkey,
+    /// Constraint: users_referrer_id_fkey on table users
+    UsersReferrerIdFkey,
+    /// Constraint: users_id_not_null on table users
+    UsersIdNotNull,
+    /// Constraint: users_name_not_null on table users
+    UsersNameNotNull,
+    /// Constraint: users_email_not_null on table users
+    UsersEmailNotNull,
+}
+
+impl TryFrom<super::ErrorConstraintInfo> for TestExplicitNativeMultiunzipConstraints {
+    type Error = ();
+
+    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
+        match info.constraint_name.as_str() {
+            "users_email_key" => Ok(Self::UsersEmailKey),
+            "users_pkey" => Ok(Self::UsersPkey),
+            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
+            "users_id_not_null" => Ok(Self::UsersIdNotNull),
+            "users_name_not_null" => Ok(Self::UsersNameNotNull),
+            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TestExplicitNativeMultiunzipRecord {
+    pub names: String,
+    pub age: Option<i32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TestExplicitNativeMultiunzipItem {
+    pub id: i32,
+    pub name: String,
+    pub age: Option<i32>,
+}
+
+/// Test multiunzip with @native suffix for Vec<Option<i32>>
+#[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.users (name, age)\nSELECT * FROM UNNEST(\n    #{names}::text[],\n    #{age}::int4[]\n)\nRETURNING id, name, age;"))]
+pub async fn test_explicit_native_multiunzip(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, items: Vec<TestExplicitNativeMultiunzipRecord>) -> Result<TestExplicitNativeMultiunzipItem, super::Error<TestExplicitNativeMultiunzipConstraints>> {
+    use itertools::Itertools;
+    let query = sqlx::query(
+        r"INSERT INTO public.users (name, age)
+        SELECT * FROM UNNEST(
+          $1::text[],
+          $2::int4[]
+        )
+        RETURNING id, name, age;"
+    );
+    let (names, age): (Vec<_>, Vec<_>) =
+        items
+            .into_iter()
+            .map(|item| (item.names, item.age))
+            .multiunzip();
+    let query = query.bind(names);
+    let query = query.bind(age);
+    let row = query.fetch_one(executor).await?;
+    let result: Result<_, sqlx::Error> = (|| {
+        Ok(TestExplicitNativeMultiunzipItem {
+        id: row.try_get::<i32, _>("id")?,
+        name: row.try_get::<String, _>("name")?,
+        age: row.try_get::<Option<i32>, _>("age")?,
+    })
+    })();
+    result.map_err(Into::into)
+}
+
+/// Constraint violations specific to this query
+#[derive(Debug, Clone)]
+pub enum TestExplicitNativeWithoutMultiunzipConstraints {
+    /// Constraint: users_email_key on table users
+    UsersEmailKey,
+    /// Constraint: users_pkey on table users
+    UsersPkey,
+    /// Constraint: users_referrer_id_fkey on table users
+    UsersReferrerIdFkey,
+    /// Constraint: users_id_not_null on table users
+    UsersIdNotNull,
+    /// Constraint: users_name_not_null on table users
+    UsersNameNotNull,
+    /// Constraint: users_email_not_null on table users
+    UsersEmailNotNull,
+}
+
+impl TryFrom<super::ErrorConstraintInfo> for TestExplicitNativeWithoutMultiunzipConstraints {
+    type Error = ();
+
+    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
+        match info.constraint_name.as_str() {
+            "users_email_key" => Ok(Self::UsersEmailKey),
+            "users_pkey" => Ok(Self::UsersPkey),
+            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
+            "users_id_not_null" => Ok(Self::UsersIdNotNull),
+            "users_name_not_null" => Ok(Self::UsersNameNotNull),
+            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TestExplicitNativeWithoutMultiunzipItem {
+    pub id: i32,
+    pub name: String,
+    pub age: Option<i32>,
+}
+
+/// Test without multiunzip with @native suffix for Vec<Option<i32>>
+#[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.users (name, age)\nSELECT * FROM UNNEST(\n    #{names}::text[],\n    #{age}::int4[]\n)\nRETURNING id, name, age;"))]
+pub async fn test_explicit_native_without_multiunzip(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, names: Vec<String>, age: Vec<Option<i32>>) -> Result<TestExplicitNativeWithoutMultiunzipItem, super::Error<TestExplicitNativeWithoutMultiunzipConstraints>> {
+    let query = sqlx::query(
+        r"INSERT INTO public.users (name, age)
+        SELECT * FROM UNNEST(
+          $1::text[],
+          $2::int4[]
+        )
+        RETURNING id, name, age;"
+    );
+    let query = query.bind(names);
+    let query = query.bind(age);
+    let row = query.fetch_one(executor).await?;
+    let result: Result<_, sqlx::Error> = (|| {
+        Ok(TestExplicitNativeWithoutMultiunzipItem {
+        id: row.try_get::<i32, _>("id")?,
+        name: row.try_get::<String, _>("name")?,
+        age: row.try_get::<Option<i32>, _>("age")?,
+    })
+    })();
+    result.map_err(Into::into)
+}
+
+/// Constraint violations specific to this query
+#[derive(Debug, Clone)]
 pub enum TestOptionalMultiunzipConstraints {
     /// Constraint: users_email_key on table users
     UsersEmailKey,

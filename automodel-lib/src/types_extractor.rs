@@ -375,10 +375,10 @@ async fn extract_input_types(
     for (i, param_type) in params.iter().enumerate() {
         // Check if this parameter has special suffixes
         let param_name = param_names.get(i).map(|s| s.as_str()).unwrap_or("");
-        
+
         // Check for ?? suffix (array with nullable elements)
         let is_nullable_elements = param_name.ends_with("??");
-        
+
         // Check for ? suffix (optional parameter)
         let is_optional_param = if is_nullable_elements {
             false // ?? takes precedence over ?
@@ -409,12 +409,24 @@ async fn extract_input_types(
                 .map(|(_, rust_type_name)| rust_type_name.clone());
 
             if let Some(custom_type) = custom_type {
+                // Check for explicit JSON wrapper control via @json or @native suffix
+                // - Type@json: Force JSON wrapper (for custom types without sqlx traits)
+                // - Type@native: No JSON wrapper (for types implementing sqlx::Encode/Decode)
+                // - Type (no suffix): Default - JSON wrapper enabled
+                let (clean_type, needs_wrapper) = if custom_type.ends_with("@json") {
+                    (&custom_type[..custom_type.len() - 5], true)
+                } else if custom_type.ends_with("@native") {
+                    (&custom_type[..custom_type.len() - 7], false)
+                } else {
+                    (custom_type.as_str(), true)
+                };
+                
                 rust_type = RustType {
-                    rust_type: custom_type,
+                    rust_type: clean_type.to_string(),
                     is_nullable: false,
                     is_optional: is_optional_param,
                     is_nullable_elements,
-                    needs_json_wrapper: true, // Custom input parameters need JSON serialization
+                    needs_json_wrapper: needs_wrapper,
                     enum_variants: None,
                     pg_type_name: None,
                 };
@@ -561,12 +573,24 @@ async fn extract_output_types(
                 .map(|(_, rust_type)| rust_type.clone());
 
             if let Some(custom_type) = custom_type {
+                // Check for explicit JSON wrapper control via @json or @native suffix
+                // - Type@json: Force JSON wrapper (for custom types without sqlx traits)
+                // - Type@native: No JSON wrapper (for types implementing sqlx::Decode)
+                // - Type (no suffix): Default - JSON wrapper enabled
+                let (clean_type, needs_wrapper) = if custom_type.ends_with("@json") {
+                    (&custom_type[..custom_type.len() - 5], true)
+                } else if custom_type.ends_with("@native") {
+                    (&custom_type[..custom_type.len() - 7], false)
+                } else {
+                    (custom_type.as_str(), true)
+                };
+                
                 RustType {
-                    rust_type: custom_type, // Store base type without Option<>
+                    rust_type: clean_type.to_string(),
                     is_nullable: base_rust_type.is_nullable,
                     is_optional: false,
                     is_nullable_elements: false,
-                    needs_json_wrapper: true, // Custom types need JSON wrapper
+                    needs_json_wrapper: needs_wrapper,
                     enum_variants: None,
                     pg_type_name: None,
                 }
