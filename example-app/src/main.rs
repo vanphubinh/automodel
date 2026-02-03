@@ -62,6 +62,10 @@ async fn run_examples(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== Testing All PostgreSQL Types ===");
     test_all_types(pool).await?;
 
+    // Test composite type (nested row)
+    println!("\n=== Testing Composite Type (Nested Row) ===");
+    test_nested_row(pool).await?;
+
     println!("\nTo see the actual generated code, check src/generated/ directory");
     println!("Functions are organized into modules: admin.rs, setup.rs, users.rs, and mod.rs");
     println!(
@@ -655,6 +659,43 @@ async fn test_all_types(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>>
     println!("  Date Range Array: {:?}", retrieved.date_range_array_col);
 
     println!("\n✓ All PostgreSQL types test completed successfully!");
+
+    Ok(())
+}
+
+async fn test_nested_row(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing composite type (table row as nested data)...");
+    
+    // Get first user or skip test if no users exist
+    let users = generated::users::get_all_users(pool).await?;
+    if users.is_empty() {
+        println!("⚠ No users found, skipping composite type test");
+        return Ok(());
+    }
+    
+    let user_id = users[0].id;
+    
+    println!("\n1. Fetching user with composite type (nested row)...");
+    let result = generated::users::test_nested_row(pool, user_id).await?;
+    
+    println!("✓ Successfully retrieved nested row data:");
+    println!("  ID: {}", result.id);
+    println!("  Name: {}", result.name);
+    
+    if let Some(user_details) = &result.user_details {
+        println!("  User Details (composite type):");
+        println!("    ID: {}", user_details.id);
+        println!("    Name: {}", user_details.name);
+        println!("    Email: {}", user_details.email);
+        println!("    Status: {:?}", user_details.status);
+        println!("    Active: {:?}", user_details.is_active);
+        println!("    Age: {:?}", user_details.age);
+        println!("    Created: {:?}", user_details.created_at);
+    } else {
+        println!("  User Details: None");
+    }
+    
+    println!("\n✓ Composite type (nested row) test completed successfully!");
 
     Ok(())
 }

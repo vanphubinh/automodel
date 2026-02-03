@@ -2,7 +2,7 @@
 
 use sqlx::Row;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum UserStatus {
     Active,
     Inactive,
@@ -38,7 +38,7 @@ impl std::fmt::Display for UserStatus {
 
 impl sqlx::Type<sqlx::Postgres> for UserStatus {
     fn type_info() -> sqlx::postgres::PgTypeInfo {
-        sqlx::postgres::PgTypeInfo::with_name("public.user_status")
+        sqlx::postgres::PgTypeInfo::with_name("user_status")
     }
 }
 
@@ -507,9 +507,11 @@ pub struct GetActiveUsersByAgeRangeItem {
 /// Get active public.users within an age range - must return at least one user or fails
 ///
 /// Query Plan:
-/// Index Scan using idx_users_age on users
-///   Index Cond: ((age >= 0) AND (age <= 0))
-///   Filter: (updated_at > (now - '30 days'::interval))
+/// Bitmap Heap Scan on users
+///   Recheck Cond: (updated_at > (now - '30 days'::interval))
+///   Filter: ((age >= 0) AND (age <= 0))
+///   ->  Bitmap Index Scan on idx_users_updated_at
+///         Index Cond: (updated_at > (now - '30 days'::interval))
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, age, profile, created_at \nFROM public.users \nWHERE age BETWEEN #{min_age} AND #{max_age} \nAND updated_at > NOW() - INTERVAL '30 days'"))]
 pub async fn get_active_users_by_age_range(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, min_age: i32, max_age: i32) -> Result<Vec<GetActiveUsersByAgeRangeItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
@@ -2078,6 +2080,81 @@ pub async fn test_explicit_native_without_multiunzip(executor: impl sqlx::Execut
         id: row.try_get::<i32, _>("id")?,
         name: row.try_get::<String, _>("name")?,
         age: row.try_get::<Option<i32>, _>("age")?,
+    })
+    })();
+    result.map_err(Into::into)
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Users {
+    pub id: i32,
+    pub name: String,
+    pub email: String,
+    pub status: Option<UserStatus>,
+    pub profile: Option<serde_json::Value>,
+    pub settings: Option<serde_json::Value>,
+    pub is_active: Option<bool>,
+    pub age: Option<i32>,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub referrer_id: Option<i32>,
+}
+
+impl sqlx::Type<sqlx::Postgres> for Users {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        sqlx::postgres::PgTypeInfo::with_name("users")
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Users {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
+        let mut decoder = sqlx::postgres::types::PgRecordDecoder::new(value)?;
+        Ok(Self {
+            id: decoder.try_decode()?,
+            name: decoder.try_decode()?,
+            email: decoder.try_decode()?,
+            status: decoder.try_decode()?,
+            profile: decoder.try_decode()?,
+            settings: decoder.try_decode()?,
+            is_active: decoder.try_decode()?,
+            age: decoder.try_decode()?,
+            created_at: decoder.try_decode()?,
+            updated_at: decoder.try_decode()?,
+            referrer_id: decoder.try_decode()?,
+        })
+    }
+}
+
+
+#[derive(Debug, Clone)]
+pub struct TestNestedRowItem {
+    pub id: i32,
+    pub name: String,
+    pub user_details: Option<Users>,
+}
+
+/// Test returning table row type as nested data
+///
+/// Query Plan:
+/// Index Scan using users_pkey on users u
+///   Index Cond: (id = 0)
+#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT \n    u.id,\n    u.name,\n    u as user_details\nFROM public.users u\nWHERE u.id = #{user_id};"))]
+pub async fn test_nested_row(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, user_id: i32) -> Result<TestNestedRowItem, super::ErrorReadOnly> {
+    let query = sqlx::query(
+        r"SELECT 
+          u.id,
+          u.name,
+          u as user_details
+        FROM public.users u
+        WHERE u.id = $1;"
+    );
+    let query = query.bind(user_id);
+    let row = query.fetch_one(executor).await?;
+    let result: Result<_, sqlx::Error> = (|| {
+        Ok(TestNestedRowItem {
+        id: row.try_get::<i32, _>("id")?,
+        name: row.try_get::<String, _>("name")?,
+        user_details: row.try_get::<Option<Users>, _>("user_details")?,
     })
     })();
     result.map_err(Into::into)

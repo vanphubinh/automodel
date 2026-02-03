@@ -26,10 +26,11 @@ pub struct GetUserActivitySummaryItem {
 ///                     Sort Key: users.created_at DESC
 ///                     ->  Seq Scan on users
 ///                           Filter: (created_at > (now - '30 days'::interval))
-///         ->  Aggregate
-///               ->  Seq Scan on users users_1
+///         ->  Materialize
+///               ->  Aggregate
+///                     ->  Seq Scan on users users_1
 /// JIT:
-///   Functions: 12
+///   Functions: 13
 ///   Options: Inlining true, Optimization true, Expressions true, Deforming true
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "WITH recent_users AS (\n  SELECT id, name, email, created_at,\n         ROW_NUMBER() OVER (ORDER BY created_at DESC) as rank\n  FROM public.users \n  WHERE created_at > NOW() - INTERVAL '30 days'\n),\nuser_stats AS (\n  SELECT \n    COUNT(*) as total_users,\n    COUNT(CASE WHEN created_at > NOW() - INTERVAL '7 days' THEN 1 END) as weekly_users,\n    AVG(age)::float8 as avg_age\n  FROM public.users\n)\nSELECT \n  ru.id,\n  ru.name, \n  ru.email,\n  ru.created_at,\n  ru.rank,\n  us.total_users,\n  us.weekly_users,\n  us.avg_age\nFROM recent_users ru\nCROSS JOIN user_stats us\nWHERE ru.rank <= 10\nORDER BY ru.rank"))]
 pub async fn get_user_activity_summary(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>) -> Result<Vec<GetUserActivitySummaryItem>, super::ErrorReadOnly> {
@@ -547,8 +548,7 @@ pub struct GetUserCountAndAvgAgeItem {
 ///
 /// Query Plan:
 /// Aggregate
-///   ->  Bitmap Heap Scan on users
-///         ->  Bitmap Index Scan on idx_users_age_updated_at
+///   ->  Index Only Scan using idx_users_age_updated_at on users
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT COUNT(*) as count, AVG(age) as avg_age FROM public.users"))]
 pub async fn get_user_count_and_avg_age(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>) -> Result<GetUserCountAndAvgAgeItem, super::ErrorReadOnly> {
     let query = sqlx::query(

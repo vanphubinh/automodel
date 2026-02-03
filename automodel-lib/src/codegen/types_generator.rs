@@ -108,7 +108,7 @@ pub fn generate_enum_definition(
     pg_type_name: &str,
 ) -> String {
     let mut enum_def = format!(
-        "#[derive(Debug, Clone, PartialEq, Eq)]\npub enum {} {{\n",
+        "#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]\npub enum {} {{\n",
         enum_name
     );
 
@@ -175,6 +175,13 @@ pub fn generate_enum_definition(
     ));
 
     // Add SQLx Type implementation for enum
+    // Strip schema prefix (e.g., "public.user_status" -> "user_status") 
+    // because sqlx doesn't use schema-qualified names when decoding nested types in composites
+    let type_name_for_sqlx = pg_type_name
+        .split('.')
+        .last()
+        .unwrap_or(pg_type_name);
+    
     enum_def.push_str(&format!(
         r#"impl sqlx::Type<sqlx::Postgres> for {} {{
     fn type_info() -> sqlx::postgres::PgTypeInfo {{
@@ -196,10 +203,92 @@ impl<'q> sqlx::Encode<'q, sqlx::Postgres> for {} {{
 }}
 
 "#,
-        enum_name, pg_type_name, enum_name, enum_name
+        enum_name, type_name_for_sqlx, enum_name, enum_name
     ));
 
     enum_def
+}
+
+/// Generate struct definitions for composite types (recursively)
+fn generate_composite_type_struct(rust_type: &RustType, custom_derives: &[String]) -> String {
+    let mut structs = String::new();
+
+    if let Some(composite_fields) = &rust_type.composite_fields {
+        // First, generate any nested composite types
+        for field in composite_fields {
+            if field.rust_type.composite_fields.is_some() {
+                structs.push_str(&generate_composite_type_struct(
+                    &field.rust_type,
+                    custom_derives,
+                ));
+                structs.push('\n');
+            }
+        }
+
+        // Then generate this composite type struct
+        let derive_attr = build_derive_attribute(
+            &["Debug", "Clone", "serde::Serialize", "serde::Deserialize"],
+            custom_derives,
+        );
+        structs.push_str(&format!(
+            "{}\npub struct {} {{\n",
+            derive_attr, rust_type.rust_type
+        ));
+
+        for field in composite_fields {
+            let field_type = if field.rust_type.is_nullable {
+                format!("Option<{}>", field.rust_type.rust_type)
+            } else {
+                field.rust_type.rust_type.clone()
+            };
+            structs.push_str(&format!(
+                "    pub {}: {},\n",
+                to_snake_case(&field.name),
+                field_type
+            ));
+        }
+
+        structs.push_str("}\n\n");
+
+        // Add sqlx Type and Decode implementations for composite types
+        // Uses PgRecordDecoder to decode PostgreSQL composite types (same as tuples)
+        let struct_name = &rust_type.rust_type;
+        let pg_type_name = rust_type
+            .pg_type_name
+            .as_deref()
+            .unwrap_or_else(|| struct_name);
+
+        structs.push_str(&format!(
+            r#"impl sqlx::Type<sqlx::Postgres> for {} {{
+    fn type_info() -> sqlx::postgres::PgTypeInfo {{
+        sqlx::postgres::PgTypeInfo::with_name("{}")
+    }}
+}}
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for {} {{
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {{
+        let mut decoder = sqlx::postgres::types::PgRecordDecoder::new(value)?;
+        Ok(Self {{
+"#,
+            struct_name, pg_type_name, struct_name
+        ));
+
+        // Generate field decoding for each composite field
+        for field in composite_fields {
+            let field_name = to_snake_case(&field.name);
+            structs.push_str(&format!("            {}: decoder.try_decode()?,\n", field_name));
+        }
+
+        structs.push_str(&format!(
+            r#"        }})
+    }}
+}}
+
+"#
+        ));
+    }
+
+    structs
 }
 
 /// Generate a result struct with a custom struct name
@@ -212,8 +301,22 @@ pub fn generate_result_struct_with_name(
         return None;
     }
 
+    let mut all_structs = String::new();
+
+    // First, generate any nested composite type structs
+    for col in output_types {
+        if col.rust_type.composite_fields.is_some() {
+            all_structs.push_str(&generate_composite_type_struct(
+                &col.rust_type,
+                custom_derives,
+            ));
+            all_structs.push('\n');
+        }
+    }
+
+    // Then generate the main result struct
     let derive_attr = build_derive_attribute(&["Debug", "Clone"], custom_derives);
-    let mut struct_def = format!("{}\npub struct {} {{\n", derive_attr, struct_name);
+    all_structs.push_str(&format!("{}\npub struct {} {{\n", derive_attr, struct_name));
 
     for col in output_types {
         let field_type = if col.rust_type.is_nullable {
@@ -221,15 +324,15 @@ pub fn generate_result_struct_with_name(
         } else {
             col.rust_type.rust_type.clone()
         };
-        struct_def.push_str(&format!(
+        all_structs.push_str(&format!(
             "    pub {}: {},\n",
             to_snake_case(&col.name),
             field_type
         ));
     }
 
-    struct_def.push_str("}\n");
-    Some(struct_def)
+    all_structs.push_str("}\n");
+    Some(all_structs)
 }
 
 /// Generate an input struct for multiunzip pattern
