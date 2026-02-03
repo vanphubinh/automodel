@@ -663,7 +663,8 @@ fn pg_type_to_rust_type<'a>(
             for field in fields {
                 let field_name = field.name().to_string();
                 let is_field_nullable = nullability_map.get(&field_name).copied().unwrap_or(true);
-                let field_type = pg_type_to_rust_type(client, field.type_(), is_field_nullable).await?;
+                let field_type =
+                    pg_type_to_rust_type(client, field.type_(), is_field_nullable).await?;
                 composite_fields.push(CompositeField {
                     name: field_name,
                     rust_type: field_type,

@@ -175,13 +175,10 @@ pub fn generate_enum_definition(
     ));
 
     // Add SQLx Type implementation for enum
-    // Strip schema prefix (e.g., "public.user_status" -> "user_status") 
+    // Strip schema prefix (e.g., "public.user_status" -> "user_status")
     // because sqlx doesn't use schema-qualified names when decoding nested types in composites
-    let type_name_for_sqlx = pg_type_name
-        .split('.')
-        .last()
-        .unwrap_or(pg_type_name);
-    
+    let type_name_for_sqlx = pg_type_name.split('.').last().unwrap_or(pg_type_name);
+
     enum_def.push_str(&format!(
         r#"impl sqlx::Type<sqlx::Postgres> for {} {{
     fn type_info() -> sqlx::postgres::PgTypeInfo {{
@@ -276,7 +273,10 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for {} {{
         // Generate field decoding for each composite field
         for field in composite_fields {
             let field_name = to_snake_case(&field.name);
-            structs.push_str(&format!("            {}: decoder.try_decode()?,\n", field_name));
+            structs.push_str(&format!(
+                "            {}: decoder.try_decode()?,\n",
+                field_name
+            ));
         }
 
         structs.push_str(&format!(
