@@ -368,14 +368,12 @@ pub struct FindUsersByNameAndAgeItem {
 ///   Options: Inlining true, Optimization true, Expressions true, Deforming true
 /// 
 /// === find_users_by_name_and_age (variant 1) ===
-/// Bitmap Heap Scan on users
-///   Recheck Cond: (age >= 0)
+/// Index Scan using idx_users_age_updated_at on users
+///   Index Cond: (age >= 0)
 ///   Filter: (((name)::text ~~* 'dummy'::text) AND ((name)::text = 'dummy'::text))
-///   ->  Bitmap Index Scan on idx_users_age_updated_at
-///         Index Cond: (age >= 0)
 /// 
 /// === find_users_by_name_and_age (variant 2) ===
-/// Index Scan using idx_users_age on users
+/// Index Scan using idx_users_age_updated_at on users
 ///   Index Cond: (age <= 0)
 ///   Filter: (((name)::text ~~* 'dummy'::text) AND ((name)::text = 'dummy'::text))
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, age \nFROM public.users \nWHERE name ILIKE #{name_pattern} \n#[AND age >= #{min_age?}] \nAND name = #{name_exact} \n#[AND age <= #{max_age?}] \nORDER BY name"))]
@@ -507,11 +505,9 @@ pub struct GetActiveUsersByAgeRangeItem {
 /// Get active public.users within an age range - must return at least one user or fails
 ///
 /// Query Plan:
-/// Bitmap Heap Scan on users
-///   Recheck Cond: (updated_at > (now - '30 days'::interval))
-///   Filter: ((age >= 0) AND (age <= 0))
-///   ->  Bitmap Index Scan on idx_users_updated_at
-///         Index Cond: (updated_at > (now - '30 days'::interval))
+/// Index Scan using idx_users_age on users
+///   Index Cond: ((age >= 0) AND (age <= 0))
+///   Filter: (updated_at > (now - '30 days'::interval))
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, age, profile, created_at \nFROM public.users \nWHERE age BETWEEN #{min_age} AND #{max_age} \nAND updated_at > NOW() - INTERVAL '30 days'"))]
 pub async fn get_active_users_by_age_range(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, min_age: i32, max_age: i32) -> Result<Vec<GetActiveUsersByAgeRangeItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
@@ -614,10 +610,8 @@ pub struct SearchUsersAdvancedItem {
 /// === search_users_advanced (variant 2) ===
 /// Sort
 ///   Sort Key: created_at DESC
-///   ->  Bitmap Heap Scan on users
-///         Recheck Cond: (age >= 0)
-///         ->  Bitmap Index Scan on idx_users_age_updated_at
-///               Index Cond: (age >= 0)
+///   ->  Index Scan using idx_users_age_updated_at on users
+///         Index Cond: (age >= 0)
 /// 
 /// === search_users_advanced (variant 3) ===
 /// Sort
@@ -1160,6 +1154,7 @@ pub struct GetAllUsersWithStarItem {
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
     pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
     pub referrer_id: Option<i32>,
+    pub social_links: Option<serde_json::Value>,
 }
 
 /// Get all public.users using SELECT * to fetch all columns
@@ -1168,6 +1163,9 @@ pub struct GetAllUsersWithStarItem {
 /// Sort
 ///   Sort Key: created_at DESC
 ///   ->  Seq Scan on users
+/// JIT:
+///   Functions: 2
+///   Options: Inlining true, Optimization true, Expressions true, Deforming true
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT * \nFROM public.users \nORDER BY created_at DESC"))]
 pub async fn get_all_users_with_star(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>) -> Result<Vec<GetAllUsersWithStarItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
@@ -1192,6 +1190,7 @@ pub async fn get_all_users_with_star(executor: impl sqlx::Executor<'_, Database 
         created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
         updated_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("updated_at")?,
         referrer_id: row.try_get::<Option<i32>, _>("referrer_id")?,
+        social_links: row.try_get::<Option<serde_json::Value>, _>("social_links")?,
     })
     }).collect();
     result.map_err(Into::into)
@@ -1210,6 +1209,7 @@ pub struct GetUserByIdWithStarItem {
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
     pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
     pub referrer_id: Option<i32>,
+    pub social_links: Option<serde_json::Value>,
 }
 
 /// Get a single user by ID using SELECT * to fetch all columns
@@ -1244,6 +1244,7 @@ pub async fn get_user_by_id_with_star(executor: impl sqlx::Executor<'_, Database
         created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
         updated_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("updated_at")?,
         referrer_id: row.try_get::<Option<i32>, _>("referrer_id")?,
+        social_links: row.try_get::<Option<serde_json::Value>, _>("social_links")?,
     })
             })();
             result.map(Some).map_err(Into::into)
@@ -1947,6 +1948,178 @@ pub async fn get_user_id_raw(executor: impl sqlx::Executor<'_, Database = sqlx::
 
 /// Constraint violations specific to this query
 #[derive(Debug, Clone)]
+pub enum UpdateUserSocialLinksConstraints {
+    /// Constraint: users_email_key on table users
+    UsersEmailKey,
+    /// Constraint: users_pkey on table users
+    UsersPkey,
+    /// Constraint: users_referrer_id_fkey on table users
+    UsersReferrerIdFkey,
+    /// Constraint: users_id_not_null on table users
+    UsersIdNotNull,
+    /// Constraint: users_name_not_null on table users
+    UsersNameNotNull,
+    /// Constraint: users_email_not_null on table users
+    UsersEmailNotNull,
+}
+
+impl TryFrom<super::ErrorConstraintInfo> for UpdateUserSocialLinksConstraints {
+    type Error = ();
+
+    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
+        match info.constraint_name.as_str() {
+            "users_email_key" => Ok(Self::UsersEmailKey),
+            "users_pkey" => Ok(Self::UsersPkey),
+            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
+            "users_id_not_null" => Ok(Self::UsersIdNotNull),
+            "users_name_not_null" => Ok(Self::UsersNameNotNull),
+            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateUserSocialLinksItem {
+    pub id: i32,
+    pub name: String,
+    pub email: String,
+    pub social_links: Option<Vec<crate::models::UserSocialLink>>,
+}
+
+/// Update user's social links
+#[tracing::instrument(level = "debug", skip_all, fields(sql = "UPDATE public.users \nSET social_links = #{social_links}, updated_at = NOW()\nWHERE id = #{user_id}\nRETURNING id, name, email, social_links;"))]
+pub async fn update_user_social_links(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, social_links: Vec<crate::models::UserSocialLink>, user_id: i32) -> Result<UpdateUserSocialLinksItem, super::Error<UpdateUserSocialLinksConstraints>> {
+    let query = sqlx::query(
+        r"UPDATE public.users 
+        SET social_links = $1, updated_at = NOW()
+        WHERE id = $2
+        RETURNING id, name, email, social_links;"
+    );
+    let query = query.bind(serde_json::to_value(&social_links).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
+    let query = query.bind(user_id);
+    let row = query.fetch_one(executor).await?;
+    let result: Result<_, sqlx::Error> = (|| {
+        Ok(UpdateUserSocialLinksItem {
+        id: row.try_get::<i32, _>("id")?,
+        name: row.try_get::<String, _>("name")?,
+        email: row.try_get::<String, _>("email")?,
+        social_links: row.try_get::<Option<serde_json::Value>, _>("social_links")?
+            .map(|v| serde_json::from_value::<Vec<crate::models::UserSocialLink>>(v)
+            .map_err(|e| sqlx::Error::Decode(Box::new(e))))
+            .transpose()?,
+    })
+    })();
+    result.map_err(Into::into)
+}
+
+#[derive(Debug, Clone)]
+pub struct GetUserSocialLinksItem {
+    pub id: i32,
+    pub name: String,
+    pub email: String,
+    pub social_links: Option<Vec<crate::models::UserSocialLink>>,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Get user with their social links
+///
+/// Query Plan:
+/// Index Scan using users_pkey on users
+///   Index Cond: (id = 0)
+#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, social_links, created_at\nFROM public.users\nWHERE id = #{user_id};"))]
+pub async fn get_user_social_links(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, user_id: i32) -> Result<GetUserSocialLinksItem, super::ErrorReadOnly> {
+    let query = sqlx::query(
+        r"SELECT id, name, email, social_links, created_at
+        FROM public.users
+        WHERE id = $1;"
+    );
+    let query = query.bind(user_id);
+    let row = query.fetch_one(executor).await?;
+    let result: Result<_, sqlx::Error> = (|| {
+        Ok(GetUserSocialLinksItem {
+        id: row.try_get::<i32, _>("id")?,
+        name: row.try_get::<String, _>("name")?,
+        email: row.try_get::<String, _>("email")?,
+        social_links: row.try_get::<Option<serde_json::Value>, _>("social_links")?
+            .map(|v| serde_json::from_value::<Vec<crate::models::UserSocialLink>>(v)
+            .map_err(|e| sqlx::Error::Decode(Box::new(e))))
+            .transpose()?,
+        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
+    })
+    })();
+    result.map_err(Into::into)
+}
+
+/// Constraint violations specific to this query
+#[derive(Debug, Clone)]
+pub enum InsertUserWithSocialLinksConstraints {
+    /// Constraint: users_email_key on table users
+    UsersEmailKey,
+    /// Constraint: users_pkey on table users
+    UsersPkey,
+    /// Constraint: users_referrer_id_fkey on table users
+    UsersReferrerIdFkey,
+    /// Constraint: users_id_not_null on table users
+    UsersIdNotNull,
+    /// Constraint: users_name_not_null on table users
+    UsersNameNotNull,
+    /// Constraint: users_email_not_null on table users
+    UsersEmailNotNull,
+}
+
+impl TryFrom<super::ErrorConstraintInfo> for InsertUserWithSocialLinksConstraints {
+    type Error = ();
+
+    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
+        match info.constraint_name.as_str() {
+            "users_email_key" => Ok(Self::UsersEmailKey),
+            "users_pkey" => Ok(Self::UsersPkey),
+            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
+            "users_id_not_null" => Ok(Self::UsersIdNotNull),
+            "users_name_not_null" => Ok(Self::UsersNameNotNull),
+            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct InsertUserWithSocialLinksItem {
+    pub id: i32,
+    pub name: String,
+    pub email: String,
+    pub social_links: Option<Vec<crate::models::UserSocialLink>>,
+}
+
+/// Add a new user with social links
+#[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.users (name, email, status, social_links)\nVALUES (#{name}, #{email}, 'pending', #{social_links})\nRETURNING id, name, email, social_links;"))]
+pub async fn insert_user_with_social_links(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, name: String, email: String, social_links: Vec<crate::models::UserSocialLink>) -> Result<InsertUserWithSocialLinksItem, super::Error<InsertUserWithSocialLinksConstraints>> {
+    let query = sqlx::query(
+        r"INSERT INTO public.users (name, email, status, social_links)
+        VALUES ($1, $2, 'pending', $3)
+        RETURNING id, name, email, social_links;"
+    );
+    let query = query.bind(&name);
+    let query = query.bind(&email);
+    let query = query.bind(serde_json::to_value(&social_links).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
+    let row = query.fetch_one(executor).await?;
+    let result: Result<_, sqlx::Error> = (|| {
+        Ok(InsertUserWithSocialLinksItem {
+        id: row.try_get::<i32, _>("id")?,
+        name: row.try_get::<String, _>("name")?,
+        email: row.try_get::<String, _>("email")?,
+        social_links: row.try_get::<Option<serde_json::Value>, _>("social_links")?
+            .map(|v| serde_json::from_value::<Vec<crate::models::UserSocialLink>>(v)
+            .map_err(|e| sqlx::Error::Decode(Box::new(e))))
+            .transpose()?,
+    })
+    })();
+    result.map_err(Into::into)
+}
+
+/// Constraint violations specific to this query
+#[derive(Debug, Clone)]
 pub enum TestExplicitNativeMultiunzipConstraints {
     /// Constraint: users_email_key on table users
     UsersEmailKey,
@@ -2098,6 +2271,7 @@ pub struct Users {
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
     pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
     pub referrer_id: Option<i32>,
+    pub social_links: Option<serde_json::Value>,
 }
 
 impl sqlx::Type<sqlx::Postgres> for Users {
@@ -2121,6 +2295,7 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Users {
             created_at: decoder.try_decode()?,
             updated_at: decoder.try_decode()?,
             referrer_id: decoder.try_decode()?,
+            social_links: decoder.try_decode()?,
         })
     }
 }

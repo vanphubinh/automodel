@@ -66,6 +66,10 @@ async fn run_examples(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== Testing Composite Type (Nested Row) ===");
     test_nested_row(pool).await?;
 
+    // Test social links with custom type mapping
+    println!("\n=== Testing Social Links with Custom Type Mapping ===");
+    test_social_links(pool).await?;
+
     println!("\nTo see the actual generated code, check src/generated/ directory");
     println!("Functions are organized into modules: admin.rs, setup.rs, users.rs, and mod.rs");
     println!(
@@ -696,6 +700,130 @@ async fn test_nested_row(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>
     }
 
     println!("\n✓ Composite type (nested row) test completed successfully!");
+
+    Ok(())
+}
+
+async fn test_social_links(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::models::UserSocialLink;
+
+    println!("Testing social links with custom type mapping...");
+
+    let timestamp = chrono::Utc::now().timestamp();
+
+    // 1. Insert a new user with social links
+    println!("\n1. Creating a new user with social links...");
+    let social_links = vec![
+        UserSocialLink {
+            name: "GitHub".to_string(),
+            url: "https://github.com/testuser".to_string(),
+        },
+        UserSocialLink {
+            name: "Twitter".to_string(),
+            url: "https://twitter.com/testuser".to_string(),
+        },
+    ];
+
+    let new_user = generated::users::insert_user_with_social_links(
+        pool,
+        "Test User".to_string(),
+        format!("test.social.{}@example.com", timestamp),
+        social_links.clone(),
+    )
+    .await?;
+
+    println!("✓ Created user with ID: {}", new_user.id);
+    println!("  Name: {}", new_user.name);
+    println!("  Email: {}", new_user.email);
+    if let Some(links) = &new_user.social_links {
+        println!("  Social Links: {} items", links.len());
+        for link in links {
+            println!("    - {}: {}", link.name, link.url);
+        }
+    } else {
+        println!("  Social Links: None");
+    }
+
+    // 2. Retrieve the user's social links
+    println!("\n2. Retrieving user's social links...");
+    let user_data = generated::users::get_user_social_links(pool, new_user.id).await?;
+
+    println!("✓ Retrieved user data:");
+    println!("  ID: {}", user_data.id);
+    println!("  Name: {}", user_data.name);
+    println!("  Email: {}", user_data.email);
+    if let Some(links) = &user_data.social_links {
+        println!("  Social Links: {} items", links.len());
+        for link in links {
+            println!("    - {}: {}", link.name, link.url);
+        }
+    } else {
+        println!("  Social Links: None");
+    }
+
+    // 3. Update the user's social links
+    println!("\n3. Updating user's social links...");
+    let updated_links = vec![
+        UserSocialLink {
+            name: "GitHub".to_string(),
+            url: "https://github.com/newusername".to_string(),
+        },
+        UserSocialLink {
+            name: "LinkedIn".to_string(),
+            url: "https://linkedin.com/in/testuser".to_string(),
+        },
+        UserSocialLink {
+            name: "Website".to_string(),
+            url: "https://testuser.com".to_string(),
+        },
+    ];
+
+    let updated_user =
+        generated::users::update_user_social_links(pool, updated_links.clone(), new_user.id)
+            .await?;
+
+    println!("✓ Updated user social links:");
+    println!("  ID: {}", updated_user.id);
+    println!("  Name: {}", updated_user.name);
+    if let Some(links) = &updated_user.social_links {
+        println!("  Social Links: {} items", links.len());
+        for link in links {
+            println!("    - {}: {}", link.name, link.url);
+        }
+    }
+
+    // 4. Verify the update by retrieving again
+    println!("\n4. Verifying the update...");
+    let verified_user = generated::users::get_user_social_links(pool, new_user.id).await?;
+
+    println!("✓ Verified updated social links:");
+    if let Some(links) = &verified_user.social_links {
+        println!("  Social Links: {} items", links.len());
+        for link in links {
+            println!("    - {}: {}", link.name, link.url);
+        }
+    }
+
+    // 5. Test with empty social links
+    println!("\n5. Testing with empty social links...");
+    let empty_links: Vec<UserSocialLink> = vec![];
+    let cleared_user =
+        generated::users::update_user_social_links(pool, empty_links, new_user.id).await?;
+
+    println!("✓ Cleared social links:");
+    println!("  ID: {}", cleared_user.id);
+    if let Some(links) = &cleared_user.social_links {
+        println!("  Social Links: {} items (should be 0)", links.len());
+    } else {
+        println!("  Social Links: 0 items (empty)");
+    }
+
+    println!("\n✓ Social links with custom type mapping test completed successfully!");
+    println!(
+        "  - Custom type Vec<crate::models::UserSocialLink> is properly serialized/deserialized"
+    );
+    println!("  - JSONB column automatically handles the JSON conversion");
+    println!("  - Type safety is maintained throughout insert, update, and query operations");
 
     Ok(())
 }

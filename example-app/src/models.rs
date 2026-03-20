@@ -17,9 +17,16 @@ pub struct UserPreferences {
     pub notifications_enabled: bool,
 }
 
-/// Social media links
+/// Social media links (for nested use in UserProfile)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SocialLink {
     pub platform: String,
+    pub url: String,
+}
+
+/// Social media link for top-level social_links column
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserSocialLink {
+    pub name: String,
     pub url: String,
 }
