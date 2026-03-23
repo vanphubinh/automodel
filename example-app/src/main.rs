@@ -879,12 +879,10 @@ async fn test_nullable_social_links(pool: &PgPool) -> Result<(), Box<dyn std::er
 
     // 1. Insert a user with social links
     println!("\n1. Creating user with social links...");
-    let links = vec![
-        UserSocialLink {
-            name: "GitHub".to_string(),
-            url: "https://github.com/nulltest".to_string(),
-        },
-    ];
+    let links = vec![UserSocialLink {
+        name: "GitHub".to_string(),
+        url: "https://github.com/nulltest".to_string(),
+    }];
     let user = generated::users::insert_user_with_social_links(
         pool,
         "Nullable Test".to_string(),
@@ -892,24 +890,33 @@ async fn test_nullable_social_links(pool: &PgPool) -> Result<(), Box<dyn std::er
         links.clone(),
     )
     .await?;
-    println!("✓ Created user ID: {}, social_links: {:?}", user.id, user.social_links);
+    println!(
+        "✓ Created user ID: {}, social_links: {:?}",
+        user.id, user.social_links
+    );
 
     // 2. Set social_links to NULL using nullable update
     println!("\n2. Setting social_links to NULL...");
-    let nulled = generated::users_array_fields::update_user_social_links_nullable(
-        pool,
-        None,
-        user.id,
-    )
-    .await?;
-    println!("✓ After setting NULL: social_links = {:?}", nulled.social_links);
-    assert!(nulled.social_links.is_none(), "Expected None after setting NULL");
+    let nulled =
+        generated::users_array_fields::update_user_social_links_nullable(pool, None, user.id)
+            .await?;
+    println!(
+        "✓ After setting NULL: social_links = {:?}",
+        nulled.social_links
+    );
+    assert!(
+        nulled.social_links.is_none(),
+        "Expected None after setting NULL"
+    );
 
     // 3. Read back and verify NULL
     println!("\n3. Reading back to verify NULL...");
     let read_back = generated::users::get_user_social_links(pool, user.id).await?;
     println!("✓ Read back: social_links = {:?}", read_back.social_links);
-    assert!(read_back.social_links.is_none(), "Expected None on read back");
+    assert!(
+        read_back.social_links.is_none(),
+        "Expected None on read back"
+    );
 
     // 4. Set social_links back to Some(vec)
     println!("\n4. Setting social_links back to Some(vec)...");
@@ -930,7 +937,10 @@ async fn test_nullable_social_links(pool: &PgPool) -> Result<(), Box<dyn std::er
     )
     .await?;
     println!("✓ Restored: social_links = {:?}", restored.social_links);
-    assert!(restored.social_links.is_some(), "Expected Some after restore");
+    assert!(
+        restored.social_links.is_some(),
+        "Expected Some after restore"
+    );
     assert_eq!(restored.social_links.as_ref().unwrap().len(), 2);
 
     // 5. Verify restored value
@@ -961,12 +971,19 @@ async fn test_social_links_structured(pool: &PgPool) -> Result<(), Box<dyn std::
         name: "Structured Test".to_string(),
         email: format!("structured.social.{}@example.com", timestamp),
         social_links: vec![
-            UserSocialLink { name: "GitHub".to_string(), url: "https://github.com/structured".to_string() },
-            UserSocialLink { name: "Blog".to_string(), url: "https://blog.structured.dev".to_string() },
+            UserSocialLink {
+                name: "GitHub".to_string(),
+                url: "https://github.com/structured".to_string(),
+            },
+            UserSocialLink {
+                name: "Blog".to_string(),
+                url: "https://blog.structured.dev".to_string(),
+            },
         ],
     };
 
-    let result = generated::users_array_fields::insert_user_social_links_structured(pool, &params).await?;
+    let result =
+        generated::users_array_fields::insert_user_social_links_structured(pool, &params).await?;
     println!("✓ Inserted user ID: {}", result.id);
     let links = result.social_links.expect("Expected Some social_links");
     assert_eq!(links.len(), 2);
@@ -990,26 +1007,41 @@ async fn test_social_links_diff(pool: &PgPool) -> Result<(), Box<dyn std::error:
         pool,
         "Diff Test".to_string(),
         format!("diff.social.{}@example.com", timestamp),
-        vec![UserSocialLink { name: "GitHub".to_string(), url: "https://github.com/difftest".to_string() }],
-    ).await?;
+        vec![UserSocialLink {
+            name: "GitHub".to_string(),
+            url: "https://github.com/difftest".to_string(),
+        }],
+    )
+    .await?;
     println!("✓ Created user ID: {}", user.id);
 
     let old = generated::users_array_fields::UpdateUserSocialLinksDiffParams {
         name: "Diff Test".to_string(),
-        social_links: vec![UserSocialLink { name: "GitHub".to_string(), url: "https://github.com/difftest".to_string() }],
+        social_links: vec![UserSocialLink {
+            name: "GitHub".to_string(),
+            url: "https://github.com/difftest".to_string(),
+        }],
     };
 
     // 1. Change only social_links (name stays the same)
     let new_links = vec![
-        UserSocialLink { name: "Twitter".to_string(), url: "https://twitter.com/difftest".to_string() },
-        UserSocialLink { name: "Website".to_string(), url: "https://difftest.dev".to_string() },
+        UserSocialLink {
+            name: "Twitter".to_string(),
+            url: "https://twitter.com/difftest".to_string(),
+        },
+        UserSocialLink {
+            name: "Website".to_string(),
+            url: "https://difftest.dev".to_string(),
+        },
     ];
     let new = generated::users_array_fields::UpdateUserSocialLinksDiffParams {
         name: "Diff Test".to_string(),
         social_links: new_links.clone(),
     };
 
-    let updated = generated::users_array_fields::update_user_social_links_diff(pool, &old, &new, user.id).await?;
+    let updated =
+        generated::users_array_fields::update_user_social_links_diff(pool, &old, &new, user.id)
+            .await?;
     let links = updated.social_links.expect("Expected Some");
     assert_eq!(links.len(), 2);
     assert_eq!(links[0].name, "Twitter");
@@ -1019,10 +1051,15 @@ async fn test_social_links_diff(pool: &PgPool) -> Result<(), Box<dyn std::error:
     let old2 = new.clone();
     let new2 = generated::users_array_fields::UpdateUserSocialLinksDiffParams {
         name: "Diff Test Updated".to_string(),
-        social_links: vec![UserSocialLink { name: "LinkedIn".to_string(), url: "https://linkedin.com/in/difftest".to_string() }],
+        social_links: vec![UserSocialLink {
+            name: "LinkedIn".to_string(),
+            url: "https://linkedin.com/in/difftest".to_string(),
+        }],
     };
 
-    let updated2 = generated::users_array_fields::update_user_social_links_diff(pool, &old2, &new2, user.id).await?;
+    let updated2 =
+        generated::users_array_fields::update_user_social_links_diff(pool, &old2, &new2, user.id)
+            .await?;
     assert_eq!(updated2.name, "Diff Test Updated");
     let links2 = updated2.social_links.expect("Expected Some");
     assert_eq!(links2.len(), 1);
@@ -1030,7 +1067,9 @@ async fn test_social_links_diff(pool: &PgPool) -> Result<(), Box<dyn std::error:
     println!("✓ Diff update changed both name and social_links");
 
     // 3. No changes (old == new) — should still return current data
-    let updated3 = generated::users_array_fields::update_user_social_links_diff(pool, &new2, &new2, user.id).await?;
+    let updated3 =
+        generated::users_array_fields::update_user_social_links_diff(pool, &new2, &new2, user.id)
+            .await?;
     assert_eq!(updated3.name, "Diff Test Updated");
     println!("✓ Diff with no changes returned current data");
 
@@ -1050,17 +1089,26 @@ async fn test_social_links_conditional(pool: &PgPool) -> Result<(), Box<dyn std:
         pool,
         "Conditional Test".to_string(),
         format!("conditional.social.{}@example.com", timestamp),
-        vec![UserSocialLink { name: "GitHub".to_string(), url: "https://github.com/condtest".to_string() }],
-    ).await?;
+        vec![UserSocialLink {
+            name: "GitHub".to_string(),
+            url: "https://github.com/condtest".to_string(),
+        }],
+    )
+    .await?;
     println!("✓ Created user ID: {}", user.id);
 
     // 1. Update only social_links (name = None → skip)
-    let new_links = vec![
-        UserSocialLink { name: "Twitter".to_string(), url: "https://twitter.com/condtest".to_string() },
-    ];
+    let new_links = vec![UserSocialLink {
+        name: "Twitter".to_string(),
+        url: "https://twitter.com/condtest".to_string(),
+    }];
     let updated = generated::users_array_fields::update_user_social_links_conditional(
-        pool, None, Some(new_links), user.id,
-    ).await?;
+        pool,
+        None,
+        Some(new_links),
+        user.id,
+    )
+    .await?;
     assert_eq!(updated.name, "Conditional Test"); // name unchanged
     let links = updated.social_links.expect("Expected Some");
     assert_eq!(links[0].name, "Twitter");
@@ -1068,8 +1116,12 @@ async fn test_social_links_conditional(pool: &PgPool) -> Result<(), Box<dyn std:
 
     // 2. Update only name (social_links = None → skip)
     let updated2 = generated::users_array_fields::update_user_social_links_conditional(
-        pool, Some("Conditional Updated".to_string()), None, user.id,
-    ).await?;
+        pool,
+        Some("Conditional Updated".to_string()),
+        None,
+        user.id,
+    )
+    .await?;
     assert_eq!(updated2.name, "Conditional Updated");
     let links2 = updated2.social_links.expect("Expected Some");
     assert_eq!(links2[0].name, "Twitter"); // social_links unchanged
@@ -1077,12 +1129,22 @@ async fn test_social_links_conditional(pool: &PgPool) -> Result<(), Box<dyn std:
 
     // 3. Update both
     let both_links = vec![
-        UserSocialLink { name: "LinkedIn".to_string(), url: "https://linkedin.com/in/condtest".to_string() },
-        UserSocialLink { name: "Blog".to_string(), url: "https://condtest.blog".to_string() },
+        UserSocialLink {
+            name: "LinkedIn".to_string(),
+            url: "https://linkedin.com/in/condtest".to_string(),
+        },
+        UserSocialLink {
+            name: "Blog".to_string(),
+            url: "https://condtest.blog".to_string(),
+        },
     ];
     let updated3 = generated::users_array_fields::update_user_social_links_conditional(
-        pool, Some("Both Updated".to_string()), Some(both_links), user.id,
-    ).await?;
+        pool,
+        Some("Both Updated".to_string()),
+        Some(both_links),
+        user.id,
+    )
+    .await?;
     assert_eq!(updated3.name, "Both Updated");
     let links3 = updated3.social_links.expect("Expected Some");
     assert_eq!(links3.len(), 2);
@@ -1103,9 +1165,10 @@ async fn test_social_links_batch(pool: &PgPool) -> Result<(), Box<dyn std::error
         generated::users_array_fields::InsertUsersBatchSocialLinksRecord {
             name: "Batch User 1".to_string(),
             email: format!("batch1.social.{}@example.com", timestamp),
-            social_links: Some(vec![
-                UserSocialLink { name: "GitHub".to_string(), url: "https://github.com/batch1".to_string() },
-            ]),
+            social_links: Some(vec![UserSocialLink {
+                name: "GitHub".to_string(),
+                url: "https://github.com/batch1".to_string(),
+            }]),
         },
         generated::users_array_fields::InsertUsersBatchSocialLinksRecord {
             name: "Batch User 2".to_string(),
@@ -1116,33 +1179,51 @@ async fn test_social_links_batch(pool: &PgPool) -> Result<(), Box<dyn std::error
             name: "Batch User 3".to_string(),
             email: format!("batch3.social.{}@example.com", timestamp),
             social_links: Some(vec![
-                UserSocialLink { name: "Twitter".to_string(), url: "https://twitter.com/batch3".to_string() },
-                UserSocialLink { name: "Website".to_string(), url: "https://batch3.dev".to_string() },
+                UserSocialLink {
+                    name: "Twitter".to_string(),
+                    url: "https://twitter.com/batch3".to_string(),
+                },
+                UserSocialLink {
+                    name: "Website".to_string(),
+                    url: "https://batch3.dev".to_string(),
+                },
             ]),
         },
     ];
 
-    let results = generated::users_array_fields::insert_users_batch_social_links(pool, items).await?;
+    let results =
+        generated::users_array_fields::insert_users_batch_social_links(pool, items).await?;
     assert_eq!(results.len(), 3);
 
     // User 1: has social links
-    let links1 = results[0].social_links.as_ref().expect("Expected Some for user 1");
+    let links1 = results[0]
+        .social_links
+        .as_ref()
+        .expect("Expected Some for user 1");
     assert_eq!(links1.len(), 1);
     assert_eq!(links1[0].name, "GitHub");
     println!("✓ User 1: {} link(s)", links1.len());
 
     // User 2: NULL social links
-    assert!(results[1].social_links.is_none(), "Expected None for user 2");
+    assert!(
+        results[1].social_links.is_none(),
+        "Expected None for user 2"
+    );
     println!("✓ User 2: NULL social_links");
 
     // User 3: has social links
-    let links3 = results[2].social_links.as_ref().expect("Expected Some for user 3");
+    let links3 = results[2]
+        .social_links
+        .as_ref()
+        .expect("Expected Some for user 3");
     assert_eq!(links3.len(), 2);
     assert_eq!(links3[0].name, "Twitter");
     println!("✓ User 3: {} link(s)", links3.len());
 
     println!("\n✓ Batch insert with optional JSONB test completed!");
-    println!("  - Vec<Record> with Option<Vec<CustomStruct>> correctly handles mixed NULL/Some values");
+    println!(
+        "  - Vec<Record> with Option<Vec<CustomStruct>> correctly handles mixed NULL/Some values"
+    );
     Ok(())
 }
 
@@ -1179,9 +1260,15 @@ async fn test_tags(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
 
     // 1. Set tags with mixed Some/None elements
     let tags = vec![
-        Some(UserTag { label: "lang".to_string(), value: "rust".to_string() }),
+        Some(UserTag {
+            label: "lang".to_string(),
+            value: "rust".to_string(),
+        }),
         None, // null element in jsonb[]
-        Some(UserTag { label: "role".to_string(), value: "dev".to_string() }),
+        Some(UserTag {
+            label: "role".to_string(),
+            value: "dev".to_string(),
+        }),
     ];
     let updated = generated::users_array_fields::update_user_tags(pool, tags, user.id).await?;
     let result_tags = updated.tags.expect("Expected Some tags");
@@ -1202,7 +1289,9 @@ async fn test_tags(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
 
     // 3. Set to empty array
     let updated2 = generated::users_array_fields::update_user_tags(pool, vec![], user.id).await?;
-    let empty_tags = updated2.tags.expect("Expected Some (empty array, not NULL)");
+    let empty_tags = updated2
+        .tags
+        .expect("Expected Some (empty array, not NULL)");
     assert_eq!(empty_tags.len(), 0);
     println!("✓ Set to empty array: len=0");
 
@@ -1221,7 +1310,10 @@ async fn test_tags_structured(pool: &PgPool) -> Result<(), Box<dyn std::error::E
         name: "Tags Struct Test".to_string(),
         email: format!("tags.struct.{}@example.com", timestamp),
         tags: vec![
-            Some(UserTag { label: "team".to_string(), value: "backend".to_string() }),
+            Some(UserTag {
+                label: "team".to_string(),
+                value: "backend".to_string(),
+            }),
             None,
         ],
     };
@@ -1265,9 +1357,10 @@ async fn test_tags_diff(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>>
     .await?;
 
     // Set initial tags
-    let initial_tags = vec![
-        Some(UserTag { label: "lang".to_string(), value: "rust".to_string() }),
-    ];
+    let initial_tags = vec![Some(UserTag {
+        label: "lang".to_string(),
+        value: "rust".to_string(),
+    })];
     generated::users_array_fields::update_user_tags(pool, initial_tags.clone(), user.id).await?;
     println!("✓ Created user ID: {} with initial tags", user.id);
 
@@ -1278,22 +1371,30 @@ async fn test_tags_diff(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>>
 
     // 1. Change only tags
     let new_tags = vec![
-        Some(UserTag { label: "lang".to_string(), value: "go".to_string() }),
+        Some(UserTag {
+            label: "lang".to_string(),
+            value: "go".to_string(),
+        }),
         None,
-        Some(UserTag { label: "os".to_string(), value: "linux".to_string() }),
+        Some(UserTag {
+            label: "os".to_string(),
+            value: "linux".to_string(),
+        }),
     ];
     let new = generated::users_array_fields::UpdateUserTagsDiffParams {
         name: "Tags Diff Test".to_string(),
         tags: new_tags.clone(),
     };
-    let updated = generated::users_array_fields::update_user_tags_diff(pool, &old, &new, user.id).await?;
+    let updated =
+        generated::users_array_fields::update_user_tags_diff(pool, &old, &new, user.id).await?;
     let tags = updated.tags.expect("Expected Some");
     assert_eq!(tags.len(), 3);
     assert!(tags[1].is_none());
     println!("✓ Diff: changed tags only (name unchanged)");
 
     // 2. No changes
-    let updated2 = generated::users_array_fields::update_user_tags_diff(pool, &new, &new, user.id).await?;
+    let updated2 =
+        generated::users_array_fields::update_user_tags_diff(pool, &new, &new, user.id).await?;
     assert_eq!(updated2.name, "Tags Diff Test");
     println!("✓ Diff: no changes, returned current data");
 
@@ -1330,7 +1431,10 @@ async fn test_tags_conditional(pool: &PgPool) -> Result<(), Box<dyn std::error::
     // Set initial tags
     generated::users_array_fields::update_user_tags(
         pool,
-        vec![Some(UserTag { label: "init".to_string(), value: "true".to_string() })],
+        vec![Some(UserTag {
+            label: "init".to_string(),
+            value: "true".to_string(),
+        })],
         user.id,
     )
     .await?;
@@ -1338,7 +1442,10 @@ async fn test_tags_conditional(pool: &PgPool) -> Result<(), Box<dyn std::error::
 
     // 1. Update only tags (name = None → skip)
     let new_tags = vec![
-        Some(UserTag { label: "updated".to_string(), value: "yes".to_string() }),
+        Some(UserTag {
+            label: "updated".to_string(),
+            value: "yes".to_string(),
+        }),
         None,
     ];
     let updated = generated::users_array_fields::update_user_tags_conditional(
@@ -1368,9 +1475,10 @@ async fn test_tags_conditional(pool: &PgPool) -> Result<(), Box<dyn std::error::
     println!("✓ Conditional: changed only name, tags skipped");
 
     // 3. Update both
-    let both_tags = vec![
-        Some(UserTag { label: "final".to_string(), value: "done".to_string() }),
-    ];
+    let both_tags = vec![Some(UserTag {
+        label: "final".to_string(),
+        value: "done".to_string(),
+    })];
     let updated3 = generated::users_array_fields::update_user_tags_conditional(
         pool,
         Some("Tags Both Updated".to_string()),
@@ -1399,7 +1507,10 @@ async fn test_tags_batch(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>
             name: "Batch Tag 1".to_string(),
             email: format!("batch.tag1.{}@example.com", timestamp),
             tags: vec![
-                Some(UserTag { label: "lang".to_string(), value: "rust".to_string() }),
+                Some(UserTag {
+                    label: "lang".to_string(),
+                    value: "rust".to_string(),
+                }),
                 None,
             ],
         },
@@ -1412,8 +1523,14 @@ async fn test_tags_batch(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>
             name: "Batch Tag 3".to_string(),
             email: format!("batch.tag3.{}@example.com", timestamp),
             tags: vec![
-                Some(UserTag { label: "os".to_string(), value: "linux".to_string() }),
-                Some(UserTag { label: "editor".to_string(), value: "vim".to_string() }),
+                Some(UserTag {
+                    label: "os".to_string(),
+                    value: "linux".to_string(),
+                }),
+                Some(UserTag {
+                    label: "editor".to_string(),
+                    value: "vim".to_string(),
+                }),
             ],
         },
     ];

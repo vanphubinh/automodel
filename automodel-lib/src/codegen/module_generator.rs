@@ -1398,13 +1398,14 @@ fn generate_sqlx_value_extraction(output_col: &OutputColumn, _index: usize) -> S
         if output_col.rust_type.is_pg_array {
             // For jsonb[] columns: extract as Vec<Option<serde_json::Value>>, deserialize each element
             // The inner_type is already Vec<Option<T>>, extract the element type T
-            let element_type = if inner_type.starts_with("Vec<Option<") && inner_type.ends_with(">>") {
-                &inner_type[11..inner_type.len() - 2]
-            } else if inner_type.starts_with("Vec<") && inner_type.ends_with(">") {
-                &inner_type[4..inner_type.len() - 1]
-            } else {
-                inner_type.as_str()
-            };
+            let element_type =
+                if inner_type.starts_with("Vec<Option<") && inner_type.ends_with(">>") {
+                    &inner_type[11..inner_type.len() - 2]
+                } else if inner_type.starts_with("Vec<") && inner_type.ends_with(">") {
+                    &inner_type[4..inner_type.len() - 1]
+                } else {
+                    inner_type.as_str()
+                };
             // Note: sqlx may return jsonb null as Some(Value::Null) rather than None,
             // so we filter through .and_then() to normalize both to None
             if output_col.rust_type.is_nullable {
