@@ -112,6 +112,28 @@ async fn run_examples(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== Testing Batch Insert with Tags ===");
     test_tags_batch(pool).await?;
 
+    // ---- required jsonb[] column tests (Vec<Option<UserTag>>, NOT NULL) ----
+
+    // Test labels (required jsonb[] column) — basic set/get
+    println!("\n=== Testing Labels (required jsonb[] column) ===");
+    test_labels(pool).await?;
+
+    // Test labels with structured parameters
+    println!("\n=== Testing Labels with Structured Parameters ===");
+    test_labels_structured(pool).await?;
+
+    // Test labels with conditional diff
+    println!("\n=== Testing Labels with Conditional Diff ===");
+    test_labels_diff(pool).await?;
+
+    // Test labels with conditional (no diff)
+    println!("\n=== Testing Labels with Conditional ===");
+    test_labels_conditional(pool).await?;
+
+    // Test batch insert with labels
+    println!("\n=== Testing Batch Insert with Labels ===");
+    test_labels_batch(pool).await?;
+
     println!("\nTo see the actual generated code, check src/generated/ directory");
     println!("Functions are organized into modules: admin.rs, setup.rs, users.rs, and mod.rs");
     println!(
@@ -1560,5 +1582,334 @@ async fn test_tags_batch(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>
     println!("\n✓ Batch insert with jsonb[] test completed!");
     println!("  - UNNEST with jsonb[] column works via ARRAY(SELECT jsonb_array_elements(...))");
     println!("  - Null elements within jsonb[] arrays preserved across batch insert");
+    Ok(())
+}
+
+// ── Required jsonb[] column (labels) tests ────────────────────────
+
+/// Test: basic set/get for required jsonb[] column (NOT NULL, Vec<Option<UserTag>>)
+async fn test_labels(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::models::UserTag;
+
+    println!("Testing required jsonb[] column (Vec<Option<UserTag>>)...");
+    let timestamp = chrono::Utc::now().timestamp();
+
+    // Create a user first
+    let user = generated::users::insert_user(
+        pool,
+        "Labels Test".to_string(),
+        format!("labels.test.{}@example.com", timestamp),
+        25,
+        models::UserProfile {
+            bio: None,
+            avatar_url: None,
+            preferences: models::UserPreferences {
+                theme: "dark".to_string(),
+                language: "en".to_string(),
+                notifications_enabled: true,
+            },
+            social_links: vec![],
+        },
+    )
+    .await?;
+    println!("✓ Created user ID: {}", user.id);
+
+    // 1. Read default (should be empty array, NOT null)
+    let read = generated::users_array_fields::get_user_labels(pool, user.id).await?;
+    assert_eq!(read.labels.len(), 0);
+    println!("✓ Default labels: empty array (NOT NULL)");
+
+    // 2. Set labels with mixed Some/None elements
+    let labels = vec![
+        Some(UserTag {
+            label: "lang".to_string(),
+            value: "rust".to_string(),
+        }),
+        None,
+        Some(UserTag {
+            label: "role".to_string(),
+            value: "dev".to_string(),
+        }),
+    ];
+    let updated =
+        generated::users_array_fields::update_user_labels(pool, labels, user.id).await?;
+    assert_eq!(updated.labels.len(), 3);
+    assert!(updated.labels[0].is_some());
+    assert!(updated.labels[1].is_none());
+    assert!(updated.labels[2].is_some());
+    println!("✓ Set labels: [Some, None, Some] — null elements preserved");
+
+    // 3. Read back
+    let read = generated::users_array_fields::get_user_labels(pool, user.id).await?;
+    assert_eq!(read.labels.len(), 3);
+    assert_eq!(read.labels[0].as_ref().unwrap().label, "lang");
+    assert!(read.labels[1].is_none());
+    assert_eq!(read.labels[2].as_ref().unwrap().label, "role");
+    println!("✓ Read back: values and nulls correct");
+
+    // 4. Set to empty array
+    let updated2 =
+        generated::users_array_fields::update_user_labels(pool, vec![], user.id).await?;
+    assert_eq!(updated2.labels.len(), 0);
+    println!("✓ Set to empty array: len=0");
+
+    println!("\n✓ Required jsonb[] basic test completed!");
+    Ok(())
+}
+
+/// Test: parameters_type with required jsonb[] column
+async fn test_labels_structured(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::models::UserTag;
+
+    println!("Testing parameters_type with required jsonb[] column...");
+    let timestamp = chrono::Utc::now().timestamp();
+
+    let params = generated::users_array_fields::InsertUserLabelsStructuredParams {
+        name: "Labels Struct Test".to_string(),
+        email: format!("labels.struct.{}@example.com", timestamp),
+        labels: vec![
+            Some(UserTag {
+                label: "team".to_string(),
+                value: "backend".to_string(),
+            }),
+            None,
+        ],
+    };
+
+    let result =
+        generated::users_array_fields::insert_user_labels_structured(pool, &params).await?;
+    println!("✓ Inserted user ID: {}", result.id);
+    assert_eq!(result.labels.len(), 2);
+    assert_eq!(result.labels[0].as_ref().unwrap().label, "team");
+    assert!(result.labels[1].is_none());
+    println!("✓ Labels round-tripped through parameters_type: [Some, None]");
+
+    println!("\n✓ Structured parameters with required jsonb[] test completed!");
+    Ok(())
+}
+
+/// Test: conditions_type (diff) with required jsonb[] column
+async fn test_labels_diff(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::models::UserTag;
+
+    println!("Testing conditions_type (diff) with required jsonb[] column...");
+    let timestamp = chrono::Utc::now().timestamp();
+
+    // Create user
+    let user = generated::users::insert_user(
+        pool,
+        "Labels Diff Test".to_string(),
+        format!("labels.diff.{}@example.com", timestamp),
+        30,
+        models::UserProfile {
+            bio: None,
+            avatar_url: None,
+            preferences: models::UserPreferences {
+                theme: "dark".to_string(),
+                language: "en".to_string(),
+                notifications_enabled: true,
+            },
+            social_links: vec![],
+        },
+    )
+    .await?;
+
+    // Set initial labels
+    let initial_labels = vec![Some(UserTag {
+        label: "lang".to_string(),
+        value: "rust".to_string(),
+    })];
+    generated::users_array_fields::update_user_labels(pool, initial_labels.clone(), user.id)
+        .await?;
+    println!("✓ Created user ID: {} with initial labels", user.id);
+
+    let old = generated::users_array_fields::UpdateUserLabelsDiffParams {
+        name: "Labels Diff Test".to_string(),
+        labels: initial_labels,
+    };
+
+    // 1. Change only labels
+    let new_labels = vec![
+        Some(UserTag {
+            label: "lang".to_string(),
+            value: "go".to_string(),
+        }),
+        None,
+        Some(UserTag {
+            label: "os".to_string(),
+            value: "linux".to_string(),
+        }),
+    ];
+    let new = generated::users_array_fields::UpdateUserLabelsDiffParams {
+        name: "Labels Diff Test".to_string(),
+        labels: new_labels.clone(),
+    };
+    let updated =
+        generated::users_array_fields::update_user_labels_diff(pool, &old, &new, user.id).await?;
+    assert_eq!(updated.labels.len(), 3);
+    assert!(updated.labels[1].is_none());
+    println!("✓ Diff: changed labels only (name unchanged)");
+
+    // 2. No changes
+    let updated2 =
+        generated::users_array_fields::update_user_labels_diff(pool, &new, &new, user.id).await?;
+    assert_eq!(updated2.name, "Labels Diff Test");
+    println!("✓ Diff: no changes, returned current data");
+
+    println!("\n✓ Conditional diff with required jsonb[] test completed!");
+    Ok(())
+}
+
+/// Test: conditional (no struct) with required jsonb[] column
+async fn test_labels_conditional(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::models::UserTag;
+
+    println!("Testing conditional (non-diff) with required jsonb[] column...");
+    let timestamp = chrono::Utc::now().timestamp();
+
+    // Create user
+    let user = generated::users::insert_user(
+        pool,
+        "Labels Cond Test".to_string(),
+        format!("labels.cond.{}@example.com", timestamp),
+        28,
+        models::UserProfile {
+            bio: None,
+            avatar_url: None,
+            preferences: models::UserPreferences {
+                theme: "dark".to_string(),
+                language: "en".to_string(),
+                notifications_enabled: true,
+            },
+            social_links: vec![],
+        },
+    )
+    .await?;
+
+    // Set initial labels
+    generated::users_array_fields::update_user_labels(
+        pool,
+        vec![Some(UserTag {
+            label: "init".to_string(),
+            value: "true".to_string(),
+        })],
+        user.id,
+    )
+    .await?;
+    println!("✓ Created user ID: {} with initial labels", user.id);
+
+    // 1. Update only labels (name = None → skip)
+    let new_labels = vec![
+        Some(UserTag {
+            label: "updated".to_string(),
+            value: "yes".to_string(),
+        }),
+        None,
+    ];
+    let updated = generated::users_array_fields::update_user_labels_conditional(
+        pool,
+        None,
+        Some(new_labels),
+        user.id,
+    )
+    .await?;
+    assert_eq!(updated.name, "Labels Cond Test");
+    assert_eq!(updated.labels.len(), 2);
+    assert!(updated.labels[1].is_none());
+    println!("✓ Conditional: changed only labels, name skipped");
+
+    // 2. Update only name (labels = None → skip)
+    let updated2 = generated::users_array_fields::update_user_labels_conditional(
+        pool,
+        Some("Labels Cond Updated".to_string()),
+        None,
+        user.id,
+    )
+    .await?;
+    assert_eq!(updated2.name, "Labels Cond Updated");
+    assert_eq!(updated2.labels.len(), 2); // unchanged
+    println!("✓ Conditional: changed only name, labels skipped");
+
+    // 3. Update both
+    let both_labels = vec![Some(UserTag {
+        label: "final".to_string(),
+        value: "done".to_string(),
+    })];
+    let updated3 = generated::users_array_fields::update_user_labels_conditional(
+        pool,
+        Some("Labels Both Updated".to_string()),
+        Some(both_labels),
+        user.id,
+    )
+    .await?;
+    assert_eq!(updated3.name, "Labels Both Updated");
+    assert_eq!(updated3.labels.len(), 1);
+    println!("✓ Conditional: changed both name and labels");
+
+    println!("\n✓ Conditional with required jsonb[] test completed!");
+    Ok(())
+}
+
+/// Test: multiunzip batch insert with required jsonb[] column
+async fn test_labels_batch(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::models::UserTag;
+
+    println!("Testing multiunzip batch insert with required jsonb[] column...");
+    let timestamp = chrono::Utc::now().timestamp();
+
+    let items = vec![
+        generated::users_array_fields::InsertUsersBatchLabelsRecord {
+            name: "Batch Label 1".to_string(),
+            email: format!("batch.label1.{}@example.com", timestamp),
+            labels: vec![
+                Some(UserTag {
+                    label: "lang".to_string(),
+                    value: "rust".to_string(),
+                }),
+                None,
+            ],
+        },
+        generated::users_array_fields::InsertUsersBatchLabelsRecord {
+            name: "Batch Label 2".to_string(),
+            email: format!("batch.label2.{}@example.com", timestamp),
+            labels: vec![], // empty array
+        },
+        generated::users_array_fields::InsertUsersBatchLabelsRecord {
+            name: "Batch Label 3".to_string(),
+            email: format!("batch.label3.{}@example.com", timestamp),
+            labels: vec![
+                Some(UserTag {
+                    label: "os".to_string(),
+                    value: "linux".to_string(),
+                }),
+                Some(UserTag {
+                    label: "editor".to_string(),
+                    value: "vim".to_string(),
+                }),
+            ],
+        },
+    ];
+
+    let results = generated::users_array_fields::insert_users_batch_labels(pool, items).await?;
+    assert_eq!(results.len(), 3);
+
+    // User 1: [Some, None]
+    assert_eq!(results[0].labels.len(), 2);
+    assert!(results[0].labels[0].is_some());
+    assert!(results[0].labels[1].is_none());
+    println!("✓ User 1: [Some, None] — null element preserved in batch");
+
+    // User 2: empty array
+    assert_eq!(results[1].labels.len(), 0);
+    println!("✓ User 2: empty array []");
+
+    // User 3: [Some, Some]
+    assert_eq!(results[2].labels.len(), 2);
+    assert_eq!(results[2].labels[0].as_ref().unwrap().label, "os");
+    assert_eq!(results[2].labels[1].as_ref().unwrap().label, "editor");
+    println!("✓ User 3: [Some, Some]");
+
+    println!("\n✓ Batch insert with required jsonb[] test completed!");
+    println!("  - Required jsonb[] column (NOT NULL) produces Vec directly, no Option wrapper");
     Ok(())
 }
