@@ -25,8 +25,15 @@ pub struct SocialLink {
 }
 
 /// Social media link for top-level social_links column
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UserSocialLink {
     pub name: String,
     pub url: String,
+}
+
+/// Tag for top-level tags jsonb[] column
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct UserTag {
+    pub label: String,
+    pub value: String,
 }

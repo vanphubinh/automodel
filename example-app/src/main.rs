@@ -70,6 +70,48 @@ async fn run_examples(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== Testing Social Links with Custom Type Mapping ===");
     test_social_links(pool).await?;
 
+    // Test nullable social links
+    println!("\n=== Testing Nullable Social Links ===");
+    test_nullable_social_links(pool).await?;
+
+    // Test social links with structured parameters
+    println!("\n=== Testing Social Links with Structured Parameters ===");
+    test_social_links_structured(pool).await?;
+
+    // Test social links with conditional diff
+    println!("\n=== Testing Social Links with Conditional Diff ===");
+    test_social_links_diff(pool).await?;
+
+    // Test social links with conditional (no diff)
+    println!("\n=== Testing Social Links with Conditional ===");
+    test_social_links_conditional(pool).await?;
+
+    // Test batch insert with optional social links
+    println!("\n=== Testing Batch Insert with Optional Social Links ===");
+    test_social_links_batch(pool).await?;
+
+    // ---- jsonb[] column tests (Vec<Option<UserTag>>) ----
+
+    // Test tags (jsonb[] column) — basic set/get
+    println!("\n=== Testing Tags (jsonb[] column) ===");
+    test_tags(pool).await?;
+
+    // Test tags with structured parameters
+    println!("\n=== Testing Tags with Structured Parameters ===");
+    test_tags_structured(pool).await?;
+
+    // Test tags with conditional diff
+    println!("\n=== Testing Tags with Conditional Diff ===");
+    test_tags_diff(pool).await?;
+
+    // Test tags with conditional (no diff)
+    println!("\n=== Testing Tags with Conditional ===");
+    test_tags_conditional(pool).await?;
+
+    // Test batch insert with tags
+    println!("\n=== Testing Batch Insert with Tags ===");
+    test_tags_batch(pool).await?;
+
     println!("\nTo see the actual generated code, check src/generated/ directory");
     println!("Functions are organized into modules: admin.rs, setup.rs, users.rs, and mod.rs");
     println!(
@@ -825,5 +867,581 @@ async fn test_social_links(pool: &PgPool) -> Result<(), Box<dyn std::error::Erro
     println!("  - JSONB column automatically handles the JSON conversion");
     println!("  - Type safety is maintained throughout insert, update, and query operations");
 
+    Ok(())
+}
+
+async fn test_nullable_social_links(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::models::UserSocialLink;
+
+    println!("Testing nullable social links (Option<Vec<UserSocialLink>>)...");
+
+    let timestamp = chrono::Utc::now().timestamp();
+
+    // 1. Insert a user with social links
+    println!("\n1. Creating user with social links...");
+    let links = vec![
+        UserSocialLink {
+            name: "GitHub".to_string(),
+            url: "https://github.com/nulltest".to_string(),
+        },
+    ];
+    let user = generated::users::insert_user_with_social_links(
+        pool,
+        "Nullable Test".to_string(),
+        format!("nullable.social.{}@example.com", timestamp),
+        links.clone(),
+    )
+    .await?;
+    println!("✓ Created user ID: {}, social_links: {:?}", user.id, user.social_links);
+
+    // 2. Set social_links to NULL using nullable update
+    println!("\n2. Setting social_links to NULL...");
+    let nulled = generated::users_array_fields::update_user_social_links_nullable(
+        pool,
+        None,
+        user.id,
+    )
+    .await?;
+    println!("✓ After setting NULL: social_links = {:?}", nulled.social_links);
+    assert!(nulled.social_links.is_none(), "Expected None after setting NULL");
+
+    // 3. Read back and verify NULL
+    println!("\n3. Reading back to verify NULL...");
+    let read_back = generated::users::get_user_social_links(pool, user.id).await?;
+    println!("✓ Read back: social_links = {:?}", read_back.social_links);
+    assert!(read_back.social_links.is_none(), "Expected None on read back");
+
+    // 4. Set social_links back to Some(vec)
+    println!("\n4. Setting social_links back to Some(vec)...");
+    let restored_links = vec![
+        UserSocialLink {
+            name: "Twitter".to_string(),
+            url: "https://twitter.com/restored".to_string(),
+        },
+        UserSocialLink {
+            name: "Website".to_string(),
+            url: "https://restored.example.com".to_string(),
+        },
+    ];
+    let restored = generated::users_array_fields::update_user_social_links_nullable(
+        pool,
+        Some(restored_links.clone()),
+        user.id,
+    )
+    .await?;
+    println!("✓ Restored: social_links = {:?}", restored.social_links);
+    assert!(restored.social_links.is_some(), "Expected Some after restore");
+    assert_eq!(restored.social_links.as_ref().unwrap().len(), 2);
+
+    // 5. Verify restored value
+    println!("\n5. Verifying restored value...");
+    let verified = generated::users::get_user_social_links(pool, user.id).await?;
+    let verified_links = verified.social_links.expect("Expected Some");
+    assert_eq!(verified_links.len(), 2);
+    println!("✓ Verified: {} links", verified_links.len());
+    for link in &verified_links {
+        println!("    - {}: {}", link.name, link.url);
+    }
+
+    println!("\n✓ Nullable social links test completed!");
+    println!("  - Option<Vec<UserSocialLink>> correctly handles NULL ↔ Some transitions");
+    println!("  - JSONB column accepts both NULL and valid JSON arrays");
+
+    Ok(())
+}
+
+/// Test: parameters_type with Vec<CustomStruct> JSONB field
+async fn test_social_links_structured(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::models::UserSocialLink;
+
+    println!("Testing parameters_type with JSONB custom type...");
+    let timestamp = chrono::Utc::now().timestamp();
+
+    let params = generated::users_array_fields::InsertUserSocialLinksStructuredParams {
+        name: "Structured Test".to_string(),
+        email: format!("structured.social.{}@example.com", timestamp),
+        social_links: vec![
+            UserSocialLink { name: "GitHub".to_string(), url: "https://github.com/structured".to_string() },
+            UserSocialLink { name: "Blog".to_string(), url: "https://blog.structured.dev".to_string() },
+        ],
+    };
+
+    let result = generated::users_array_fields::insert_user_social_links_structured(pool, &params).await?;
+    println!("✓ Inserted user ID: {}", result.id);
+    let links = result.social_links.expect("Expected Some social_links");
+    assert_eq!(links.len(), 2);
+    assert_eq!(links[0].name, "GitHub");
+    assert_eq!(links[1].name, "Blog");
+    println!("✓ Social links correctly round-tripped through parameters_type struct");
+
+    println!("\n✓ Structured parameters with JSONB test completed!");
+    Ok(())
+}
+
+/// Test: conditions_type (diff) with Vec<CustomStruct> JSONB field
+async fn test_social_links_diff(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::models::UserSocialLink;
+
+    println!("Testing conditions_type (diff) with JSONB custom type...");
+    let timestamp = chrono::Utc::now().timestamp();
+
+    // Create a user first
+    let user = generated::users::insert_user_with_social_links(
+        pool,
+        "Diff Test".to_string(),
+        format!("diff.social.{}@example.com", timestamp),
+        vec![UserSocialLink { name: "GitHub".to_string(), url: "https://github.com/difftest".to_string() }],
+    ).await?;
+    println!("✓ Created user ID: {}", user.id);
+
+    let old = generated::users_array_fields::UpdateUserSocialLinksDiffParams {
+        name: "Diff Test".to_string(),
+        social_links: vec![UserSocialLink { name: "GitHub".to_string(), url: "https://github.com/difftest".to_string() }],
+    };
+
+    // 1. Change only social_links (name stays the same)
+    let new_links = vec![
+        UserSocialLink { name: "Twitter".to_string(), url: "https://twitter.com/difftest".to_string() },
+        UserSocialLink { name: "Website".to_string(), url: "https://difftest.dev".to_string() },
+    ];
+    let new = generated::users_array_fields::UpdateUserSocialLinksDiffParams {
+        name: "Diff Test".to_string(),
+        social_links: new_links.clone(),
+    };
+
+    let updated = generated::users_array_fields::update_user_social_links_diff(pool, &old, &new, user.id).await?;
+    let links = updated.social_links.expect("Expected Some");
+    assert_eq!(links.len(), 2);
+    assert_eq!(links[0].name, "Twitter");
+    println!("✓ Diff update changed social_links only (name unchanged)");
+
+    // 2. Change both name and social_links
+    let old2 = new.clone();
+    let new2 = generated::users_array_fields::UpdateUserSocialLinksDiffParams {
+        name: "Diff Test Updated".to_string(),
+        social_links: vec![UserSocialLink { name: "LinkedIn".to_string(), url: "https://linkedin.com/in/difftest".to_string() }],
+    };
+
+    let updated2 = generated::users_array_fields::update_user_social_links_diff(pool, &old2, &new2, user.id).await?;
+    assert_eq!(updated2.name, "Diff Test Updated");
+    let links2 = updated2.social_links.expect("Expected Some");
+    assert_eq!(links2.len(), 1);
+    assert_eq!(links2[0].name, "LinkedIn");
+    println!("✓ Diff update changed both name and social_links");
+
+    // 3. No changes (old == new) — should still return current data
+    let updated3 = generated::users_array_fields::update_user_social_links_diff(pool, &new2, &new2, user.id).await?;
+    assert_eq!(updated3.name, "Diff Test Updated");
+    println!("✓ Diff with no changes returned current data");
+
+    println!("\n✓ Conditional diff with JSONB test completed!");
+    Ok(())
+}
+
+/// Test: conditional (no struct) with Option<Vec<CustomStruct>> JSONB field
+async fn test_social_links_conditional(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::models::UserSocialLink;
+
+    println!("Testing conditional (non-diff) with optional JSONB custom type...");
+    let timestamp = chrono::Utc::now().timestamp();
+
+    // Create a user first
+    let user = generated::users::insert_user_with_social_links(
+        pool,
+        "Conditional Test".to_string(),
+        format!("conditional.social.{}@example.com", timestamp),
+        vec![UserSocialLink { name: "GitHub".to_string(), url: "https://github.com/condtest".to_string() }],
+    ).await?;
+    println!("✓ Created user ID: {}", user.id);
+
+    // 1. Update only social_links (name = None → skip)
+    let new_links = vec![
+        UserSocialLink { name: "Twitter".to_string(), url: "https://twitter.com/condtest".to_string() },
+    ];
+    let updated = generated::users_array_fields::update_user_social_links_conditional(
+        pool, None, Some(new_links), user.id,
+    ).await?;
+    assert_eq!(updated.name, "Conditional Test"); // name unchanged
+    let links = updated.social_links.expect("Expected Some");
+    assert_eq!(links[0].name, "Twitter");
+    println!("✓ Conditional update changed only social_links (name skipped)");
+
+    // 2. Update only name (social_links = None → skip)
+    let updated2 = generated::users_array_fields::update_user_social_links_conditional(
+        pool, Some("Conditional Updated".to_string()), None, user.id,
+    ).await?;
+    assert_eq!(updated2.name, "Conditional Updated");
+    let links2 = updated2.social_links.expect("Expected Some");
+    assert_eq!(links2[0].name, "Twitter"); // social_links unchanged
+    println!("✓ Conditional update changed only name (social_links skipped)");
+
+    // 3. Update both
+    let both_links = vec![
+        UserSocialLink { name: "LinkedIn".to_string(), url: "https://linkedin.com/in/condtest".to_string() },
+        UserSocialLink { name: "Blog".to_string(), url: "https://condtest.blog".to_string() },
+    ];
+    let updated3 = generated::users_array_fields::update_user_social_links_conditional(
+        pool, Some("Both Updated".to_string()), Some(both_links), user.id,
+    ).await?;
+    assert_eq!(updated3.name, "Both Updated");
+    let links3 = updated3.social_links.expect("Expected Some");
+    assert_eq!(links3.len(), 2);
+    println!("✓ Conditional update changed both name and social_links");
+
+    println!("\n✓ Conditional with JSONB test completed!");
+    Ok(())
+}
+
+/// Test: multiunzip batch insert with Option<Vec<CustomStruct>> JSONB field
+async fn test_social_links_batch(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::models::UserSocialLink;
+
+    println!("Testing multiunzip batch insert with optional JSONB custom type...");
+    let timestamp = chrono::Utc::now().timestamp();
+
+    let items = vec![
+        generated::users_array_fields::InsertUsersBatchSocialLinksRecord {
+            name: "Batch User 1".to_string(),
+            email: format!("batch1.social.{}@example.com", timestamp),
+            social_links: Some(vec![
+                UserSocialLink { name: "GitHub".to_string(), url: "https://github.com/batch1".to_string() },
+            ]),
+        },
+        generated::users_array_fields::InsertUsersBatchSocialLinksRecord {
+            name: "Batch User 2".to_string(),
+            email: format!("batch2.social.{}@example.com", timestamp),
+            social_links: None, // NULL social_links
+        },
+        generated::users_array_fields::InsertUsersBatchSocialLinksRecord {
+            name: "Batch User 3".to_string(),
+            email: format!("batch3.social.{}@example.com", timestamp),
+            social_links: Some(vec![
+                UserSocialLink { name: "Twitter".to_string(), url: "https://twitter.com/batch3".to_string() },
+                UserSocialLink { name: "Website".to_string(), url: "https://batch3.dev".to_string() },
+            ]),
+        },
+    ];
+
+    let results = generated::users_array_fields::insert_users_batch_social_links(pool, items).await?;
+    assert_eq!(results.len(), 3);
+
+    // User 1: has social links
+    let links1 = results[0].social_links.as_ref().expect("Expected Some for user 1");
+    assert_eq!(links1.len(), 1);
+    assert_eq!(links1[0].name, "GitHub");
+    println!("✓ User 1: {} link(s)", links1.len());
+
+    // User 2: NULL social links
+    assert!(results[1].social_links.is_none(), "Expected None for user 2");
+    println!("✓ User 2: NULL social_links");
+
+    // User 3: has social links
+    let links3 = results[2].social_links.as_ref().expect("Expected Some for user 3");
+    assert_eq!(links3.len(), 2);
+    assert_eq!(links3[0].name, "Twitter");
+    println!("✓ User 3: {} link(s)", links3.len());
+
+    println!("\n✓ Batch insert with optional JSONB test completed!");
+    println!("  - Vec<Record> with Option<Vec<CustomStruct>> correctly handles mixed NULL/Some values");
+    Ok(())
+}
+
+// ====================================================================
+// jsonb[] column tests — Vec<Option<UserTag>> (array of nullable JSONB)
+// ====================================================================
+
+/// Test: basic set/get for jsonb[] column
+async fn test_tags(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::models::UserTag;
+
+    println!("Testing jsonb[] column (Vec<Option<UserTag>>)...");
+    let timestamp = chrono::Utc::now().timestamp();
+
+    // Create a user first
+    let user = generated::users::insert_user(
+        pool,
+        "Tags Test".to_string(),
+        format!("tags.test.{}@example.com", timestamp),
+        25,
+        models::UserProfile {
+            bio: None,
+            avatar_url: None,
+            preferences: models::UserPreferences {
+                theme: "dark".to_string(),
+                language: "en".to_string(),
+                notifications_enabled: true,
+            },
+            social_links: vec![],
+        },
+    )
+    .await?;
+    println!("✓ Created user ID: {}", user.id);
+
+    // 1. Set tags with mixed Some/None elements
+    let tags = vec![
+        Some(UserTag { label: "lang".to_string(), value: "rust".to_string() }),
+        None, // null element in jsonb[]
+        Some(UserTag { label: "role".to_string(), value: "dev".to_string() }),
+    ];
+    let updated = generated::users_array_fields::update_user_tags(pool, tags, user.id).await?;
+    let result_tags = updated.tags.expect("Expected Some tags");
+    assert_eq!(result_tags.len(), 3);
+    assert!(result_tags[0].is_some());
+    assert!(result_tags[1].is_none());
+    assert!(result_tags[2].is_some());
+    println!("✓ Set tags: [Some, None, Some] — null elements preserved");
+
+    // 2. Read back
+    let read = generated::users_array_fields::get_user_tags(pool, user.id).await?;
+    let read_tags = read.tags.expect("Expected Some tags");
+    assert_eq!(read_tags.len(), 3);
+    assert_eq!(read_tags[0].as_ref().unwrap().label, "lang");
+    assert!(read_tags[1].is_none());
+    assert_eq!(read_tags[2].as_ref().unwrap().label, "role");
+    println!("✓ Read back: values and nulls correct");
+
+    // 3. Set to empty array
+    let updated2 = generated::users_array_fields::update_user_tags(pool, vec![], user.id).await?;
+    let empty_tags = updated2.tags.expect("Expected Some (empty array, not NULL)");
+    assert_eq!(empty_tags.len(), 0);
+    println!("✓ Set to empty array: len=0");
+
+    println!("\n✓ jsonb[] basic test completed!");
+    Ok(())
+}
+
+/// Test: parameters_type with jsonb[] column
+async fn test_tags_structured(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::models::UserTag;
+
+    println!("Testing parameters_type with jsonb[] column...");
+    let timestamp = chrono::Utc::now().timestamp();
+
+    let params = generated::users_array_fields::InsertUserTagsStructuredParams {
+        name: "Tags Struct Test".to_string(),
+        email: format!("tags.struct.{}@example.com", timestamp),
+        tags: vec![
+            Some(UserTag { label: "team".to_string(), value: "backend".to_string() }),
+            None,
+        ],
+    };
+
+    let result = generated::users_array_fields::insert_user_tags_structured(pool, &params).await?;
+    println!("✓ Inserted user ID: {}", result.id);
+    let tags = result.tags.expect("Expected Some tags");
+    assert_eq!(tags.len(), 2);
+    assert_eq!(tags[0].as_ref().unwrap().label, "team");
+    assert!(tags[1].is_none());
+    println!("✓ Tags round-tripped through parameters_type: [Some, None]");
+
+    println!("\n✓ Structured parameters with jsonb[] test completed!");
+    Ok(())
+}
+
+/// Test: conditions_type (diff) with jsonb[] column
+async fn test_tags_diff(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::models::UserTag;
+
+    println!("Testing conditions_type (diff) with jsonb[] column...");
+    let timestamp = chrono::Utc::now().timestamp();
+
+    // Create user with initial tags
+    let user = generated::users::insert_user(
+        pool,
+        "Tags Diff Test".to_string(),
+        format!("tags.diff.{}@example.com", timestamp),
+        30,
+        models::UserProfile {
+            bio: None,
+            avatar_url: None,
+            preferences: models::UserPreferences {
+                theme: "dark".to_string(),
+                language: "en".to_string(),
+                notifications_enabled: true,
+            },
+            social_links: vec![],
+        },
+    )
+    .await?;
+
+    // Set initial tags
+    let initial_tags = vec![
+        Some(UserTag { label: "lang".to_string(), value: "rust".to_string() }),
+    ];
+    generated::users_array_fields::update_user_tags(pool, initial_tags.clone(), user.id).await?;
+    println!("✓ Created user ID: {} with initial tags", user.id);
+
+    let old = generated::users_array_fields::UpdateUserTagsDiffParams {
+        name: "Tags Diff Test".to_string(),
+        tags: initial_tags,
+    };
+
+    // 1. Change only tags
+    let new_tags = vec![
+        Some(UserTag { label: "lang".to_string(), value: "go".to_string() }),
+        None,
+        Some(UserTag { label: "os".to_string(), value: "linux".to_string() }),
+    ];
+    let new = generated::users_array_fields::UpdateUserTagsDiffParams {
+        name: "Tags Diff Test".to_string(),
+        tags: new_tags.clone(),
+    };
+    let updated = generated::users_array_fields::update_user_tags_diff(pool, &old, &new, user.id).await?;
+    let tags = updated.tags.expect("Expected Some");
+    assert_eq!(tags.len(), 3);
+    assert!(tags[1].is_none());
+    println!("✓ Diff: changed tags only (name unchanged)");
+
+    // 2. No changes
+    let updated2 = generated::users_array_fields::update_user_tags_diff(pool, &new, &new, user.id).await?;
+    assert_eq!(updated2.name, "Tags Diff Test");
+    println!("✓ Diff: no changes, returned current data");
+
+    println!("\n✓ Conditional diff with jsonb[] test completed!");
+    Ok(())
+}
+
+/// Test: conditional (no struct) with jsonb[] column
+async fn test_tags_conditional(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::models::UserTag;
+
+    println!("Testing conditional (non-diff) with jsonb[] column...");
+    let timestamp = chrono::Utc::now().timestamp();
+
+    // Create user
+    let user = generated::users::insert_user(
+        pool,
+        "Tags Cond Test".to_string(),
+        format!("tags.cond.{}@example.com", timestamp),
+        28,
+        models::UserProfile {
+            bio: None,
+            avatar_url: None,
+            preferences: models::UserPreferences {
+                theme: "dark".to_string(),
+                language: "en".to_string(),
+                notifications_enabled: true,
+            },
+            social_links: vec![],
+        },
+    )
+    .await?;
+
+    // Set initial tags
+    generated::users_array_fields::update_user_tags(
+        pool,
+        vec![Some(UserTag { label: "init".to_string(), value: "true".to_string() })],
+        user.id,
+    )
+    .await?;
+    println!("✓ Created user ID: {} with initial tags", user.id);
+
+    // 1. Update only tags (name = None → skip)
+    let new_tags = vec![
+        Some(UserTag { label: "updated".to_string(), value: "yes".to_string() }),
+        None,
+    ];
+    let updated = generated::users_array_fields::update_user_tags_conditional(
+        pool,
+        None,
+        Some(new_tags),
+        user.id,
+    )
+    .await?;
+    assert_eq!(updated.name, "Tags Cond Test");
+    let tags = updated.tags.expect("Expected Some");
+    assert_eq!(tags.len(), 2);
+    assert!(tags[1].is_none());
+    println!("✓ Conditional: changed only tags, name skipped");
+
+    // 2. Update only name (tags = None → skip)
+    let updated2 = generated::users_array_fields::update_user_tags_conditional(
+        pool,
+        Some("Tags Cond Updated".to_string()),
+        None,
+        user.id,
+    )
+    .await?;
+    assert_eq!(updated2.name, "Tags Cond Updated");
+    let tags2 = updated2.tags.expect("Expected Some");
+    assert_eq!(tags2.len(), 2); // unchanged
+    println!("✓ Conditional: changed only name, tags skipped");
+
+    // 3. Update both
+    let both_tags = vec![
+        Some(UserTag { label: "final".to_string(), value: "done".to_string() }),
+    ];
+    let updated3 = generated::users_array_fields::update_user_tags_conditional(
+        pool,
+        Some("Tags Both Updated".to_string()),
+        Some(both_tags),
+        user.id,
+    )
+    .await?;
+    assert_eq!(updated3.name, "Tags Both Updated");
+    let tags3 = updated3.tags.expect("Expected Some");
+    assert_eq!(tags3.len(), 1);
+    println!("✓ Conditional: changed both name and tags");
+
+    println!("\n✓ Conditional with jsonb[] test completed!");
+    Ok(())
+}
+
+/// Test: multiunzip batch insert with jsonb[] column
+async fn test_tags_batch(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::models::UserTag;
+
+    println!("Testing multiunzip batch insert with jsonb[] column...");
+    let timestamp = chrono::Utc::now().timestamp();
+
+    let items = vec![
+        generated::users_array_fields::InsertUsersBatchTagsRecord {
+            name: "Batch Tag 1".to_string(),
+            email: format!("batch.tag1.{}@example.com", timestamp),
+            tags: vec![
+                Some(UserTag { label: "lang".to_string(), value: "rust".to_string() }),
+                None,
+            ],
+        },
+        generated::users_array_fields::InsertUsersBatchTagsRecord {
+            name: "Batch Tag 2".to_string(),
+            email: format!("batch.tag2.{}@example.com", timestamp),
+            tags: vec![], // empty array (not NULL)
+        },
+        generated::users_array_fields::InsertUsersBatchTagsRecord {
+            name: "Batch Tag 3".to_string(),
+            email: format!("batch.tag3.{}@example.com", timestamp),
+            tags: vec![
+                Some(UserTag { label: "os".to_string(), value: "linux".to_string() }),
+                Some(UserTag { label: "editor".to_string(), value: "vim".to_string() }),
+            ],
+        },
+    ];
+
+    let results = generated::users_array_fields::insert_users_batch_tags(pool, items).await?;
+    assert_eq!(results.len(), 3);
+
+    // User 1: [Some, None]
+    let tags1 = results[0].tags.as_ref().expect("Expected Some for user 1");
+    assert_eq!(tags1.len(), 2);
+    assert!(tags1[0].is_some());
+    assert!(tags1[1].is_none());
+    println!("✓ User 1: [Some, None] — null element preserved in batch");
+
+    // User 2: empty array
+    let tags2 = results[1].tags.as_ref().expect("Expected Some for user 2");
+    assert_eq!(tags2.len(), 0);
+    println!("✓ User 2: empty array []");
+
+    // User 3: [Some, Some]
+    let tags3 = results[2].tags.as_ref().expect("Expected Some for user 3");
+    assert_eq!(tags3.len(), 2);
+    assert_eq!(tags3[0].as_ref().unwrap().label, "os");
+    assert_eq!(tags3[1].as_ref().unwrap().label, "editor");
+    println!("✓ User 3: [Some, Some]");
+
+    println!("\n✓ Batch insert with jsonb[] test completed!");
+    println!("  - UNNEST with jsonb[] column works via ARRAY(SELECT jsonb_array_elements(...))");
+    println!("  - Null elements within jsonb[] arrays preserved across batch insert");
     Ok(())
 }

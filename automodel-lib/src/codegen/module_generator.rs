@@ -879,11 +879,20 @@ fn generate_static_function_body(
                 let rust_type_info = &type_info.input_types[i];
 
                 if rust_type_info.needs_json_wrapper {
-                    // For custom types in arrays, we need to serialize each element
-                    body.push_str(&format!(
-                        "    let {}_json: Result<Vec<serde_json::Value>, _> = {}.into_iter().map(|v| serde_json::to_value(&v)).collect();\n",
-                        var, var
-                    ));
+                    if rust_type_info.is_optional {
+                        // For optional custom types in arrays, each element is Option<T>
+                        // Map each element: None stays None, Some(v) becomes Some(to_value(v))
+                        body.push_str(&format!(
+                            "    let {}_json: Result<Vec<Option<serde_json::Value>>, _> = {}.into_iter().map(|v| v.map(|inner| serde_json::to_value(&inner)).transpose()).collect();\n",
+                            var, var
+                        ));
+                    } else {
+                        // For custom types in arrays, we need to serialize each element
+                        body.push_str(&format!(
+                            "    let {}_json: Result<Vec<serde_json::Value>, _> = {}.into_iter().map(|v| serde_json::to_value(&v)).collect();\n",
+                            var, var
+                        ));
+                    }
                     body.push_str(&format!(
                         "    let query = query.bind({}_json.map_err(|e| sqlx::Error::Encode(Box::new(e)))?);\n",
                         var
@@ -909,11 +918,30 @@ fn generate_static_function_body(
 
                 // Check if this is a custom type that needs JSON serialization
                 if rust_type_info.needs_json_wrapper {
-                    // For custom types, serialize to JSON before binding
-                    body.push_str(&format!(
-                        "    let query = query.bind(serde_json::to_value(&params.{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);\n", 
-                        clean_name
-                    ));
+                    if rust_type_info.is_pg_array {
+                        // For jsonb[] columns: serialize each element individually
+                        body.push_str(&format!(
+                            "    let {}_json: Vec<Option<serde_json::Value>> = params.{}.iter().map(|el| el.as_ref().map(|v| serde_json::to_value(v)).transpose().map_err(|e| sqlx::Error::Encode(Box::new(e)))).collect::<Result<_, _>>()?;\n",
+                            clean_name, clean_name
+                        ));
+                        body.push_str(&format!(
+                            "    let query = query.bind({}_json);\n",
+                            clean_name
+                        ));
+                    } else if rust_type_info.is_optional {
+                        // For optional custom types, map through Option to produce Option<serde_json::Value>
+                        // so that None becomes SQL NULL rather than JSON null
+                        body.push_str(&format!(
+                            "    let query = query.bind(params.{}.as_ref().map(|v| serde_json::to_value(v)).transpose().map_err(|e| sqlx::Error::Encode(Box::new(e)))?);\n",
+                            clean_name
+                        ));
+                    } else {
+                        // For custom types, serialize to JSON before binding
+                        body.push_str(&format!(
+                            "    let query = query.bind(serde_json::to_value(&params.{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);\n", 
+                            clean_name
+                        ));
+                    }
                 } else if param_type == "String" {
                     // Use reference for String parameters to avoid move issues
                     body.push_str(&format!(
@@ -949,11 +977,30 @@ fn generate_static_function_body(
 
                 // Check if this is a custom type that needs JSON serialization
                 if rust_type_info.needs_json_wrapper {
-                    // For custom types, serialize to JSON before binding
-                    body.push_str(&format!(
-                        "    let query = query.bind(serde_json::to_value(&{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);\n", 
-                        clean_name
-                    ));
+                    if rust_type_info.is_pg_array {
+                        // For jsonb[] columns: serialize each element individually
+                        body.push_str(&format!(
+                            "    let {}_json: Vec<Option<serde_json::Value>> = {}.iter().map(|el| el.as_ref().map(|v| serde_json::to_value(v)).transpose().map_err(|e| sqlx::Error::Encode(Box::new(e)))).collect::<Result<_, _>>()?;\n",
+                            clean_name, clean_name
+                        ));
+                        body.push_str(&format!(
+                            "    let query = query.bind({}_json);\n",
+                            clean_name
+                        ));
+                    } else if rust_type_info.is_optional {
+                        // For optional custom types, map through Option to produce Option<serde_json::Value>
+                        // so that None becomes SQL NULL rather than JSON null
+                        body.push_str(&format!(
+                            "    let query = query.bind({}.as_ref().map(|v| serde_json::to_value(v)).transpose().map_err(|e| sqlx::Error::Encode(Box::new(e)))?);\n",
+                            clean_name
+                        ));
+                    } else {
+                        // For custom types, serialize to JSON before binding
+                        body.push_str(&format!(
+                            "    let query = query.bind(serde_json::to_value(&{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);\n", 
+                            clean_name
+                        ));
+                    }
                 } else if param_type == "String" {
                     // Use reference for String parameters to avoid move issues
                     body.push_str(&format!("    let query = query.bind(&{});\n", clean_name));
@@ -1114,10 +1161,19 @@ fn generate_conditional_function_body(
             }) {
                 if let Some(rust_type_info) = type_info.input_types.get(param_index) {
                     if rust_type_info.needs_json_wrapper {
-                        if use_structured_params {
-                            body.push_str(&format!("    let {}_json = serde_json::to_value(&params.{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
+                        if rust_type_info.is_pg_array {
+                            // For jsonb[] columns: serialize each element individually
+                            if use_structured_params {
+                                body.push_str(&format!("    let {}_json: Vec<Option<serde_json::Value>> = params.{}.iter().map(|el| el.as_ref().map(|v| serde_json::to_value(v)).transpose().map_err(|e| sqlx::Error::Encode(Box::new(e)))).collect::<Result<_, _>>()?;\n", clean_param, clean_param));
+                            } else {
+                                body.push_str(&format!("    let {}_json: Vec<Option<serde_json::Value>> = {}.iter().map(|el| el.as_ref().map(|v| serde_json::to_value(v)).transpose().map_err(|e| sqlx::Error::Encode(Box::new(e)))).collect::<Result<_, _>>()?;\n", clean_param, clean_param));
+                            }
                         } else {
-                            body.push_str(&format!("    let {}_json = serde_json::to_value(&{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
+                            if use_structured_params {
+                                body.push_str(&format!("    let {}_json = serde_json::to_value(&params.{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
+                            } else {
+                                body.push_str(&format!("    let {}_json = serde_json::to_value(&{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
+                            }
                         }
                         body.push_str(&format!("    query = query.bind({}_json);\n", clean_param));
                     } else {
@@ -1158,15 +1214,26 @@ fn generate_conditional_function_body(
         }) {
             if let Some(rust_type_info) = type_info.input_types.get(param_index) {
                 if rust_type_info.needs_json_wrapper {
-                    if use_conditional_diff {
-                        // For conditions_type, use new.field directly
-                        body.push_str(&format!("        let {}_json = serde_json::to_value(&new.{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
-                    } else if use_structured_params {
-                        // For parameters_type, unwrap from params struct
-                        body.push_str(&format!("        let {}_json = serde_json::to_value(&params.{}.as_ref().unwrap()).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
+                    if rust_type_info.is_pg_array {
+                        // For jsonb[] columns: serialize each element individually
+                        if use_conditional_diff {
+                            body.push_str(&format!("        let {}_json: Vec<Option<serde_json::Value>> = new.{}.iter().map(|el| el.as_ref().map(|v| serde_json::to_value(v)).transpose().map_err(|e| sqlx::Error::Encode(Box::new(e)))).collect::<Result<_, _>>()?;\n", clean_param, clean_param));
+                        } else if use_structured_params {
+                            body.push_str(&format!("        let {}_json: Vec<Option<serde_json::Value>> = params.{}.as_ref().unwrap().iter().map(|el| el.as_ref().map(|v| serde_json::to_value(v)).transpose().map_err(|e| sqlx::Error::Encode(Box::new(e)))).collect::<Result<_, _>>()?;\n", clean_param, clean_param));
+                        } else {
+                            body.push_str(&format!("        let {}_json: Vec<Option<serde_json::Value>> = {}.as_ref().unwrap().iter().map(|el| el.as_ref().map(|v| serde_json::to_value(v)).transpose().map_err(|e| sqlx::Error::Encode(Box::new(e)))).collect::<Result<_, _>>()?;\n", clean_param, clean_param));
+                        }
                     } else {
-                        // For regular conditional, unwrap the Option
-                        body.push_str(&format!("        let {}_json = serde_json::to_value(&{}.as_ref().unwrap()).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
+                        if use_conditional_diff {
+                            // For conditions_type, use new.field directly
+                            body.push_str(&format!("        let {}_json = serde_json::to_value(&new.{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
+                        } else if use_structured_params {
+                            // For parameters_type, unwrap from params struct
+                            body.push_str(&format!("        let {}_json = serde_json::to_value(&params.{}.as_ref().unwrap()).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
+                        } else {
+                            // For regular conditional, unwrap the Option
+                            body.push_str(&format!("        let {}_json = serde_json::to_value(&{}.as_ref().unwrap()).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
+                        }
                     }
                     body.push_str(&format!(
                         "        query = query.bind({}_json);\n",
@@ -1328,7 +1395,33 @@ fn generate_sqlx_value_extraction(output_col: &OutputColumn, _index: usize) -> S
     if output_col.rust_type.needs_json_wrapper {
         // For custom types, we need to extract as serde_json::Value and then deserialize
         let inner_type = &output_col.rust_type.rust_type;
-        if output_col.rust_type.is_nullable {
+        if output_col.rust_type.is_pg_array {
+            // For jsonb[] columns: extract as Vec<Option<serde_json::Value>>, deserialize each element
+            // The inner_type is already Vec<Option<T>>, extract the element type T
+            let element_type = if inner_type.starts_with("Vec<Option<") && inner_type.ends_with(">>") {
+                &inner_type[11..inner_type.len() - 2]
+            } else if inner_type.starts_with("Vec<") && inner_type.ends_with(">") {
+                &inner_type[4..inner_type.len() - 1]
+            } else {
+                inner_type.as_str()
+            };
+            // Note: sqlx may return jsonb null as Some(Value::Null) rather than None,
+            // so we filter through .and_then() to normalize both to None
+            if output_col.rust_type.is_nullable {
+                format!(
+                    "row.try_get::<Option<Vec<Option<serde_json::Value>>>, _>(\"{}\")?
+            .map(|arr| arr.into_iter().map(|el| el.and_then(|v| if v.is_null() {{ None }} else {{ Some(v) }}).map(|v| serde_json::from_value::<{}>(v).map_err(|e| sqlx::Error::Decode(Box::new(e)))).transpose()).collect::<Result<Vec<_>, _>>())
+            .transpose()?",
+                    column_name, element_type
+                )
+            } else {
+                format!(
+                    "row.try_get::<Vec<Option<serde_json::Value>>, _>(\"{}\")?
+            .into_iter().map(|el| el.and_then(|v| if v.is_null() {{ None }} else {{ Some(v) }}).map(|v| serde_json::from_value::<{}>(v).map_err(|e| sqlx::Error::Decode(Box::new(e)))).transpose()).collect::<Result<Vec<_>, _>>()?",
+                    column_name, element_type
+                )
+            }
+        } else if output_col.rust_type.is_nullable {
             format!(
                 "row.try_get::<Option<serde_json::Value>, _>(\"{}\")?
             .map(|v| serde_json::from_value::<{}>(v)

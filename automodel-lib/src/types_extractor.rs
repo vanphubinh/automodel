@@ -46,6 +46,8 @@ pub struct RustType {
     pub is_nullable_elements: bool,
     /// Whether this is a custom type that needs JSON wrapper
     pub needs_json_wrapper: bool,
+    /// Whether the underlying PostgreSQL type is an array (e.g., jsonb[])
+    pub is_pg_array: bool,
     /// If this is an enum type, contains the enum variants
     pub enum_variants: Option<Vec<String>>,
     /// If this is an enum type, contains the original PostgreSQL type name
@@ -438,6 +440,7 @@ async fn extract_input_types(
                     is_optional: is_optional_param,
                     is_nullable_elements,
                     needs_json_wrapper: needs_wrapper,
+                    is_pg_array: param_type.name().starts_with('_'),
                     enum_variants: None,
                     pg_type_name: None,
                     composite_fields: None,
@@ -603,6 +606,7 @@ async fn extract_output_types(
                     is_optional: false,
                     is_nullable_elements: false,
                     needs_json_wrapper: needs_wrapper,
+                    is_pg_array: column.type_().name().starts_with('_'),
                     enum_variants: None,
                     pg_type_name: None,
                     composite_fields: None,
@@ -680,6 +684,7 @@ fn pg_type_to_rust_type<'a>(
                 is_optional: false,
                 is_nullable_elements: false,
                 needs_json_wrapper: false,
+                is_pg_array: false,
                 enum_variants: None,
                 pg_type_name: Some(pg_type.name().to_string()),
                 composite_fields: Some(composite_fields),
@@ -859,6 +864,7 @@ fn pg_type_to_rust_type<'a>(
                         is_optional: false,
                         is_nullable_elements: false,
                         needs_json_wrapper: false,
+                        is_pg_array: false,
                         enum_variants: Some(enum_info.variants),
                         pg_type_name: Some(enum_info.type_name), // Keep fully-qualified for SQL
                         composite_fields: None,
@@ -870,6 +876,7 @@ fn pg_type_to_rust_type<'a>(
                     is_optional: false,
                     is_nullable_elements: false,
                     needs_json_wrapper: false,
+                    is_pg_array: pg_type.name().starts_with('_'),
                     enum_variants: None,
                     pg_type_name: None,
                     composite_fields: None,
@@ -883,6 +890,7 @@ fn pg_type_to_rust_type<'a>(
             is_optional: false,
             is_nullable_elements: false,
             needs_json_wrapper: false,
+            is_pg_array: pg_type.name().starts_with('_'),
             enum_variants: None,
             pg_type_name: None,
             composite_fields: None,

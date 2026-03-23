@@ -368,12 +368,14 @@ pub struct FindUsersByNameAndAgeItem {
 ///   Options: Inlining true, Optimization true, Expressions true, Deforming true
 /// 
 /// === find_users_by_name_and_age (variant 1) ===
-/// Index Scan using idx_users_age_updated_at on users
-///   Index Cond: (age >= 0)
+/// Bitmap Heap Scan on users
+///   Recheck Cond: (age >= 0)
 ///   Filter: (((name)::text ~~* 'dummy'::text) AND ((name)::text = 'dummy'::text))
+///   ->  Bitmap Index Scan on idx_users_age
+///         Index Cond: (age >= 0)
 /// 
 /// === find_users_by_name_and_age (variant 2) ===
-/// Index Scan using idx_users_age_updated_at on users
+/// Index Scan using idx_users_age on users
 ///   Index Cond: (age <= 0)
 ///   Filter: (((name)::text ~~* 'dummy'::text) AND ((name)::text = 'dummy'::text))
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, age \nFROM public.users \nWHERE name ILIKE #{name_pattern} \n#[AND age >= #{min_age?}] \nAND name = #{name_exact} \n#[AND age <= #{max_age?}] \nORDER BY name"))]
@@ -610,8 +612,10 @@ pub struct SearchUsersAdvancedItem {
 /// === search_users_advanced (variant 2) ===
 /// Sort
 ///   Sort Key: created_at DESC
-///   ->  Index Scan using idx_users_age_updated_at on users
-///         Index Cond: (age >= 0)
+///   ->  Bitmap Heap Scan on users
+///         Recheck Cond: (age >= 0)
+///         ->  Bitmap Index Scan on idx_users_age
+///               Index Cond: (age >= 0)
 /// 
 /// === search_users_advanced (variant 3) ===
 /// Sort
@@ -1155,6 +1159,7 @@ pub struct GetAllUsersWithStarItem {
     pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
     pub referrer_id: Option<i32>,
     pub social_links: Option<serde_json::Value>,
+    pub tags: Option<Vec<serde_json::Value>>,
 }
 
 /// Get all public.users using SELECT * to fetch all columns
@@ -1191,6 +1196,7 @@ pub async fn get_all_users_with_star(executor: impl sqlx::Executor<'_, Database 
         updated_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("updated_at")?,
         referrer_id: row.try_get::<Option<i32>, _>("referrer_id")?,
         social_links: row.try_get::<Option<serde_json::Value>, _>("social_links")?,
+        tags: row.try_get::<Option<Vec<serde_json::Value>>, _>("tags")?,
     })
     }).collect();
     result.map_err(Into::into)
@@ -1210,6 +1216,7 @@ pub struct GetUserByIdWithStarItem {
     pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
     pub referrer_id: Option<i32>,
     pub social_links: Option<serde_json::Value>,
+    pub tags: Option<Vec<serde_json::Value>>,
 }
 
 /// Get a single user by ID using SELECT * to fetch all columns
@@ -1245,6 +1252,7 @@ pub async fn get_user_by_id_with_star(executor: impl sqlx::Executor<'_, Database
         updated_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("updated_at")?,
         referrer_id: row.try_get::<Option<i32>, _>("referrer_id")?,
         social_links: row.try_get::<Option<serde_json::Value>, _>("social_links")?,
+        tags: row.try_get::<Option<Vec<serde_json::Value>>, _>("tags")?,
     })
             })();
             result.map(Some).map_err(Into::into)
@@ -1269,9 +1277,9 @@ pub struct GetUserByIdAndEmailItem {
 /// Get a user by ID and email - generates GetUserByIdAndEmailParams struct and GetUserByIdAndEmailItem return struct
 ///
 /// Query Plan:
-/// Index Scan using users_email_key on users
-///   Index Cond: ((email)::text = 'dummy'::text)
-///   Filter: (id = 0)
+/// Index Scan using users_pkey on users
+///   Index Cond: (id = 0)
+///   Filter: ((email)::text = 'dummy'::text)
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email \nFROM public.users \nWHERE id = #{id} AND email = #{email}"))]
 pub async fn get_user_by_id_and_email(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, params: &GetUserByIdAndEmailParams) -> Result<Option<GetUserByIdAndEmailItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
@@ -1798,9 +1806,9 @@ pub async fn search_user_details(executor: impl sqlx::Executor<'_, Database = sq
 /// Find user by criteria - uses GetUserByIdAndEmailParams for params and UserSummary for return
 ///
 /// Query Plan:
-/// Index Scan using users_email_key on users
-///   Index Cond: ((email)::text = 'dummy'::text)
-///   Filter: (id = 0)
+/// Index Scan using users_pkey on users
+///   Index Cond: (id = 0)
+///   Filter: ((email)::text = 'dummy'::text)
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email \nFROM public.users \nWHERE id = #{id} AND email = #{email}"))]
 pub async fn find_user_by_criteria(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, params: &GetUserByIdAndEmailParams) -> Result<Option<UserSummary>, super::ErrorReadOnly> {
     let query = sqlx::query(
@@ -2272,6 +2280,7 @@ pub struct Users {
     pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
     pub referrer_id: Option<i32>,
     pub social_links: Option<serde_json::Value>,
+    pub tags: Option<Vec<serde_json::Value>>,
 }
 
 impl sqlx::Type<sqlx::Postgres> for Users {
@@ -2296,6 +2305,7 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Users {
             updated_at: decoder.try_decode()?,
             referrer_id: decoder.try_decode()?,
             social_links: decoder.try_decode()?,
+            tags: decoder.try_decode()?,
         })
     }
 }
