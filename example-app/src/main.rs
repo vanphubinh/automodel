@@ -1631,8 +1631,7 @@ async fn test_labels(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
             value: "dev".to_string(),
         }),
     ];
-    let updated =
-        generated::users_array_fields::update_user_labels(pool, labels, user.id).await?;
+    let updated = generated::users_array_fields::update_user_labels(pool, labels, user.id).await?;
     assert_eq!(updated.labels.len(), 3);
     assert!(updated.labels[0].is_some());
     assert!(updated.labels[1].is_none());
@@ -1648,8 +1647,7 @@ async fn test_labels(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
     println!("✓ Read back: values and nulls correct");
 
     // 4. Set to empty array
-    let updated2 =
-        generated::users_array_fields::update_user_labels(pool, vec![], user.id).await?;
+    let updated2 = generated::users_array_fields::update_user_labels(pool, vec![], user.id).await?;
     assert_eq!(updated2.labels.len(), 0);
     println!("✓ Set to empty array: len=0");
 

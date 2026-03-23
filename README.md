@@ -1413,6 +1413,83 @@ let inserted = insert_posts_batch(&client, posts).await?;
 println!("Inserted {} posts", inserted.len());
 
 ```
+
+### Array Columns in Batch Inserts (jsonb[], text[], etc.)
+
+PostgreSQL's `UNNEST` flattens multidimensional arrays. This means you **cannot** pass `jsonb[][]` or `text[][]` to insert into a column of type `jsonb[]` or `text[]` — `UNNEST` would flatten the nested arrays into individual elements instead of producing one array per row.
+
+The workaround is to pass each row's array value as a single `jsonb` (a JSON array), then reconstruct the PostgreSQL array in SQL using `jsonb_array_elements`:
+
+**For nullable array columns** (`jsonb[] DEFAULT NULL`):
+```sql
+-- @automodel
+--    expect: multiple
+--    multiunzip: true
+--    types:
+--      tags: "Vec<Option<crate::models::UserTag>>"
+--      public.users.tags: "Vec<Option<crate::models::UserTag>>"
+-- @end
+INSERT INTO public.users (name, email, tags)
+SELECT name, email,
+    CASE WHEN tags IS NULL THEN NULL
+    ELSE ARRAY(SELECT jsonb_array_elements(tags)) END
+FROM UNNEST(
+        #{name}::text [],
+        #{email}::text [],
+        #{tags}::jsonb []
+    ) AS t(name, email, tags)
+RETURNING id, name, email, tags;
+```
+
+**For required array columns** (`jsonb[] NOT NULL`):
+```sql
+-- @automodel
+--    expect: multiple
+--    multiunzip: true
+--    types:
+--      labels: "Vec<Option<crate::models::UserTag>>"
+--      public.users.labels: "Vec<Option<crate::models::UserTag>>"
+-- @end
+INSERT INTO public.users (name, email, labels)
+SELECT name, email,
+    ARRAY(SELECT jsonb_array_elements(labels))
+FROM UNNEST(
+        #{name}::text [],
+        #{email}::text [],
+        #{labels}::jsonb []
+    ) AS t(name, email, labels)
+RETURNING id, name, email, labels;
+```
+
+**How it works:**
+
+1. The generated Rust code automatically serializes each row's array value to a `jsonb` value (a JSON array like `[{"label":"rust"},{"label":"go"}]`) — this is transparent to the caller
+2. `UNNEST` on `jsonb[]` yields one `jsonb` scalar per row — no flattening
+3. `ARRAY(SELECT jsonb_array_elements(tags))` reconstructs the `jsonb[]` from the JSON array
+4. For nullable columns, the `CASE WHEN ... IS NULL THEN NULL` guard preserves SQL NULLs
+
+The `types:` annotation maps both the parameter and output column to your custom Rust type (e.g. `Vec<Option<crate::models::UserTag>>`). AutoModel handles serialization/deserialization of each element individually.
+
+> **Why not `jsonb[][]`?** PostgreSQL requires uniform sub-array lengths in multidimensional arrays and `UNNEST` flattens all dimensions. These constraints make `type[][]` unusable for variable-length per-row arrays.
+
+**For plain `text[]` columns** (using `jsonb_array_elements_text` to reconstruct):
+```sql
+-- @automodel
+--    expect: multiple
+--    multiunzip: true
+-- @end
+INSERT INTO public.items (name, tags)
+SELECT name,
+    ARRAY(SELECT jsonb_array_elements_text(tags))::text[]
+FROM UNNEST(
+        #{name}::text [],
+        #{tags}::jsonb []
+    ) AS t(name, tags)
+RETURNING id, name, tags;
+```
+
+The pattern is the same as for `jsonb[]` — in the SQL, the parameter is declared as `jsonb[]` so that UNNEST receives flat scalars. AutoModel's generated code automatically serializes the Rust `Vec<String>` values to JSON arrays before binding, so the conversion is transparent to the caller. On the SQL side, `jsonb_array_elements_text()` extracts `text` values from each JSON array, and `ARRAY(...)::text[]` reconstructs the `text[]` column.
+
 ## Upsert Pattern (INSERT ... ON CONFLICT)
 
 PostgreSQL's `ON CONFLICT` clause allows you to handle conflicts when inserting data, enabling "upsert" operations (insert if new, update if exists). AutoModel fully supports this pattern for both single-row and batch operations.
@@ -1922,6 +1999,16 @@ All types support PostgreSQL arrays with automatic mapping to `Vec<T>`:
 ### Custom Enum Types
 
 PostgreSQL custom enums are automatically detected and mapped to generated Rust enums with proper encoding/decoding support. See the Configuration Options section for details on enum handling.
+
+## Disabling Formatting of Generated Code
+
+AutoModel emits a `// @generated` marker in the first few lines of every generated file. To prevent `rustfmt` from reformatting generated code, add this to your workspace `rustfmt.toml`:
+
+```toml
+format_generated_files = false
+```
+
+When this option is set, `rustfmt` skips any file that contains `@generated` in its first five lines. See the [rustfmt documentation](https://rust-lang.github.io/rustfmt/?version=v1.6.0&search=#format_generated_files) for details.
 
 ## Requirements
 
