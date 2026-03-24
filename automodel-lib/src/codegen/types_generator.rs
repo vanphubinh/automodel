@@ -309,10 +309,7 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for {} {{
 
         for field in composite_fields {
             let field_name = to_snake_case(&field.name);
-            structs.push_str(&format!(
-                "        encoder.encode(&self.{})?;\n",
-                field_name
-            ));
+            structs.push_str(&format!("        encoder.encode(&self.{})?;\n", field_name));
         }
 
         structs.push_str(
@@ -661,7 +658,8 @@ pub fn generate_input_composite_structs(
             rt.clone()
         };
 
-        let struct_code = generate_composite_type_struct(&element_rt, custom_derives, emitted_struct_names);
+        let struct_code =
+            generate_composite_type_struct(&element_rt, custom_derives, emitted_struct_names);
         if !struct_code.is_empty() {
             all_structs.push_str(&struct_code);
             all_structs.push('\n');

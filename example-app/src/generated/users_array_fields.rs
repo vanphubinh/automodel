@@ -1450,3 +1450,114 @@ pub async fn insert_users_batch_labels(executor: impl sqlx::Executor<'_, Databas
     result.map_err(Into::into)
 }
 
+/// Constraint violations specific to this query
+#[derive(Debug, Clone)]
+pub enum InsertUsersBulkCompositeConstraints {
+    /// Constraint: users_email_key on table users
+    UsersEmailKey,
+    /// Constraint: users_pkey on table users
+    UsersPkey,
+    /// Constraint: users_referrer_id_fkey on table users
+    UsersReferrerIdFkey,
+    /// Constraint: users_id_not_null on table users
+    UsersIdNotNull,
+    /// Constraint: users_name_not_null on table users
+    UsersNameNotNull,
+    /// Constraint: users_email_not_null on table users
+    UsersEmailNotNull,
+    /// Constraint: users_labels_not_null on table users
+    UsersLabelsNotNull,
+}
+
+impl TryFrom<super::ErrorConstraintInfo> for InsertUsersBulkCompositeConstraints {
+    type Error = ();
+
+    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
+        match info.constraint_name.as_str() {
+            "users_email_key" => Ok(Self::UsersEmailKey),
+            "users_pkey" => Ok(Self::UsersPkey),
+            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
+            "users_id_not_null" => Ok(Self::UsersIdNotNull),
+            "users_name_not_null" => Ok(Self::UsersNameNotNull),
+            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
+            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UserWithLinksInput {
+    pub name: Option<String>,
+    pub email: Option<String>,
+    pub social_links: Option<serde_json::Value>,
+}
+
+impl sqlx::Type<sqlx::Postgres> for UserWithLinksInput {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        sqlx::postgres::PgTypeInfo::with_name("user_with_links_input")
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for UserWithLinksInput {
+    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
+        let mut decoder = sqlx::postgres::types::PgRecordDecoder::new(value)?;
+        Ok(Self {
+            name: decoder.try_decode()?,
+            email: decoder.try_decode()?,
+            social_links: decoder.try_decode()?,
+        })
+    }
+}
+
+impl<'q> sqlx::Encode<'q, sqlx::Postgres> for UserWithLinksInput {
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync + 'static>> {
+        let mut encoder = sqlx::postgres::types::PgRecordEncoder::new(buf);
+        encoder.encode(&self.name)?;
+        encoder.encode(&self.email)?;
+        encoder.encode(&self.social_links)?;
+        encoder.finish();
+        Ok(sqlx::encode::IsNull::No)
+    }
+}
+
+impl sqlx::postgres::PgHasArrayType for UserWithLinksInput {
+    fn array_type_info() -> sqlx::postgres::PgTypeInfo {
+        sqlx::postgres::PgTypeInfo::with_name("_user_with_links_input")
+    }
+}
+
+
+#[derive(Debug, Clone)]
+pub struct InsertUsersBulkCompositeItem {
+    pub id: i32,
+    pub name: String,
+    pub email: String,
+    pub social_links: Option<Vec<crate::models::UserSocialLink>>,
+}
+
+/// Bulk insert users with social links using composite type UNNEST
+#[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.users (name, email, social_links)\nSELECT r.name, r.email, r.social_links\nFROM UNNEST(#{items}::public.user_with_links_input[]) AS r(name, email, social_links)\nRETURNING id, name, email, social_links"))]
+pub async fn insert_users_bulk_composite(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, items: Vec<UserWithLinksInput>) -> Result<Vec<InsertUsersBulkCompositeItem>, super::Error<InsertUsersBulkCompositeConstraints>> {
+    let query = sqlx::query(
+        r"INSERT INTO public.users (name, email, social_links)
+        SELECT r.name, r.email, r.social_links
+        FROM UNNEST($1::public.user_with_links_input[]) AS r(name, email, social_links)
+        RETURNING id, name, email, social_links"
+    );
+    let query = query.bind(items);
+    let rows = query.fetch_all(executor).await?;
+    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
+        Ok(InsertUsersBulkCompositeItem {
+        id: row.try_get::<i32, _>("id")?,
+        name: row.try_get::<String, _>("name")?,
+        email: row.try_get::<String, _>("email")?,
+        social_links: row.try_get::<Option<serde_json::Value>, _>("social_links")?
+            .map(|v| serde_json::from_value::<Vec<crate::models::UserSocialLink>>(v)
+            .map_err(|e| sqlx::Error::Decode(Box::new(e))))
+            .transpose()?,
+    })
+    }).collect();
+    result.map_err(Into::into)
+}
+

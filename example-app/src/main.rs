@@ -134,6 +134,10 @@ async fn run_examples(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== Testing Batch Insert with Labels ===");
     test_labels_batch(pool).await?;
 
+    // Test bulk insert with social links using composite type UNNEST
+    println!("\n=== Testing Bulk Insert Social Links (Composite UNNEST) ===");
+    test_social_links_composite_unnest(pool).await?;
+
     // Test composite type input (bulk insert via UNNEST with composite array)
     println!("\n=== Testing Composite Type Input (UNNEST) ===");
     test_widgets_composite_input(pool).await?;
@@ -1916,6 +1920,89 @@ async fn test_labels_batch(pool: &PgPool) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
+async fn test_social_links_composite_unnest(
+    pool: &PgPool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use crate::models::UserSocialLink;
+
+    println!("Testing composite type UNNEST bulk insert (alternative to multiunzip)...");
+    let timestamp = chrono::Utc::now().timestamp();
+
+    let items = vec![
+        generated::users_array_fields::UserWithLinksInput {
+            name: Some("Composite User 1".to_string()),
+            email: Some(format!("composite1.{}@example.com", timestamp)),
+            social_links: Some(
+                serde_json::to_value(&vec![
+                    UserSocialLink {
+                        name: "GitHub".to_string(),
+                        url: "https://github.com/composite1".to_string(),
+                    },
+                    UserSocialLink {
+                        name: "LinkedIn".to_string(),
+                        url: "https://linkedin.com/in/composite1".to_string(),
+                    },
+                ])
+                .unwrap(),
+            ),
+        },
+        generated::users_array_fields::UserWithLinksInput {
+            name: Some("Composite User 2".to_string()),
+            email: Some(format!("composite2.{}@example.com", timestamp)),
+            social_links: None, // NULL social_links
+        },
+        generated::users_array_fields::UserWithLinksInput {
+            name: Some("Composite User 3".to_string()),
+            email: Some(format!("composite3.{}@example.com", timestamp)),
+            social_links: Some(
+                serde_json::to_value(&vec![UserSocialLink {
+                    name: "Website".to_string(),
+                    url: "https://composite3.dev".to_string(),
+                }])
+                .unwrap(),
+            ),
+        },
+    ];
+
+    let results =
+        generated::users_array_fields::insert_users_bulk_composite(pool, items).await?;
+    assert_eq!(results.len(), 3);
+
+    // User 1: has 2 social links
+    let links1 = results[0]
+        .social_links
+        .as_ref()
+        .expect("Expected Some for user 1");
+    assert_eq!(links1.len(), 2);
+    assert_eq!(links1[0].name, "GitHub");
+    assert_eq!(links1[1].name, "LinkedIn");
+    println!(
+        "✓ User 1: {} link(s) via composite UNNEST",
+        links1.len()
+    );
+
+    // User 2: NULL social links
+    assert!(
+        results[1].social_links.is_none(),
+        "Expected None for user 2"
+    );
+    println!("✓ User 2: NULL social_links via composite UNNEST");
+
+    // User 3: has 1 social link
+    let links3 = results[2]
+        .social_links
+        .as_ref()
+        .expect("Expected Some for user 3");
+    assert_eq!(links3.len(), 1);
+    assert_eq!(links3[0].name, "Website");
+    println!("✓ User 3: {} link(s) via composite UNNEST", links3.len());
+
+    println!("\n✓ Composite type UNNEST bulk insert test completed!");
+    println!("  - Single Vec<CompositeType> parameter instead of multiunzip arrays");
+    println!("  - JSONB fields within composite types work correctly");
+    Ok(())
+}
+
 async fn test_widgets_composite_input(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
     println!("Demonstrating composite type input parameters...");
 
@@ -1945,12 +2032,21 @@ async fn test_widgets_composite_input(pool: &PgPool) -> Result<(), Box<dyn std::
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].name, "Widget-A");
     assert!(results[0].metadata.is_some());
-    assert_eq!(results[0].metadata.as_ref().unwrap().color, Some("red".to_string()));
+    assert_eq!(
+        results[0].metadata.as_ref().unwrap().color,
+        Some("red".to_string())
+    );
     assert_eq!(results[0].metadata.as_ref().unwrap().version, Some(1));
     assert!(results[1].metadata.is_none());
-    println!("✓ Inserted {} widgets via table composite type", results.len());
+    println!(
+        "✓ Inserted {} widgets via table composite type",
+        results.len()
+    );
     for r in &results {
-        println!("  id={}, name={}, weight={:?}, metadata={:?}", r.id, r.name, r.weight, r.metadata);
+        println!(
+            "  id={}, name={}, weight={:?}, metadata={:?}",
+            r.id, r.name, r.weight, r.metadata
+        );
     }
 
     // Test 2: Bulk insert using custom composite type (public.widget_input[]) with nested metadata
@@ -1975,11 +2071,20 @@ async fn test_widgets_composite_input(pool: &PgPool) -> Result<(), Box<dyn std::
     assert_eq!(results2.len(), 2);
     assert_eq!(results2[0].name, "Custom-X");
     assert!(results2[0].metadata.is_some());
-    assert_eq!(results2[0].metadata.as_ref().unwrap().color, Some("blue".to_string()));
+    assert_eq!(
+        results2[0].metadata.as_ref().unwrap().color,
+        Some("blue".to_string())
+    );
     assert!(results2[1].metadata.is_none());
-    println!("✓ Inserted {} widgets via custom composite type", results2.len());
+    println!(
+        "✓ Inserted {} widgets via custom composite type",
+        results2.len()
+    );
     for r in &results2 {
-        println!("  id={}, name={}, weight={:?}, metadata={:?}", r.id, r.name, r.weight, r.metadata);
+        println!(
+            "  id={}, name={}, weight={:?}, metadata={:?}",
+            r.id, r.name, r.weight, r.metadata
+        );
     }
 
     // Test 3: Insert a single widget using singular composite parameter (not an array)
@@ -1997,10 +2102,16 @@ async fn test_widgets_composite_input(pool: &PgPool) -> Result<(), Box<dyn std::
     assert_eq!(result3.name, "Single-Z");
     assert_eq!(result3.weight, Some(42.0));
     assert!(result3.metadata.is_some());
-    assert_eq!(result3.metadata.as_ref().unwrap().color, Some("green".to_string()));
+    assert_eq!(
+        result3.metadata.as_ref().unwrap().color,
+        Some("green".to_string())
+    );
     assert_eq!(result3.metadata.as_ref().unwrap().version, Some(7));
     println!("✓ Inserted single widget via singular composite type");
-    println!("  id={}, name={}, weight={:?}, metadata={:?}", result3.id, result3.name, result3.weight, result3.metadata);
+    println!(
+        "  id={}, name={}, weight={:?}, metadata={:?}",
+        result3.id, result3.name, result3.weight, result3.metadata
+    );
 
     // Test 4: Get all widgets to verify
     println!("\n4. Fetching all widgets...");

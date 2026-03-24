@@ -1490,6 +1490,100 @@ RETURNING id, name, tags;
 
 The pattern is the same as for `jsonb[]` — in the SQL, the parameter is declared as `jsonb[]` so that UNNEST receives flat scalars. AutoModel's generated code automatically serializes the Rust `Vec<String>` values to JSON arrays before binding, so the conversion is transparent to the caller. On the SQL side, `jsonb_array_elements_text()` extracts `text` values from each JSON array, and `ARRAY(...)::text[]` reconstructs the `text[]` column.
 
+### UNNEST with Composite Types
+
+As an alternative to the `multiunzip` pattern (where each column is a separate array parameter), you can use **PostgreSQL composite types** with UNNEST. Instead of passing N separate arrays in the SQL, you pass a single array of a composite (row) type. AutoModel auto-generates the corresponding Rust struct with `Encode`, `Decode`, `Type`, and `PgHasArrayType` implementations.
+
+From the caller's perspective, both approaches look the same — you pass a `Vec<SomeStruct>` and get results back. The difference is in how the SQL query is written and what happens under the hood: `multiunzip` splits the struct into separate arrays internally, while composite types bind a single typed array directly to PostgreSQL.
+
+**When to prefer composite types over multiunzip:**
+- Your input rows have nested structure (e.g., composite fields within composites)
+- You don't want the `itertools` / `many-unzip` crate dependency
+- No `multiunzip: true` metadata is needed — the composite type is detected automatically
+- You want to leverage PostgreSQL's type system for input validation
+
+**Step 1: Define a composite type in PostgreSQL:**
+
+```sql
+CREATE TYPE public.user_with_links_input AS (
+    name TEXT,
+    email TEXT,
+    social_links JSONB
+);
+```
+
+**Step 2: Write the query using the composite type array:**
+
+`queries/users_array_fields/insert_users_bulk_composite.sql`:
+```sql
+-- @automodel
+--    description: Bulk insert users with social links using composite type UNNEST
+--    expect: multiple
+--    types:
+--      public.users.social_links: "Vec<crate::models::UserSocialLink>"
+-- @end
+
+INSERT INTO public.users (name, email, social_links)
+SELECT r.name, r.email, r.social_links
+FROM UNNEST(#{items}::public.user_with_links_input[]) AS r(name, email, social_links)
+RETURNING id, name, email, social_links
+```
+
+No `multiunzip: true` is needed. AutoModel detects the composite type from the `::public.user_with_links_input[]` cast and generates:
+
+```rust
+// Auto-generated composite type struct with sqlx trait impls
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UserWithLinksInput {
+    pub name: Option<String>,
+    pub email: Option<String>,
+    pub social_links: Option<serde_json::Value>,
+}
+
+// Function accepts a single Vec of the composite type
+pub async fn insert_users_bulk_composite(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    items: Vec<UserWithLinksInput>,
+) -> Result<Vec<InsertUsersBulkCompositeItem>, super::Error<InsertUsersBulkCompositeConstraints>>
+```
+
+**Step 3: Use in Rust code:**
+
+```rust
+use crate::models::UserSocialLink;
+
+let items = vec![
+    UserWithLinksInput {
+        name: Some("Alice".to_string()),
+        email: Some("alice@example.com".to_string()),
+        social_links: Some(serde_json::to_value(&vec![
+            UserSocialLink { name: "GitHub".to_string(), url: "https://github.com/alice".to_string() },
+        ]).unwrap()),
+    },
+    UserWithLinksInput {
+        name: Some("Bob".to_string()),
+        email: Some("bob@example.com".to_string()),
+        social_links: None, // NULL social_links
+    },
+];
+
+let results = insert_users_bulk_composite(&pool, items).await?;
+```
+
+**Comparison: multiunzip vs composite type UNNEST**
+
+| Aspect | `multiunzip: true` | Composite type |
+|--------|-------------------|----------------|
+| Rust caller API | `Vec<Record>` | `Vec<CompositeType>` (same feel) |
+| SQL parameter style | Separate arrays: `#{name}::text[], #{email}::text[]` | Single array: `#{items}::composite_type[]` |
+| Under the hood | Struct split into arrays via `multiunzip()` | Array of composite bound directly to PG |
+| Requires DDL | No (uses built-in types) | Yes (`CREATE TYPE`) |
+| Metadata config | `multiunzip: true` | None (auto-detected) |
+| Nested composites | Not supported | Supported (composites within composites) |
+| Dependencies | `itertools` or `many-unzip` crate | None |
+
+Both approaches produce the same result — efficient bulk inserts via a single `INSERT ... SELECT * FROM UNNEST(...)` statement.
+
 ## Upsert Pattern (INSERT ... ON CONFLICT)
 
 PostgreSQL's `ON CONFLICT` clause allows you to handle conflicts when inserting data, enabling "upsert" operations (insert if new, update if exists). AutoModel fully supports this pattern for both single-row and batch operations.

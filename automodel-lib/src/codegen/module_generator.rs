@@ -1,9 +1,8 @@
 use crate::codegen::types_generator::{
     generate_conditional_diff_params, generate_conditional_diff_struct, generate_enum_definition,
     generate_input_composite_structs, generate_input_params_with_names,
-    generate_multiunzip_input_struct, generate_multiunzip_param,
-    generate_result_struct_with_name, generate_return_type, generate_structured_params_signature,
-    generate_structured_params_struct,
+    generate_multiunzip_input_struct, generate_multiunzip_param, generate_result_struct_with_name,
+    generate_return_type, generate_structured_params_signature, generate_structured_params_struct,
 };
 use crate::query_definition::{ExpectedResult, QueryDefinition, TelemetryLevel};
 use crate::query_definition_rt::QueryDefinitionRuntime;
