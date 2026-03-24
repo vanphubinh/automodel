@@ -1,6 +1,7 @@
 use crate::codegen::types_generator::{
     generate_conditional_diff_params, generate_conditional_diff_struct, generate_enum_definition,
-    generate_input_params_with_names, generate_multiunzip_input_struct, generate_multiunzip_param,
+    generate_input_composite_structs, generate_input_params_with_names,
+    generate_multiunzip_input_struct, generate_multiunzip_param,
     generate_result_struct_with_name, generate_return_type, generate_structured_params_signature,
     generate_structured_params_struct,
 };
@@ -545,6 +546,18 @@ pub fn generate_function_code_without_enums(
         _ => (false, None),
     };
 
+    // Generate composite type structs for any input parameters that are composite or array-of-composite
+    {
+        let composite_structs = generate_input_composite_structs(
+            &type_info.input_types,
+            &query.parameters_type_derives,
+            emitted_struct_names,
+        );
+        if !composite_structs.is_empty() {
+            code.push_str(&composite_structs);
+        }
+    }
+
     // Generate input struct for multiunzip if needed
     if use_multiunzip {
         let struct_name = format!("{}Record", to_pascal_case(&query.name));
@@ -622,6 +635,7 @@ pub fn generate_function_code_without_enums(
                 &result_struct_name,
                 &type_info.output_types,
                 &query.return_type_derives,
+                emitted_struct_names,
             ) {
                 code.push_str(&struct_def);
                 code.push('\n');

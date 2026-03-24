@@ -134,6 +134,10 @@ async fn run_examples(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== Testing Batch Insert with Labels ===");
     test_labels_batch(pool).await?;
 
+    // Test composite type input (bulk insert via UNNEST with composite array)
+    println!("\n=== Testing Composite Type Input (UNNEST) ===");
+    test_widgets_composite_input(pool).await?;
+
     println!("\nTo see the actual generated code, check src/generated/ directory");
     println!("Functions are organized into modules: admin.rs, setup.rs, users.rs, and mod.rs");
     println!(
@@ -1909,5 +1913,103 @@ async fn test_labels_batch(pool: &PgPool) -> Result<(), Box<dyn std::error::Erro
 
     println!("\n✓ Batch insert with required jsonb[] test completed!");
     println!("  - Required jsonb[] column (NOT NULL) produces Vec directly, no Option wrapper");
+    Ok(())
+}
+
+async fn test_widgets_composite_input(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Demonstrating composite type input parameters...");
+
+    // Test 1: Bulk insert using table composite type (public.widgets[]) with nested metadata
+    println!("\n1. Inserting widgets using table composite type with nested metadata...");
+    let table_items = vec![
+        generated::widgets::Widgets {
+            id: 0,
+            name: "Widget-A".to_string(),
+            weight: Some(3.14),
+            metadata: Some(generated::widgets::WidgetMetadata {
+                color: Some("red".to_string()),
+                version: Some(1),
+            }),
+            created_at: None,
+        },
+        generated::widgets::Widgets {
+            id: 0,
+            name: "Widget-B".to_string(),
+            weight: Some(2.72),
+            metadata: None, // nullable nested composite
+            created_at: None,
+        },
+    ];
+
+    let results = generated::widgets::insert_widgets_bulk(pool, table_items).await?;
+    assert_eq!(results.len(), 2);
+    assert_eq!(results[0].name, "Widget-A");
+    assert!(results[0].metadata.is_some());
+    assert_eq!(results[0].metadata.as_ref().unwrap().color, Some("red".to_string()));
+    assert_eq!(results[0].metadata.as_ref().unwrap().version, Some(1));
+    assert!(results[1].metadata.is_none());
+    println!("✓ Inserted {} widgets via table composite type", results.len());
+    for r in &results {
+        println!("  id={}, name={}, weight={:?}, metadata={:?}", r.id, r.name, r.weight, r.metadata);
+    }
+
+    // Test 2: Bulk insert using custom composite type (public.widget_input[]) with nested metadata
+    println!("\n2. Inserting widgets using custom composite type with nested metadata...");
+    let custom_items = vec![
+        generated::widgets::WidgetInput {
+            name: Some("Custom-X".to_string()),
+            weight: Some(9.81),
+            metadata: Some(generated::widgets::WidgetMetadata {
+                color: Some("blue".to_string()),
+                version: Some(3),
+            }),
+        },
+        generated::widgets::WidgetInput {
+            name: Some("Custom-Y".to_string()),
+            weight: None,
+            metadata: None,
+        },
+    ];
+
+    let results2 = generated::widgets::insert_widgets_custom_type(pool, custom_items).await?;
+    assert_eq!(results2.len(), 2);
+    assert_eq!(results2[0].name, "Custom-X");
+    assert!(results2[0].metadata.is_some());
+    assert_eq!(results2[0].metadata.as_ref().unwrap().color, Some("blue".to_string()));
+    assert!(results2[1].metadata.is_none());
+    println!("✓ Inserted {} widgets via custom composite type", results2.len());
+    for r in &results2 {
+        println!("  id={}, name={}, weight={:?}, metadata={:?}", r.id, r.name, r.weight, r.metadata);
+    }
+
+    // Test 3: Insert a single widget using singular composite parameter (not an array)
+    println!("\n3. Inserting a single widget using singular composite parameter...");
+    let single_item = generated::widgets::WidgetInput {
+        name: Some("Single-Z".to_string()),
+        weight: Some(42.0),
+        metadata: Some(generated::widgets::WidgetMetadata {
+            color: Some("green".to_string()),
+            version: Some(7),
+        }),
+    };
+
+    let result3 = generated::widgets::insert_widget_single(pool, single_item).await?;
+    assert_eq!(result3.name, "Single-Z");
+    assert_eq!(result3.weight, Some(42.0));
+    assert!(result3.metadata.is_some());
+    assert_eq!(result3.metadata.as_ref().unwrap().color, Some("green".to_string()));
+    assert_eq!(result3.metadata.as_ref().unwrap().version, Some(7));
+    println!("✓ Inserted single widget via singular composite type");
+    println!("  id={}, name={}, weight={:?}, metadata={:?}", result3.id, result3.name, result3.weight, result3.metadata);
+
+    // Test 4: Get all widgets to verify
+    println!("\n4. Fetching all widgets...");
+    let all_widgets = generated::widgets::get_all_widgets(pool).await?;
+    println!("✓ Total widgets in database: {}", all_widgets.len());
+
+    println!("\n✓ Composite type input test completed!");
+    println!("  - Table composite array (widgets[]): bulk insert with nested metadata");
+    println!("  - Custom composite array (widget_input[]): bulk insert with nested metadata");
+    println!("  - Singular composite (widget_input): single insert with nested metadata");
     Ok(())
 }

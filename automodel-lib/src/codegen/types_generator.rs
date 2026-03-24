@@ -207,16 +207,28 @@ impl<'q> sqlx::Encode<'q, sqlx::Postgres> for {} {{
 }
 
 /// Generate struct definitions for composite types (recursively)
-fn generate_composite_type_struct(rust_type: &RustType, custom_derives: &[String]) -> String {
+/// Includes sqlx::Type, sqlx::Decode, and sqlx::Encode implementations
+/// Uses `emitted` set to avoid generating the same struct twice in one module.
+fn generate_composite_type_struct(
+    rust_type: &RustType,
+    custom_derives: &[String],
+    emitted: &mut std::collections::HashSet<String>,
+) -> String {
     let mut structs = String::new();
 
     if let Some(composite_fields) = &rust_type.composite_fields {
+        // Skip if already emitted
+        if emitted.contains(&rust_type.rust_type) {
+            return structs;
+        }
+
         // First, generate any nested composite types
         for field in composite_fields {
             if field.rust_type.composite_fields.is_some() {
                 structs.push_str(&generate_composite_type_struct(
                     &field.rust_type,
                     custom_derives,
+                    emitted,
                 ));
                 structs.push('\n');
             }
@@ -247,8 +259,7 @@ fn generate_composite_type_struct(rust_type: &RustType, custom_derives: &[String
 
         structs.push_str("}\n\n");
 
-        // Add sqlx Type and Decode implementations for composite types
-        // Uses PgRecordDecoder to decode PostgreSQL composite types (same as tuples)
+        // Add sqlx Type, Decode, and Encode implementations for composite types
         let struct_name = &rust_type.rust_type;
         let pg_type_name = rust_type
             .pg_type_name
@@ -286,6 +297,46 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for {} {{
 
 "#
         ));
+
+        // Generate Encode implementation using PgRecordEncoder
+        structs.push_str(&format!(
+            r#"impl<'q> sqlx::Encode<'q, sqlx::Postgres> for {} {{
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync + 'static>> {{
+        let mut encoder = sqlx::postgres::types::PgRecordEncoder::new(buf);
+"#,
+            struct_name
+        ));
+
+        for field in composite_fields {
+            let field_name = to_snake_case(&field.name);
+            structs.push_str(&format!(
+                "        encoder.encode(&self.{})?;\n",
+                field_name
+            ));
+        }
+
+        structs.push_str(
+            r#"        encoder.finish();
+        Ok(sqlx::encode::IsNull::No)
+    }
+}
+
+"#,
+        );
+
+        // Generate PgHasArrayType implementation so Vec<T> can be used as a bind parameter
+        structs.push_str(&format!(
+            r#"impl sqlx::postgres::PgHasArrayType for {} {{
+    fn array_type_info() -> sqlx::postgres::PgTypeInfo {{
+        sqlx::postgres::PgTypeInfo::with_name("_{}")
+    }}
+}}
+
+"#,
+            struct_name, pg_type_name
+        ));
+
+        emitted.insert(rust_type.rust_type.clone());
     }
 
     structs
@@ -296,6 +347,7 @@ pub fn generate_result_struct_with_name(
     struct_name: &str,
     output_types: &[OutputColumn],
     custom_derives: &[String],
+    emitted_struct_names: &mut std::collections::HashSet<String>,
 ) -> Option<String> {
     if output_types.is_empty() {
         return None;
@@ -309,6 +361,7 @@ pub fn generate_result_struct_with_name(
             all_structs.push_str(&generate_composite_type_struct(
                 &col.rust_type,
                 custom_derives,
+                emitted_struct_names,
             ));
             all_structs.push('\n');
         }
@@ -557,4 +610,63 @@ pub fn generate_structured_params_signature(
         format!("{}Params", to_pascal_case(query_name))
     };
     format!("params: &{}", struct_name)
+}
+
+/// Generate composite type structs for input parameters that are composite or array-of-composite types.
+/// For array-of-composite (e.g., Vec<Widgets>), generates a struct for the element type.
+/// For direct composite (e.g., Widgets), generates the struct directly.
+/// Returns the generated code and a list of struct names that were generated.
+pub fn generate_input_composite_structs(
+    input_types: &[RustType],
+    custom_derives: &[String],
+    emitted_struct_names: &mut std::collections::HashSet<String>,
+) -> String {
+    let mut all_structs = String::new();
+
+    for rt in input_types {
+        if rt.composite_fields.is_none() {
+            continue;
+        }
+
+        // Determine the element struct name
+        let element_struct_name = if rt.is_pg_array {
+            // For Vec<Widgets>, extract element type name from pg_type_name
+            rt.pg_type_name
+                .as_ref()
+                .map(|n| to_pascal_case(n))
+                .unwrap_or_else(|| rt.rust_type.clone())
+        } else {
+            rt.rust_type.clone()
+        };
+
+        // Skip if already generated
+        if emitted_struct_names.contains(&element_struct_name) {
+            continue;
+        }
+
+        // Create an element-level RustType for struct generation
+        let element_rt = if rt.is_pg_array {
+            RustType {
+                rust_type: element_struct_name.clone(),
+                is_nullable: false,
+                is_optional: false,
+                is_nullable_elements: false,
+                needs_json_wrapper: false,
+                is_pg_array: false,
+                enum_variants: None,
+                pg_type_name: rt.pg_type_name.clone(),
+                composite_fields: rt.composite_fields.clone(),
+            }
+        } else {
+            rt.clone()
+        };
+
+        let struct_code = generate_composite_type_struct(&element_rt, custom_derives, emitted_struct_names);
+        if !struct_code.is_empty() {
+            all_structs.push_str(&struct_code);
+            all_structs.push('\n');
+        }
+    }
+
+    all_structs
 }

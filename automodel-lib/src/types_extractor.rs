@@ -634,6 +634,63 @@ fn pg_type_to_rust_type<'a>(
     is_nullable: bool,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<RustType>> + 'a + Send>> {
     Box::pin(async move {
+        // Check if this is an array type with a composite element type
+        // Handles patterns like $1::widgets[] or $1::widget_input[]
+        // where the parameter is an array of a composite (table or custom) type
+        if let PgKind::Array(element_type) = pg_type.kind() {
+            if let PgKind::Composite(fields) = element_type.kind() {
+                // Query nullability for the composite element type's fields
+                let nullability_map = if let Ok(rows) = client
+                    .query(
+                        "SELECT a.attname, NOT a.attnotnull as is_nullable 
+                         FROM pg_type t
+                         JOIN pg_attribute a ON a.attrelid = t.typrelid
+                         WHERE t.oid = $1 AND a.attnum > 0 AND NOT a.attisdropped
+                         ORDER BY a.attnum",
+                        &[&element_type.oid()],
+                    )
+                    .await
+                {
+                    rows.iter()
+                        .map(|row| {
+                            let name: String = row.get(0);
+                            let nullable: bool = row.get(1);
+                            (name, nullable)
+                        })
+                        .collect::<std::collections::HashMap<String, bool>>()
+                } else {
+                    std::collections::HashMap::new()
+                };
+
+                let mut composite_fields = Vec::new();
+                for field in fields {
+                    let field_name = field.name().to_string();
+                    let is_field_nullable =
+                        nullability_map.get(&field_name).copied().unwrap_or(true);
+                    let field_type =
+                        pg_type_to_rust_type(client, field.type_(), is_field_nullable).await?;
+                    composite_fields.push(CompositeField {
+                        name: field_name,
+                        rust_type: field_type,
+                    });
+                }
+
+                let element_type_name = to_pascal_case(element_type.name());
+
+                return Ok(RustType {
+                    rust_type: format!("Vec<{}>", element_type_name),
+                    is_nullable,
+                    is_optional: false,
+                    is_nullable_elements: false,
+                    needs_json_wrapper: false,
+                    is_pg_array: true,
+                    enum_variants: None,
+                    pg_type_name: Some(element_type.name().to_string()),
+                    composite_fields: Some(composite_fields),
+                });
+            }
+        }
+
         // Check if this is a composite type using kind()
         // This works for named composite types (table types, CREATE TYPE, etc.)
         // but NOT for anonymous RECORD types from ROW() constructors
@@ -1071,35 +1128,42 @@ pub fn convert_named_params_to_positional(sql: &str) -> (String, Vec<String>) {
     }
 }
 
-/// Extract all unique enum types from input and output types
+/// Recursively collect enum types from a RustType (including nested composite fields)
+fn collect_enums_from_rust_type(
+    rust_type: &RustType,
+    enum_types: &mut std::collections::HashMap<String, (Vec<String>, String)>,
+) {
+    if let Some(ref variants) = rust_type.enum_variants {
+        if let Some(ref pg_type_name) = rust_type.pg_type_name {
+            enum_types.insert(
+                rust_type.rust_type.clone(),
+                (variants.clone(), pg_type_name.clone()),
+            );
+        }
+    }
+    // Recurse into composite fields
+    if let Some(ref composite_fields) = rust_type.composite_fields {
+        for field in composite_fields {
+            collect_enums_from_rust_type(&field.rust_type, enum_types);
+        }
+    }
+}
+
+/// Extract all unique enum types from input and output types (recursively including composite fields)
 pub fn extract_enum_types(
     input_types: &[RustType],
     output_types: &[OutputColumn],
 ) -> Vec<(String, Vec<String>, String)> {
     let mut enum_types = std::collections::HashMap::new();
 
-    // Check input types for enums
+    // Check input types for enums (including nested in composites)
     for input_type in input_types {
-        if let Some(ref variants) = input_type.enum_variants {
-            if let Some(ref pg_type_name) = input_type.pg_type_name {
-                enum_types.insert(
-                    input_type.rust_type.clone(),
-                    (variants.clone(), pg_type_name.clone()),
-                );
-            }
-        }
+        collect_enums_from_rust_type(input_type, &mut enum_types);
     }
 
-    // Check output types for enums
+    // Check output types for enums (including nested in composites)
     for output_col in output_types {
-        if let Some(ref variants) = output_col.rust_type.enum_variants {
-            if let Some(ref pg_type_name) = output_col.rust_type.pg_type_name {
-                enum_types.insert(
-                    output_col.rust_type.rust_type.clone(),
-                    (variants.clone(), pg_type_name.clone()),
-                );
-            }
-        }
+        collect_enums_from_rust_type(&output_col.rust_type, &mut enum_types);
     }
 
     enum_types
@@ -1123,6 +1187,30 @@ pub async fn create_dummy_params(
     let mut special_params: Vec<(usize, String, String)> = Vec::new(); // (param_index, type_name, value)
 
     for param_type in param_types {
+        // Check if this is an array of composite type (e.g., widgets[])
+        if let PgKind::Array(element_type) = param_type.kind() {
+            if let PgKind::Composite(_) = element_type.kind() {
+                special_params.push((
+                    dummy_params.len(),
+                    format!("{}[]", element_type.name()),
+                    "{}".to_string(),
+                ));
+                dummy_params.push(Box::new("COMPOSITE_ARRAY_PLACEHOLDER".to_string()));
+                continue;
+            }
+        }
+
+        // Check if this is a direct composite type (e.g., widgets)
+        if let PgKind::Composite(_) = param_type.kind() {
+            special_params.push((
+                dummy_params.len(),
+                param_type.name().to_string(),
+                "NULL".to_string(),
+            ));
+            dummy_params.push(Box::new("COMPOSITE_PLACEHOLDER".to_string()));
+            continue;
+        }
+
         // Check if this is an enum type and get actual enum values
         if let Ok(Some(enum_info)) = get_enum_type_info(client, param_type.oid()).await {
             special_params.push((

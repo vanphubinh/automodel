@@ -381,11 +381,11 @@ pub struct FindUsersByNameAndAgeItem {
 /// Bitmap Heap Scan on users
 ///   Recheck Cond: (age >= 0)
 ///   Filter: (((name)::text ~~* 'dummy'::text) AND ((name)::text = 'dummy'::text))
-///   ->  Bitmap Index Scan on idx_users_age
+///   ->  Bitmap Index Scan on idx_users_age_updated_at
 ///         Index Cond: (age >= 0)
 /// 
 /// === find_users_by_name_and_age (variant 2) ===
-/// Index Scan using idx_users_age on users
+/// Index Scan using idx_users_age_updated_at on users
 ///   Index Cond: (age <= 0)
 ///   Filter: (((name)::text ~~* 'dummy'::text) AND ((name)::text = 'dummy'::text))
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, age \nFROM public.users \nWHERE name ILIKE #{name_pattern} \n#[AND age >= #{min_age?}] \nAND name = #{name_exact} \n#[AND age <= #{max_age?}] \nORDER BY name"))]
@@ -624,7 +624,7 @@ pub struct SearchUsersAdvancedItem {
 ///   Sort Key: created_at DESC
 ///   ->  Bitmap Heap Scan on users
 ///         Recheck Cond: (age >= 0)
-///         ->  Bitmap Index Scan on idx_users_age
+///         ->  Bitmap Index Scan on idx_users_age_updated_at
 ///               Index Cond: (age >= 0)
 /// 
 /// === search_users_advanced (variant 3) ===
@@ -1303,9 +1303,9 @@ pub struct GetUserByIdAndEmailItem {
 /// Get a user by ID and email - generates GetUserByIdAndEmailParams struct and GetUserByIdAndEmailItem return struct
 ///
 /// Query Plan:
-/// Index Scan using users_pkey on users
-///   Index Cond: (id = 0)
-///   Filter: ((email)::text = 'dummy'::text)
+/// Index Scan using users_email_key on users
+///   Index Cond: ((email)::text = 'dummy'::text)
+///   Filter: (id = 0)
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email \nFROM public.users \nWHERE id = #{id} AND email = #{email}"))]
 pub async fn get_user_by_id_and_email(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, params: &GetUserByIdAndEmailParams) -> Result<Option<GetUserByIdAndEmailItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
@@ -1844,9 +1844,9 @@ pub async fn search_user_details(executor: impl sqlx::Executor<'_, Database = sq
 /// Find user by criteria - uses GetUserByIdAndEmailParams for params and UserSummary for return
 ///
 /// Query Plan:
-/// Index Scan using users_pkey on users
-///   Index Cond: (id = 0)
-///   Filter: ((email)::text = 'dummy'::text)
+/// Index Scan using users_email_key on users
+///   Index Cond: ((email)::text = 'dummy'::text)
+///   Filter: (id = 0)
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email \nFROM public.users \nWHERE id = #{id} AND email = #{email}"))]
 pub async fn find_user_by_criteria(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, params: &GetUserByIdAndEmailParams) -> Result<Option<UserSummary>, super::ErrorReadOnly> {
     let query = sqlx::query(
@@ -2359,6 +2359,34 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Users {
             tags: decoder.try_decode()?,
             labels: decoder.try_decode()?,
         })
+    }
+}
+
+impl<'q> sqlx::Encode<'q, sqlx::Postgres> for Users {
+    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync + 'static>> {
+        let mut encoder = sqlx::postgres::types::PgRecordEncoder::new(buf);
+        encoder.encode(&self.id)?;
+        encoder.encode(&self.name)?;
+        encoder.encode(&self.email)?;
+        encoder.encode(&self.status)?;
+        encoder.encode(&self.profile)?;
+        encoder.encode(&self.settings)?;
+        encoder.encode(&self.is_active)?;
+        encoder.encode(&self.age)?;
+        encoder.encode(&self.created_at)?;
+        encoder.encode(&self.updated_at)?;
+        encoder.encode(&self.referrer_id)?;
+        encoder.encode(&self.social_links)?;
+        encoder.encode(&self.tags)?;
+        encoder.encode(&self.labels)?;
+        encoder.finish();
+        Ok(sqlx::encode::IsNull::No)
+    }
+}
+
+impl sqlx::postgres::PgHasArrayType for Users {
+    fn array_type_info() -> sqlx::postgres::PgTypeInfo {
+        sqlx::postgres::PgTypeInfo::with_name("_users")
     }
 }
 
