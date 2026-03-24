@@ -1964,8 +1964,7 @@ async fn test_social_links_composite_unnest(
         },
     ];
 
-    let results =
-        generated::users_array_fields::insert_users_bulk_composite(pool, items).await?;
+    let results = generated::users_array_fields::insert_users_bulk_composite(pool, items).await?;
     assert_eq!(results.len(), 3);
 
     // User 1: has 2 social links
@@ -1976,10 +1975,7 @@ async fn test_social_links_composite_unnest(
     assert_eq!(links1.len(), 2);
     assert_eq!(links1[0].name, "GitHub");
     assert_eq!(links1[1].name, "LinkedIn");
-    println!(
-        "✓ User 1: {} link(s) via composite UNNEST",
-        links1.len()
-    );
+    println!("✓ User 1: {} link(s) via composite UNNEST", links1.len());
 
     // User 2: NULL social links
     assert!(
