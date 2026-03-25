@@ -549,8 +549,7 @@ pub struct GetUserCountAndAvgAgeItem {
 ///
 /// Query Plan:
 /// Aggregate
-///   ->  Bitmap Heap Scan on users
-///         ->  Bitmap Index Scan on idx_users_age_updated_at
+///   ->  Index Only Scan using idx_users_age_updated_at on users
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT COUNT(*) as count, AVG(age) as avg_age FROM public.users"))]
 pub async fn get_user_count_and_avg_age(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>) -> Result<GetUserCountAndAvgAgeItem, super::ErrorReadOnly> {
     let query = sqlx::query(

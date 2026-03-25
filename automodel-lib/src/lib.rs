@@ -1,6 +1,7 @@
 mod codegen;
 mod query_definition;
 mod query_definition_rt;
+mod rust_type;
 mod sqlfile_parser;
 mod types_extractor;
 mod utils;
@@ -306,6 +307,10 @@ impl AutoModel {
         // PHASE 1: Analyze all queries and collect information
         let analyzed_queries = self.analyze_all_queries(&client).await?;
 
+        // Build TypeSystem from all query types and generate to types/ subfolder
+        let type_system = Self::build_type_system(&client, &self.queries).await?;
+        type_system.codegen(&output_path.join("types")).await?;
+
         // Collect all warnings
         let mut all_warnings = Vec::new();
 
@@ -328,7 +333,8 @@ impl AutoModel {
 
         // Create the main mod.rs file
         let mod_file = output_path.join("mod.rs");
-        let mod_content = generate_root_module(&modules, source_hash);
+        let mut mod_content = generate_root_module(&modules, source_hash);
+        mod_content.push_str("pub mod types;\n");
         fs::write(&mod_file, &mod_content)?;
 
         // Write all warnings to automodel.warn file only if there are warnings
@@ -342,6 +348,29 @@ impl AutoModel {
         }
 
         Ok(())
+    }
+
+    /// Build a TypeSystem by preparing all queries and collecting their PgTypes.
+    /// Unsupported types (pseudo, multirange) are silently skipped.
+    async fn build_type_system(
+        client: &tokio_postgres::Client,
+        queries: &[QueryDefinition],
+    ) -> Result<rust_type::TypeSystem> {
+        let mut type_system = rust_type::TypeSystem::new();
+
+        for query in queries {
+            let (converted_sql, _, _) = &query.sql_variants[0];
+            if let Ok(statement) = client.prepare(converted_sql).await {
+                for param_type in statement.params() {
+                    let _ = type_system.insert(param_type);
+                }
+                for column in statement.columns() {
+                    let _ = type_system.insert(column.type_());
+                }
+            }
+        }
+
+        Ok(type_system)
     }
 
     /// PHASE 1: Analyze all queries and extract complete information
