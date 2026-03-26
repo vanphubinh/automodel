@@ -1,6 +1,24 @@
-# AutoModel Workspace
+# AutoModel — SQL-first Reverse ORM for Rust, Built for the AI Era
 
-A Rust workspace for automatically generating typed functions from SQL queries using PostgreSQL. Queries are defined in SQL files with embedded configuration in comments.
+## Why AutoModel
+
+Database access in Rust typically falls into two camps: **ORMs** (Diesel, SeaORM) and **compile-time checked SQL** (sqlx). Both have trade-offs that become sharply worse when an AI assistant — or any automated tool — is working with your code, and humans are exposed to far more intense code reviewing cycle.
+
+**AutoModel is different: you write plain SQL, and the tool generates real Rust source files**.
+
+```
+queries/users/get_user.sql  →  src/generated/users.rs  (checked into git)
+```
+
+1. **Human or AI can read everything.** Generated structs, function signatures, error enums, and type aliases — all corresponding to the actual database schema, including constraints exposed as structured Rust enums — are ordinary `.rs` files sitting in your repo. An LLM can inspect them, reason about types, and produce correct calling code on the first try — no PostgreSQL agent, no database connection, no special tooling required.
+2. **Plain SQL stays plain SQL.** Your queries are `.sql` files with full syntax highlighting. There is no query builder to learn, no expression DSL. Any valid PostgreSQL query works — window functions, CTEs, recursive queries, lateral joins, subqueries, aggregations, `UNNEST` batch inserts, partitioned tables, domain types, composite types, conditional clauses — all features of SQL, with no restrictions.
+3. **Build-time code generation, not compile-time magic.** `build.rs` connects to the database once, extracts types from prepared statements, and writes `.rs` files — the whole step takes seconds, not the minutes of a full application compile. After that, builds are fully offline. CI can verify that generated code is up-to-date without a live database.
+4. **Diff-friendly and reviewable.** Because the generated code is committed, pull request reviewers (human or AI) see exactly what changed — a renamed field, a new column, a constraint added. Nothing is hidden inside macro expansion.
+5. **Built-in query analytics.** During code generation, AutoModel runs `EXPLAIN` on every query. Every generated function includes the query plan in its doc comments, and a warnings file is committed to the repo flagging sequential scans (missing indexes) and multi-partition access on partitioned tables. Warnings are surfaced during build time and visible at review time — reviewers (human or AI) catch performance problems before they reach production. Analysis can be opted out per query.
+6. **Feature-rich control over generated code.** Struct reuse and deduplication across queries. Diff-based conditional updates for the load → transform → save pattern. Custom struct naming for cleaner, domain-specific APIs. Automated `multiunzip` support combined with `UNNEST` for batch inserts. Strongly typed mappings for `json`/`jsonb` columns. Full support for composite types and whole-record column insertion and selection — and much more.
+7. **Less code to write, review, and test.** The glue between SQL and Rust — structs, parameter binding, error enums, type conversions — is an entire class of code that no human needs to write, review, or maintain. It is machine-generated from your SQL and the database schema. Reviewers focus on the `.sql` file and the business logic that calls it. This directly translates to faster development cycles: adding a new query is a single `.sql` file, and you have a strongly typed Rust function to call on the next build.
+
+The result: a workflow where SQL is the source of truth, types are real files, every tool in the ecosystem — IDE, AI, CI, code review — can see the full picture, and development moves faster because an entire layer of boilerplate is eliminated.
 
 ## Project Structure
 
@@ -10,94 +28,20 @@ This is a Cargo workspace with three main components:
 - **`automodel-cli/`** - Command-line interface with advanced features  
 - **`example-app/`** - An example application that demonstrates build-time code generation
 
-## Features
-
-- 📝 Define SQL queries in `.sql` files with embedded configuration in comments
-- 🔌 Connect to PostgreSQL databases  
-- 🔍 Automatically extract input and output types from prepared statements
-- 🛠️ Generate Rust functions with proper type signatures at build time
-- ✅ Support for all common PostgreSQL types including custom enums and domain types
-- 🏗️ Generate result structs for multi-column queries
-- ⚡ Build-time code generation with automatic regeneration when SQL files change
-- 📊 Built-in query performance analysis with sequential scan detection
-- 🔄 Conditional queries with dynamic SQL based on optional parameters
-- ♻️ Struct reuse and deduplication across queries
-- 🔀 Diff-based conditional updates for precise change tracking
-- 🎨 Custom struct naming for cleaner, domain-specific APIs
-- 💡 SQL syntax highlighting and editor support for query definitions
-
 ## Quick Start
 
-### 1. Clone and Build
-
-```bash
-git clone <repository-url>
-cd automodel
-cargo build
-```
-
-### 2. CLI Usage
-
-The CLI tool provides several commands for different workflows:
-
-#### Generate code
-
-```bash
-# Basic generation from queries directory
-cargo run -p automodel-cli -- generate -d postgresql://localhost/mydb -q queries/
-
-# Generate with custom output file
-cargo run -p automodel-cli -- generate -d postgresql://localhost/mydb -q queries/ -o src/db_functions.rs
-
-# Dry run (see generated code without writing files)
-cargo run -p automodel-cli -- generate -d postgresql://localhost/mydb -q queries/ --dry-run
-```
-
-#### Query Performance Analysis
-
-```bash
-# Analysis is performed automatically during code generation (if analysis is enabled in query metadata)
-cargo run -p automodel-cli -- generate -d postgresql://localhost/mydb -q queries/
-```
-
-#### CLI Help
-
-```bash
-# General help
-cargo run -p automodel-cli -- --help
-
-# Subcommand help
-cargo run -p automodel-cli -- generate --help
-```
-
-### 3. Run the Example App
-
-```bash
-cd example-app
-cargo run
-```
-
-The example app demonstrates:
-- Build-time code generation via `build.rs`
-- Automatic regeneration when SQL files change
-- How to use generated functions in your application
-- SQL files with embedded metadata configuration
-
-## Library Usage (automodel-lib)
-
-### Add to your Cargo.toml
+### 1. Add to your Cargo.toml
 
 ```toml
 [dependencies]
-automodel-lib = { path = "../automodel-lib" }  # or from crates.io when published
+automodel = "0.9"
 
 [build-dependencies]  
-automodel-lib = { path = "../automodel-lib" }
+automodel = "0.9"
 tokio = { version = "1.0", features = ["rt"] }
-anyhow = "1.0"
 ```
 
-### Create a build.rs for automatic code generation
+### 2. Create a build.rs
 
 ```rust
 #[tokio::main]
@@ -137,17 +81,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### Define Queries in SQL Files
+### 3. Write SQL queries
 
-Organize your queries as separate SQL files with embedded configuration in comments. This approach provides SQL syntax highlighting and better editor support.
-
-**Directory Structure:**
-
-Create a `queries/` directory in your project:
+Create a `queries/` directory and add `.sql` files organized by module:
 
 ```
 my-project/
-├── queries/              # SQL files organized by module
+├── queries/
 │   └── users/
 │       ├── get_user_by_id.sql
 │       ├── create_user.sql
@@ -157,9 +97,7 @@ my-project/
     └── main.rs
 ```
 
-**SQL File Format:**
-
-Each SQL file contains configuration metadata in SQL comments followed by the query:
+Each SQL file contains an optional metadata block followed by the query:
 
 ```sql
 -- @automodel
@@ -172,7 +110,7 @@ FROM users
 WHERE id = #{id}
 ```
 
-**Advanced Example with Custom Types:**
+A more advanced example with conditional updates and custom types:
 
 ```sql
 -- @automodel
@@ -191,47 +129,11 @@ WHERE id = #{user_id}
 RETURNING id, name, email, profile, updated_at
 ```
 
-**File Naming Convention:**
-- File path: `queries/{module_name}/{function_name}.sql`
-- Module name: The directory name (e.g., `users`)
-- Function name: The file name without extension (e.g., `update_user_profile_diff`)
+File path determines the generated module and function name: `queries/{module}/{function}.sql`. Both must be valid Rust identifiers.
 
-Both module and function names must be valid Rust identifiers.
+All metadata is optional. When omitted, sensible defaults are used. See [Configuration Options](#configuration-options) for the full reference.
 
-**Metadata Format:**
-
-All metadata is optional and specified in YAML format within SQL comments:
-
-```sql
--- @automodel
---    description: Optional query description
---    expect: exactly_one | possible_one | at_least_one | multiple
---    module: custom_module  # Overrides directory-based module name
---    types:
---      field_name: "CustomType"
---    telemetry:
---      level: debug
---      include_params: [param1, param2]
---    conditions_type: true | "CustomStructName"
---    parameters_type: true | "CustomStructName"
---    return_type: "CustomReturnType"
---    error_type: "CustomErrorType"
---    ensure_indexes: true
---    multiunzip: true
--- @end
-
-SELECT * FROM table WHERE id = #{id}
-```
-
-**Benefits:**
-- ✅ SQL syntax highlighting in your editor
-- ✅ Better code organization for large projects
-- ✅ Easy to version control individual queries
-- ✅ Configuration embedded directly with the SQL
-- ✅ Automatic build regeneration when SQL files change
-- ✅ Module organization based on directory structure
-
-### Use the generated functions
+### 4. Use the generated functions
 
 ```rust
 mod generated;
@@ -239,11 +141,28 @@ mod generated;
 use tokio_postgres::Client;
 
 async fn example(client: &Client) -> Result<(), tokio_postgres::Error> {
-    // The functions are generated at build time with proper types!
     let user = generated::get_user_by_id(client, 1).await?;
     let new_id = generated::create_user(client, "John".to_string(), "john@example.com".to_string()).await?;
     Ok(())
 }
+```
+
+### 5. CLI Usage (alternative to build.rs)
+
+AutoModel also ships as a standalone CLI for use outside of `build.rs`:
+
+```bash
+# Generate code from queries directory
+automodel generate -d postgresql://localhost/mydb -q queries/
+
+# Generate with custom output file
+automodel generate -d postgresql://localhost/mydb -q queries/ -o src/db_functions.rs
+
+# Dry run (see generated code without writing files)
+automodel generate -d postgresql://localhost/mydb -q queries/ --dry-run
+
+# Help
+automodel --help
 ```
 
 ## Configuration Options
@@ -2242,6 +2161,10 @@ format_generated_files = false
 ```
 
 When this option is set, `rustfmt` skips any file that contains `@generated` in its first five lines. See the [rustfmt documentation](https://rust-lang.github.io/rustfmt/?version=v1.6.0&search=#format_generated_files) for details.
+
+## Advanced Guides
+
+- [Composite Types vs JSONB](doc/composite-types-vs-jsonb.md) — choosing between PostgreSQL composite types and JSONB columns, with side-by-side comparisons of insert/batch insert/select, backward & forward compatibility analysis, and best practices for schema evolution without downtime.
 
 ## Requirements
 
