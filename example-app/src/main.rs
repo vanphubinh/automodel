@@ -1929,7 +1929,7 @@ async fn test_social_links_composite_unnest(
     let timestamp = chrono::Utc::now().timestamp();
 
     let items = vec![
-        generated::users_array_fields::UserWithLinksInput {
+        generated::types::public::UserWithLinksInput {
             name: Some("Composite User 1".to_string()),
             email: Some(format!("composite1.{}@example.com", timestamp)),
             social_links: Some(
@@ -1946,12 +1946,12 @@ async fn test_social_links_composite_unnest(
                 .unwrap(),
             ),
         },
-        generated::users_array_fields::UserWithLinksInput {
+        generated::types::public::UserWithLinksInput {
             name: Some("Composite User 2".to_string()),
             email: Some(format!("composite2.{}@example.com", timestamp)),
             social_links: None, // NULL social_links
         },
-        generated::users_array_fields::UserWithLinksInput {
+        generated::types::public::UserWithLinksInput {
             name: Some("Composite User 3".to_string()),
             email: Some(format!("composite3.{}@example.com", timestamp)),
             social_links: Some(
@@ -2005,17 +2005,17 @@ async fn test_widgets_composite_input(pool: &PgPool) -> Result<(), Box<dyn std::
     // Test 1: Bulk insert using table composite type (public.widgets[]) with nested metadata
     println!("\n1. Inserting widgets using table composite type with nested metadata...");
     let table_items = vec![
-        generated::widgets::Widgets {
+        generated::types::public::Widgets {
             id: 0,
             name: "Widget-A".to_string(),
             weight: Some(3.14),
-            metadata: Some(generated::widgets::WidgetMetadata {
+            metadata: Some(generated::types::public::WidgetMetadata {
                 color: Some("red".to_string()),
                 version: Some(1),
             }),
             created_at: None,
         },
-        generated::widgets::Widgets {
+        generated::types::public::Widgets {
             id: 0,
             name: "Widget-B".to_string(),
             weight: Some(2.72),
@@ -2048,16 +2048,16 @@ async fn test_widgets_composite_input(pool: &PgPool) -> Result<(), Box<dyn std::
     // Test 2: Bulk insert using custom composite type (public.widget_input[]) with nested metadata
     println!("\n2. Inserting widgets using custom composite type with nested metadata...");
     let custom_items = vec![
-        generated::widgets::WidgetInput {
-            name: Some("Custom-X".to_string()),
+        generated::types::public::WidgetInput {
+            name: "Custom-X".to_string(),
             weight: Some(9.81),
-            metadata: Some(generated::widgets::WidgetMetadata {
+            metadata: Some(generated::types::public::WidgetMetadata {
                 color: Some("blue".to_string()),
                 version: Some(3),
             }),
         },
-        generated::widgets::WidgetInput {
-            name: Some("Custom-Y".to_string()),
+        generated::types::public::WidgetInput {
+            name: "Custom-Y".to_string(),
             weight: None,
             metadata: None,
         },
@@ -2085,10 +2085,10 @@ async fn test_widgets_composite_input(pool: &PgPool) -> Result<(), Box<dyn std::
 
     // Test 3: Insert a single widget using singular composite parameter (not an array)
     println!("\n3. Inserting a single widget using singular composite parameter...");
-    let single_item = generated::widgets::WidgetInput {
-        name: Some("Single-Z".to_string()),
+    let single_item = generated::types::public::WidgetInput {
+        name: "Single-Z".to_string(),
         weight: Some(42.0),
-        metadata: Some(generated::widgets::WidgetMetadata {
+        metadata: Some(generated::types::public::WidgetMetadata {
             color: Some("green".to_string()),
             version: Some(7),
         }),

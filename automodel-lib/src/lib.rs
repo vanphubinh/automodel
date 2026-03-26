@@ -307,8 +307,8 @@ impl AutoModel {
         // PHASE 1: Analyze all queries and collect information
         let analyzed_queries = self.analyze_all_queries(&client).await?;
 
-        // Build TypeSystem from all query types and generate to types/ subfolder
-        let type_system = Self::build_type_system(&client, &self.queries).await?;
+        // Build TypeSystem from captured statements (no re-preparation needed)
+        let type_system = Self::build_type_system(&client, &analyzed_queries).await?;
         type_system.codegen(&output_path.join("types")).await?;
 
         // Collect all warnings
@@ -350,23 +350,20 @@ impl AutoModel {
         Ok(())
     }
 
-    /// Build a TypeSystem by preparing all queries and collecting their PgTypes.
-    /// Unsupported types (pseudo, multirange) are silently skipped.
+    /// Build a TypeSystem from the statements captured during query analysis.
     async fn build_type_system(
         client: &tokio_postgres::Client,
-        queries: &[QueryDefinition],
+        analyzed_queries: &[QueryDefinitionRuntime],
     ) -> Result<rust_type::TypeSystem> {
         let mut type_system = rust_type::TypeSystem::new();
 
-        for query in queries {
-            let (converted_sql, _, _) = &query.sql_variants[0];
-            if let Ok(statement) = client.prepare(converted_sql).await {
-                for param_type in statement.params() {
-                    let _ = type_system.insert(param_type);
-                }
-                for column in statement.columns() {
-                    let _ = type_system.insert(column.type_());
-                }
+        for query in analyzed_queries {
+            let statement = &query.type_info.statement;
+            for param_type in statement.params() {
+                let _ = type_system.insert(param_type);
+            }
+            for column in statement.columns() {
+                let _ = type_system.insert(column.type_());
             }
         }
 
@@ -379,7 +376,7 @@ impl AutoModel {
     }
 
     /// PHASE 1: Analyze all queries and extract complete information
-    /// This phase interacts with the database to collect all needed information
+    /// This phase interacts with the database to collect all needed information.
     async fn analyze_all_queries(
         &self,
         client: &tokio_postgres::Client,
@@ -391,7 +388,7 @@ impl AutoModel {
             .map(|query| async move {
                 println!("cargo:info=Analyzing query '{}'", query.name);
 
-                // Extract type information (input/output types, parsed SQL)
+                // Extract type information (captures Statement for later TypeSystem building)
                 let type_info =
                     extract_query_types(client, &query.sql, query.types.as_ref()).await?;
 

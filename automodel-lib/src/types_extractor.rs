@@ -27,6 +27,8 @@ pub struct QueryTypeInfo {
     pub output_types: Vec<OutputColumn>,
     /// Parsed SQL with conditional blocks (if any)
     pub parsed_sql: Option<ParsedSql>,
+    /// The prepared statement, retained for building the TypeSystem
+    pub statement: Statement,
 }
 
 /// Represents a conditional block in a SQL query
@@ -85,6 +87,7 @@ pub async fn extract_query_types(
         } else {
             None
         },
+        statement,
     })
 }
 
