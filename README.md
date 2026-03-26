@@ -16,7 +16,7 @@ This is a Cargo workspace with three main components:
 - 🔌 Connect to PostgreSQL databases  
 - 🔍 Automatically extract input and output types from prepared statements
 - 🛠️ Generate Rust functions with proper type signatures at build time
-- ✅ Support for all common PostgreSQL types including custom enums
+- ✅ Support for all common PostgreSQL types including custom enums and domain types
 - 🏗️ Generate result structs for multi-column queries
 - ⚡ Build-time code generation with automatic regeneration when SQL files change
 - 📊 Built-in query performance analysis with sequential scan detection
@@ -347,6 +347,7 @@ If no metadata is provided, sensible defaults are used.
 --    expect: exactly_one       # exactly_one | possible_one | at_least_one | multiple
 --    types:                    # Custom type mappings
 --      profile: "crate::models::UserProfile"                         # query params/output by name
+--      public.positive_int: "std::num::NonZeroI32"                   # domain type alias override
 --      public.users.social_links: "Vec<crate::models::UserSocialLink>"  # composite type field
 --    telemetry:                # Per-query telemetry settings
 --      level: trace
@@ -475,6 +476,45 @@ Key details:
 --      public.users.social_links: "Vec<crate::models::UserSocialLink>"  # OK: same type
 --      public.users.profile: "crate::models::UserProfile"               # OK: different field
 ```
+
+**Domain Type Alias Mappings:**
+
+PostgreSQL domain types (`CREATE DOMAIN`) are detected automatically and generated as Rust type aliases:
+
+```sql
+CREATE DOMAIN positive_int AS INTEGER CHECK (VALUE > 0);
+CREATE DOMAIN email_address AS VARCHAR(255) CHECK (VALUE ~* '^[^@]+@[^@]+$');
+```
+
+Generated (default):
+```rust
+pub type PositiveInt = i32;
+pub type EmailAddress = String;
+```
+
+Use 2-segment keys (`schema.domain_name`) in `types:` to override the alias target:
+
+```sql
+-- @automodel
+--    types:
+--      public.positive_int: "std::num::NonZeroI32"
+-- @end
+```
+
+Generated (with override):
+```rust
+pub type PositiveInt = std::num::NonZeroI32;
+```
+
+Domain CHECK constraints are also included in error type enums for mutation queries (e.g., `PositiveIntCheck`, `EmailAddressCheck`).
+
+**Type mapping key summary:**
+
+| Key format | Segments | Purpose | Example |
+|-----------|----------|---------|---------|
+| `field_name` | 1 | Map parameter/column by name | `profile: "UserProfile"` |
+| `schema.domain` | 2 | Override domain type alias | `public.positive_int: "NonZeroI32"` |
+| `schema.type.field` | 3 | Map composite type field | `public.users.social_links: "Vec<Link>"` |
 
 ### Named Parameters
 
@@ -1920,6 +1960,7 @@ AutoModel automatically extracts all constraints from your PostgreSQL database f
 - **Foreign key constraints** - With referenced table and column information
 - **Check constraints** - With constraint expression
 - **NOT NULL constraints** - For columns that cannot be null
+- **Domain check constraints** - CHECK constraints from domain types used by table columns
 
 **Example:**
 For a users table with:

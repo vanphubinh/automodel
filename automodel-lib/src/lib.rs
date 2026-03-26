@@ -372,12 +372,19 @@ impl AutoModel {
             .await
             .unwrap_or_else(|e| eprintln!("Warning: failed to resolve field nullability: {}", e));
 
-        // Apply custom type mappings to composite type fields (from query-level `types:` configs)
-        // Collect all 3-segment keys (schema.type.field) from all queries, detect conflicts,
-        // then apply the merged mappings to the type system.
+        // Apply custom type mappings from query-level `types:` configs.
         //
+        // Two key formats:
+        //   2-segment: schema.domain_name → alias override (e.g. "public.positive_int": "std::num::NonZeroI32")
+        //   3-segment: schema.type.field  → composite field mapping (e.g. "public.users.profile": "UserProfile")
+        //
+        // Collect all keys from all queries, detect conflicts, then apply.
+
         // Key: (schema.type_name, field_name) → (mapped_type, needs_json_wrapper, source_query)
-        let mut merged: std::collections::HashMap<(String, String), (String, bool, String)> =
+        let mut merged_fields: std::collections::HashMap<(String, String), (String, bool, String)> =
+            std::collections::HashMap::new();
+        // Key: schema.domain_name → (mapped_type, source_query)
+        let mut merged_aliases: std::collections::HashMap<String, (String, String)> =
             std::collections::HashMap::new();
 
         for query in analyzed_queries {
@@ -386,50 +393,78 @@ impl AutoModel {
             };
             for (key, value) in mappings {
                 let parts: Vec<&str> = key.splitn(3, '.').collect();
-                if parts.len() != 3 {
-                    continue;
-                }
-                let composite_key = format!("{}.{}", parts[0], parts[1]);
-                let field_name = parts[2].to_string();
-
-                // Parse @json/@native suffix
-                let (clean_type, needs_wrapper) = if value.ends_with("@json") {
-                    (&value[..value.len() - 5], true)
-                } else if value.ends_with("@native") {
-                    (&value[..value.len() - 7], false)
-                } else {
-                    (value.as_str(), true)
-                };
-
-                let map_key = (composite_key.clone(), field_name.clone());
-                if let Some((existing_type, _, existing_source)) = merged.get(&map_key) {
-                    if existing_type != clean_type {
-                        anyhow::bail!(
-                            "Conflicting type mappings for composite field `{}.{}`:\n  \
-                             - {}: \"{}\"\n  \
-                             - {}: \"{}\"",
-                            composite_key,
-                            field_name,
-                            existing_source,
-                            existing_type,
-                            query.definition.name,
-                            clean_type,
+                if parts.len() == 2 {
+                    // 2-segment: schema.domain_name → alias override
+                    if let Some((existing_type, existing_source)) = merged_aliases.get(key) {
+                        if existing_type != value {
+                            anyhow::bail!(
+                                "Conflicting type mappings for domain `{}`:\n  \
+                                 - {}: \"{}\"\n  \
+                                 - {}: \"{}\"",
+                                key,
+                                existing_source,
+                                existing_type,
+                                query.definition.name,
+                                value,
+                            );
+                        }
+                    } else {
+                        merged_aliases.insert(
+                            key.clone(),
+                            (value.clone(), query.definition.name.clone()),
                         );
                     }
-                } else {
-                    merged.insert(
-                        map_key,
-                        (
-                            clean_type.to_string(),
-                            needs_wrapper,
-                            query.definition.name.clone(),
-                        ),
-                    );
+                } else if parts.len() == 3 {
+                    // 3-segment: schema.type.field → composite field mapping
+                    let composite_key = format!("{}.{}", parts[0], parts[1]);
+                    let field_name = parts[2].to_string();
+
+                    // Parse @json/@native suffix
+                    let (clean_type, needs_wrapper) = if value.ends_with("@json") {
+                        (&value[..value.len() - 5], true)
+                    } else if value.ends_with("@native") {
+                        (&value[..value.len() - 7], false)
+                    } else {
+                        (value.as_str(), true)
+                    };
+
+                    let map_key = (composite_key.clone(), field_name.clone());
+                    if let Some((existing_type, _, existing_source)) = merged_fields.get(&map_key) {
+                        if existing_type != clean_type {
+                            anyhow::bail!(
+                                "Conflicting type mappings for composite field `{}.{}`:\n  \
+                                 - {}: \"{}\"\n  \
+                                 - {}: \"{}\"",
+                                composite_key,
+                                field_name,
+                                existing_source,
+                                existing_type,
+                                query.definition.name,
+                                clean_type,
+                            );
+                        }
+                    } else {
+                        merged_fields.insert(
+                            map_key,
+                            (
+                                clean_type.to_string(),
+                                needs_wrapper,
+                                query.definition.name.clone(),
+                            ),
+                        );
+                    }
                 }
             }
         }
 
-        for ((composite_key, field_name), (mapped_type, needs_wrapper, _)) in &merged {
+        // Apply alias mappings (2-segment keys)
+        for (key, (mapped_type, _)) in &merged_aliases {
+            let parts: Vec<&str> = key.splitn(2, '.').collect();
+            type_system.apply_alias_mapping(parts[0], parts[1], mapped_type);
+        }
+
+        // Apply composite field mappings (3-segment keys)
+        for ((composite_key, field_name), (mapped_type, needs_wrapper, _)) in &merged_fields {
             let parts: Vec<&str> = composite_key.splitn(2, '.').collect();
             type_system.apply_field_mapping(
                 parts[0],

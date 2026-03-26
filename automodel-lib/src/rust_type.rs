@@ -253,6 +253,27 @@ impl TypeSystem {
         Ok(())
     }
 
+    /// Apply a custom type alias override to a domain type.
+    ///
+    /// Changes the generated `pub type Alias = BaseType;` to use `mapped_type` instead.
+    pub fn apply_alias_mapping(
+        &mut self,
+        schema: &str,
+        type_name: &str,
+        mapped_type: &str,
+    ) {
+        let type_info = self
+            .types
+            .values_mut()
+            .find(|ti| ti.pg_schema == schema && ti.pg_name == type_name);
+
+        if let Some(type_info) = type_info {
+            if let TypeKind::Alias(ref mut alias) = type_info.kind {
+                alias.mapped_type_ref = Some(mapped_type.to_string());
+            }
+        }
+    }
+
     /// Apply a single custom type mapping to a composite type field.
     ///
     /// Finds the composite type by `schema.type_name` and sets `mapped_type_ref`
@@ -368,7 +389,10 @@ impl TryFrom<&PgType> for TypeInfo {
                     TypeKind::Range(elem_type.rust_name()?)
                 }
                 tokio_postgres::types::Kind::Domain(base_type) => {
-                    TypeKind::Alias(base_type.rust_name()?)
+                    TypeKind::Alias(AliasInfo {
+                        type_ref: base_type.rust_name()?,
+                        mapped_type_ref: None,
+                    })
                 }
                 tokio_postgres::types::Kind::Composite(fields) => {
                     let mut struct_fields = Vec::with_capacity(fields.len());
@@ -395,9 +419,17 @@ pub enum TypeKind {
     Simple,
     Array(TypeRef),
     Range(TypeRef),
-    Alias(TypeRef),
+    Alias(AliasInfo),
     Enum(Vec<EnumVariant>),
     Struct(Vec<StructField>),
+}
+
+#[derive(Debug, Clone)]
+pub struct AliasInfo {
+    /// The Rust type of the domain's base type (e.g. "i32" for a domain over integer)
+    pub type_ref: TypeRef,
+    /// Custom type override (e.g. "std::num::NonZeroI32") set via `types:` config
+    pub mapped_type_ref: Option<TypeRef>,
 }
 
 #[derive(Debug, Clone)]
@@ -608,7 +640,7 @@ impl TypeInfo {
         match &self.kind {
             TypeKind::Enum(variants) => Some(self.codegen_enum(variants, custom_derives)),
             TypeKind::Struct(fields) => Some(self.codegen_struct(fields, custom_derives)),
-            TypeKind::Alias(base_type) => Some(self.codegen_alias(base_type)),
+            TypeKind::Alias(alias) => Some(self.codegen_alias(alias)),
             _ => None,
         }
     }
@@ -780,12 +812,13 @@ impl TypeInfo {
         }
     }
 
-    fn codegen_alias(&self, base_type: &str) -> String {
+    fn codegen_alias(&self, alias: &AliasInfo) -> String {
         let name = self
             .rust_name
             .strip_prefix(&format!("super::{}::", self.rust_module))
             .unwrap_or(&self.rust_name);
-        format!("pub type {} = {};\n\n", name, base_type)
+        let rhs = alias.mapped_type_ref.as_deref().unwrap_or(&alias.type_ref);
+        format!("pub type {} = {};\n\n", name, rhs)
     }
 
     fn build_derive_attribute(default_derives: &[&str], custom_derives: &[String]) -> String {
