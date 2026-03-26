@@ -3,6 +3,14 @@ name = "example-app"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "example_app"
+path = "src/lib.rs"
+
+[[bin]]
+name = "example-app"
+path = "src/main.rs"
+
 [dependencies]
 automodel = { path = "../automodel-lib" }
 tokio = { workspace = true }

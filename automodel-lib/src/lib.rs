@@ -121,11 +121,13 @@ impl AutoModel {
     ///         if std::env::var("CI").is_err() {
     ///             std::env::var("AUTOMODEL_DATABASE_URL").map_err(|_| {
     ///                 "AUTOMODEL_DATABASE_URL environment variable must be set for code generation"
+    ///                     .to_string()
     ///             })
     ///         } else {
-    ///             Err("Detecting not up to date AutoModel generated code in CI environment")
+    ///             Err("Detecting not up to date AutoModel generated code in CI environment"
+    ///                 .to_string())
     ///         }
-    ///     }, "queries.yaml", "src/generated").await?;
+    ///     }, "queries", "src/generated", Default::default()).await?;
     ///     Ok(())
     /// }
     /// ```
@@ -998,12 +1000,75 @@ impl AutoModel {
         };
 
         // PostgreSQL returns EXPLAIN as text lines
+
+        // State for partition pruning detection: track Append nodes and child scans
+        let mut append_indent: Option<usize> = None;
+        let mut partition_scans: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+
         for row in rows {
             let plan_line: String = row.get(0);
             query_plan_lines.push(plan_line.clone());
 
-            // Check for sequential scans
-            if plan_line.contains("Seq Scan") {
+            // --- Partition pruning detection (must run before seq scan to suppress duplicates) ---
+            let indent = plan_line.len() - plan_line.trim_start().len();
+            let trimmed = plan_line.trim();
+            // Strip the "->  " arrow prefix that PostgreSQL uses for child nodes
+            let node_name = trimmed.trim_start_matches("->").trim_start();
+
+            // Detect Append / MergeAppend node (signals multi-partition scan)
+            if node_name.starts_with("Append") || node_name.starts_with("MergeAppend") {
+                // If we had a previous Append, flush it first
+                if append_indent.is_some() {
+                    Self::emit_partition_pruning_warnings(
+                        query_name,
+                        &partition_scans,
+                        &mut warnings,
+                    );
+                }
+                append_indent = Some(indent);
+                partition_scans.clear();
+            } else if let Some(ai) = append_indent {
+                if indent <= ai {
+                    // We've left the Append block — evaluate collected scans
+                    Self::emit_partition_pruning_warnings(
+                        query_name,
+                        &partition_scans,
+                        &mut warnings,
+                    );
+                    append_indent = None;
+                    partition_scans.clear();
+                } else {
+                    // Child node inside Append — extract base table name from table scan nodes
+                    // Only count actual table scan nodes, not index scans within them
+                    let is_table_scan = node_name.starts_with("Seq Scan")
+                        || node_name.starts_with("Index Scan")
+                        || node_name.starts_with("Index Only Scan")
+                        || node_name.starts_with("Bitmap Heap Scan");
+                    if is_table_scan {
+                        // Plan lines: "->  Seq Scan on orders_p0 orders_1  (cost=...)"
+                        // After " on ": parts[0]=partition, parts[1]=alias (parent table)
+                        if let Some(on_pos) = plan_line.find(" on ") {
+                            let after_on = &plan_line[on_pos + 4..];
+                            let parts: Vec<&str> = after_on.split_whitespace().collect();
+                            if let Some(raw_alias) = parts.get(1).or(parts.first()) {
+                                // Strip trailing _N suffix from alias to get base table name
+                                let base_table = raw_alias
+                                    .trim_end_matches(|c: char| c == '_' || c.is_ascii_digit());
+                                let base_table = if base_table.is_empty() {
+                                    raw_alias.to_string()
+                                } else {
+                                    base_table.to_string()
+                                };
+                                *partition_scans.entry(base_table).or_insert(0) += 1;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // --- Sequential scan detection (skip when inside Append to avoid noisy per-partition warnings) ---
+            if plan_line.contains("Seq Scan") && append_indent.is_none() {
                 has_sequential_scan = true;
 
                 // Extract table name from the plan line
@@ -1043,6 +1108,11 @@ impl AutoModel {
             }
         }
 
+        // Flush any remaining Append block at end of plan
+        if append_indent.is_some() {
+            Self::emit_partition_pruning_warnings(query_name, &partition_scans, &mut warnings);
+        }
+
         let query_plan = query_plan_lines.join("\n");
         Ok((
             has_sequential_scan,
@@ -1050,5 +1120,22 @@ impl AutoModel {
             warnings,
             query_plan,
         ))
+    }
+
+    /// Emit warnings if partition scans indicate missing partition pruning.
+    /// Called when we detect an Append node with 2+ child scans on the same base table.
+    fn emit_partition_pruning_warnings(
+        query_name: &str,
+        partition_scans: &std::collections::HashMap<String, usize>,
+        warnings: &mut Vec<String>,
+    ) {
+        for (table, &count) in partition_scans {
+            if count >= 2 {
+                warnings.push(format!(
+                    "Query '{}' scans all {} partitions of table '{}'",
+                    query_name, count, table
+                ));
+            }
+        }
     }
 }

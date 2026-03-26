@@ -8,6 +8,8 @@ Query 'get_user_engagement_metrics (base)' performs sequential scan on table 'po
 Query 'get_user_engagement_metrics (base)' performs sequential scan on table 'comments'
 Query 'get_time_series_user_registrations (base)' performs sequential scan on table 'users'
 Query 'get_users_with_timezone_info (base)' performs sequential scan on table 'users'
+Query 'get_orders_by_product (base)' scans all 4 partitions of table 'orders'
+Query 'get_orders_by_tenant_range (base)' scans all 4 partitions of table 'orders'
 Query 'get_all_products (base)' performs sequential scan on table 'products'
 Query 'get_all_users (base)' performs sequential scan on table 'users'
 Query 'find_users_by_name_and_age (base)' performs sequential scan on table 'users'
