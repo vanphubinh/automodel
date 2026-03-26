@@ -1,4 +1,4 @@
-# AutoModel — SQL-first Reverse ORM for Rust, Built for the AI Era
+# AutoModel — SQL-first Reverse ORM for Rust, Built for the greater DX and for the AI Era
 
 ## Why AutoModel
 
