@@ -41,6 +41,8 @@ export AUTOMODEL_DATABASE_URL="postgresql://postgres:password@localhost:55432/po
 set -x AUTOMODEL_DATABASE_URL "postgresql://postgres:password@localhost:55432/postgres"
 ```
 
+Note, if you are developing from a container, database URL need to be asjusted to connect to the Postgres container directly
+
 ## 3. Run Migrations
 
 ```bash
@@ -65,7 +67,32 @@ cargo run -p example-app
 
 This executes all the test functions in `example-app/src/main.rs` against the database.
 
-## 6. Tear Down
+## 6. Run the Test Suite
+
+```bash
+cargo test -p example-app
+```
+
+Runs all integration tests in `example-app/tests/`.
+
+## 7. Full Regeneration (Invalidate + Rebuild + Test)
+
+To force a complete regeneration of all generated code and verify everything works:
+
+```bash
+# Invalidate generated code
+rm example-app/src/generated/mod.rs
+
+# Rebuild (triggers full code generation)
+cargo build -p example-app
+
+# Run the test suite
+cargo test -p example-app
+```
+
+This is useful before releases or after changes to the codegen logic. AutoModel detects the missing `mod.rs` and regenerates all files.
+
+## 8. Tear Down
 
 Stop and remove the container (data preserved in volume):
 

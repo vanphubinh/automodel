@@ -18,8 +18,8 @@ The CLI depends on the lib, so **the lib must be published first**.
 ## Prerequisites
 
 - `cargo login` must have been run with a valid crates.io API token
-- All changes committed and pushed
-- Tests passing (use the **testing** skill to verify)
+- Docker (with Compose v2) for running tests
+- `psql` CLI (from `postgresql-client` or equivalent) for migrations
 
 ## Procedure
 
@@ -38,7 +38,13 @@ Also update the CLI's dependency on the lib if needed:
 
 - `automodel-cli/Cargo.toml` → `automodel = { path = "../automodel-lib", version = "X" }` (the `version` field must be compatible with the new version)
 
-### 3. Pre-publish checks
+### 3. Run tests with full code regeneration
+
+Follow the **testing** skill (steps 1–4, then step 7: "Full Regeneration") to start PostgreSQL, run migrations, invalidate generated code, rebuild, and run the full test suite.
+
+All tests must pass before proceeding. If tests fail, fix the issues and restart from this step.
+
+### 4. Pre-publish checks
 
 ```bash
 # Ensure everything compiles
@@ -51,7 +57,7 @@ cargo package -p automodel-cli --allow-dirty
 
 Review any warnings. Fix before proceeding.
 
-### 4. Commit the version bump
+### 5. Commit the version bump
 
 Commit all changes **before** publishing so `cargo publish` works without `--allow-dirty`:
 
@@ -60,7 +66,7 @@ git add -A
 git commit -m "release: vX.Y.Z"
 ```
 
-### 5. Temporarily comment out `[patch.crates-io]`
+### 6. Temporarily comment out `[patch.crates-io]`
 
 The workspace `Cargo.toml` has a `[patch.crates-io]` section that redirects `automodel` to the local path. **`cargo publish` ignores `[patch]`**, so this does not block publishing. However, if you see resolution errors, temporarily comment it out:
 
@@ -71,19 +77,19 @@ The workspace `Cargo.toml` has a `[patch.crates-io]` section that redirects `aut
 
 Restore it after publishing.
 
-### 6. Publish the lib first
+### 7. Publish the lib first
 
 ```bash
 cargo publish -p automodel
 ```
 
-### 7. Publish the CLI
+### 8. Publish the CLI
 
 ```bash
 cargo publish -p automodel-cli
 ```
 
-### 8. Tag and push
+### 9. Tag and push
 
 If you commented out `[patch.crates-io]`, restore and amend the commit.
 
@@ -97,21 +103,28 @@ git push && git push --tags
 Replace `X.Y.Z` with the actual version:
 
 ```bash
-# 1. Verify
+# 1. Run tests (see testing skill for details)
+docker compose up -d
+set -x AUTOMODEL_DATABASE_URL "postgresql://postgres:password@localhost:55432/postgres"
+bash scripts/migrate.sh
+rm example-app/src/generated/mod.rs
+cargo build -p example-app && cargo test -p example-app
+
+# 2. Verify
 cargo check --workspace
 
-# 2. Dry-run
+# 3. Dry-run
 cargo package -p automodel --allow-dirty
 cargo package -p automodel-cli --allow-dirty
 
-# 3. Commit
+# 4. Commit
 git add -A && git commit -m "release: vX.Y.Z"
 
-# 4. Publish (lib first!)
+# 5. Publish (lib first!)
 cargo publish -p automodel
 cargo publish -p automodel-cli
 
-# 5. Tag & push
+# 6. Tag & push
 git tag vX.Y.Z
 git push && git push --tags
 ```
