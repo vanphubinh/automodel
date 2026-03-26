@@ -2,7 +2,7 @@
 name = "automodel"
 version = "0.9.0"
 edition = "2021"
-description = "A Rust library for generating typed functions from YAML-defined SQL queries"
+description = "AutoModel — SQL-first Reverse ORM for Rust, Built for the greater DX and for the AI Era"
 license = "MIT"
 repository = "https://github.com/thepartly/automodel"
 keywords = ["sql", "postgresql", "codegen", "database", "yaml"]
