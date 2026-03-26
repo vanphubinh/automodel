@@ -320,6 +320,36 @@ async fn query_table_constraints(
         });
     }
 
+    // Query domain CHECK constraints for columns that use domain types
+    let domain_rows = client
+        .query(
+            r#"
+            SELECT DISTINCT
+                dc.conname as constraint_name,
+                t.relname as table_name
+            FROM pg_attribute a
+            JOIN pg_class t ON a.attrelid = t.oid
+            JOIN pg_type dt ON a.atttypid = dt.oid AND dt.typtype = 'd'
+            JOIN pg_constraint dc ON dc.contypid = dt.oid AND dc.contype = 'c'
+            WHERE a.attrelid = $1
+                AND a.attnum > 0
+                AND NOT a.attisdropped
+            "#,
+            &[&table_oid],
+        )
+        .await?;
+
+    for row in domain_rows {
+        let constraint_name: String = row.get(0);
+        let table_name: String = row.get(1);
+
+        constraints.push(ConstraintInfo {
+            name: constraint_name,
+            constraint_type: "domain_check".to_string(),
+            table_name,
+        });
+    }
+
     Ok(constraints)
 }
 
@@ -471,43 +501,76 @@ fn extract_input_types(
     Ok(input_types)
 }
 
-/// Get nullability information for columns by querying PostgreSQL system catalogs
-async fn get_column_nullability(
+/// Per-column metadata resolved from pg_attribute and pg_type system catalogs
+struct ColumnMetadata {
+    is_nullable: bool,
+    /// If the column's actual type is a domain, this holds the domain's Rust name
+    domain_type_name: Option<String>,
+}
+
+/// Get column metadata (nullability and domain type info) by querying PostgreSQL system catalogs
+async fn get_column_metadata(
     client: &tokio_postgres::Client,
     columns: &[tokio_postgres::Column],
-) -> Result<Vec<bool>> {
-    let mut nullability = Vec::new();
+) -> Result<Vec<ColumnMetadata>> {
+    let mut metadata = Vec::new();
 
     for column in columns {
         let table_oid = column.table_oid();
         let column_id = column.column_id();
 
-        let is_nullable = if let (Some(table_oid), Some(column_id)) = (table_oid, column_id) {
-            // Query pg_attribute to get the actual NOT NULL constraint
+        let meta = if let (Some(table_oid), Some(column_id)) = (table_oid, column_id) {
+            // Query pg_attribute + pg_type to get nullability and detect domain types
             let rows = client
                 .query(
-                    "SELECT attnotnull FROM pg_attribute WHERE attrelid = $1 AND attnum = $2",
+                    "SELECT a.attnotnull, t.typtype, t.typname, n.nspname \
+                     FROM pg_attribute a \
+                     JOIN pg_type t ON a.atttypid = t.oid \
+                     JOIN pg_namespace n ON t.typnamespace = n.oid \
+                     WHERE a.attrelid = $1 AND a.attnum = $2",
                     &[&table_oid, &column_id],
                 )
                 .await?;
 
             if let Some(row) = rows.first() {
                 let attnotnull: bool = row.get(0);
-                !attnotnull // attnotnull=true means NOT NULL, so nullable=false
+                let typtype: i8 = row.get(1);
+                let typname: String = row.get(2);
+                let nspname: String = row.get(3);
+
+                let domain_type_name = if typtype == b'd' as i8 {
+                    // Column uses a domain type — produce its qualified Rust name
+                    Some(qualify_type_for_query_module(&format!(
+                        "super::{}::{}",
+                        crate::utils::schema_to_module_name(&nspname),
+                        crate::utils::to_pascal_case(&typname),
+                    )))
+                } else {
+                    None
+                };
+
+                ColumnMetadata {
+                    is_nullable: !attnotnull,
+                    domain_type_name,
+                }
             } else {
-                // Fallback: if we can't find the column info, assume nullable
-                true
+                ColumnMetadata {
+                    is_nullable: true,
+                    domain_type_name: None,
+                }
             }
         } else {
             // No table/column info available (computed column, function result, etc.)
-            // Assume nullable for safety
-            true
+            ColumnMetadata {
+                is_nullable: true,
+                domain_type_name: None,
+            }
         };
 
-        nullability.push(is_nullable);
+        metadata.push(meta);
     }
 
-    Ok(nullability)
+    Ok(metadata)
 }
 
 /// Extract output column types from a prepared statement
@@ -519,18 +582,25 @@ async fn extract_output_types(
     let columns = statement.columns();
     let mut output_types = Vec::new();
 
-    // Get nullability information for all columns
-    let nullability_info = get_column_nullability(client, &columns).await?;
+    // Get column metadata (nullability + domain type info)
+    let column_metadata = get_column_metadata(client, &columns).await?;
 
     for (i, column) in columns.iter().enumerate() {
         let column_name = column.name();
-        let is_nullable = nullability_info.get(i).copied().unwrap_or(true); // Default to nullable if unknown
-        let base_type_name = qualify_type_for_query_module(
-            &column
-                .type_()
-                .rust_name()
-                .map_err(|e| anyhow::anyhow!("{}", e))?,
-        );
+        let meta = column_metadata.get(i);
+        let is_nullable = meta.map(|m| m.is_nullable).unwrap_or(true);
+
+        // Use domain type name if available, otherwise fall back to the base type
+        let base_type_name = if let Some(domain_name) = meta.and_then(|m| m.domain_type_name.clone()) {
+            domain_name
+        } else {
+            qualify_type_for_query_module(
+                &column
+                    .type_()
+                    .rust_name()
+                    .map_err(|e| anyhow::anyhow!("{}", e))?,
+            )
+        };
 
         // Check if there's a custom type mapping for this field
         let (mapped_type_ref, final_nullable, needs_json_wrapper) = if let Some(mappings) =

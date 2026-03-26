@@ -99,11 +99,14 @@ pub struct GetHierarchicalUserDataItem {
 ///     ->  Recursive Union
 ///           ->  Seq Scan on users
 ///                 Filter: (referrer_id IS NULL)
-///           ->  Hash Join
-///                 Hash Cond: (u.referrer_id = uh_1.id)
+///           ->  Merge Join
+///                 Merge Cond: (u.referrer_id = uh_1.id)
 ///                 Join Filter: (u.id <> ALL (uh_1.path))
-///                 ->  Seq Scan on users u
-///                 ->  Hash
+///                 ->  Sort
+///                       Sort Key: u.referrer_id
+///                       ->  Seq Scan on users u
+///                 ->  Sort
+///                       Sort Key: uh_1.id
 ///                       ->  WorkTable Scan on user_hierarchy uh_1
 ///                             Filter: (level < 5)
 ///   ->  Sort
@@ -117,7 +120,7 @@ pub struct GetHierarchicalUserDataItem {
 ///                     Sort Key: referrals.referrer_id
 ///                     ->  Seq Scan on users referrals
 /// JIT:
-///   Functions: 29
+///   Functions: 31
 ///   Options: Inlining true, Optimization true, Expressions true, Deforming true
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "WITH RECURSIVE user_hierarchy AS (\n  -- Base case: public.users without referrers (or top-level public.users)\n  SELECT \n    id, \n    name, \n    email, \n    NULL::integer as referrer_id,\n    1 as level,\n    ARRAY[id] as path\n  FROM public.users \n  WHERE referrer_id IS NULL\n  \n  UNION ALL\n  \n  -- Recursive case: public.users with referrers\n  SELECT \n    u.id,\n    u.name,\n    u.email,\n    u.referrer_id,\n    uh.level + 1,\n    uh.path || u.id\n  FROM public.users u\n  INNER JOIN user_hierarchy uh ON u.referrer_id = uh.id\n  WHERE u.id != ALL(uh.path) -- Prevent cycles\n  AND uh.level < 5 -- Limit depth\n)\nSELECT \n  uh.id,\n  uh.name,\n  uh.email,\n  uh.referrer_id,\n  uh.level,\n  uh.path,\n  COUNT(referrals.id) as direct_referrals_count\nFROM user_hierarchy uh\nLEFT JOIN public.users referrals ON referrals.referrer_id = uh.id\nGROUP BY uh.id, uh.name, uh.email, uh.referrer_id, uh.level, uh.path\nORDER BY uh.level, uh.name"))]
 pub async fn get_hierarchical_user_data(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>) -> Result<Vec<GetHierarchicalUserDataItem>, super::ErrorReadOnly> {

@@ -474,10 +474,7 @@ impl StructField {
     /// For JSON-wrapped fields, wraps the value in `sqlx::types::Json` internally.
     fn codegen_encode_expr(&self) -> String {
         if !self.needs_json_wrapper {
-            return format!(
-                "        encoder.encode(&self.{})?;\n",
-                self.rust_name
-            );
+            return format!("        encoder.encode(&self.{})?;\n", self.rust_name);
         }
 
         if self.is_pg_array() {
@@ -605,12 +602,13 @@ impl std::ops::Deref for OutputColumn {
 }
 
 impl TypeInfo {
-    /// Generate the full type definition (enum or struct with sqlx derive macros).
-    /// Returns `None` for Simple, Array, Range, and Alias kinds.
+    /// Generate the full type definition (enum, struct, or type alias).
+    /// Returns `None` for Simple, Array, and Range kinds.
     pub fn codegen(&self, custom_derives: &[String]) -> Option<String> {
         match &self.kind {
             TypeKind::Enum(variants) => Some(self.codegen_enum(variants, custom_derives)),
             TypeKind::Struct(fields) => Some(self.codegen_struct(fields, custom_derives)),
+            TypeKind::Alias(base_type) => Some(self.codegen_alias(base_type)),
             _ => None,
         }
     }
@@ -748,7 +746,11 @@ impl TypeInfo {
             ));
             code.push_str("        Ok(Self {\n");
             for field in fields {
-                code.push_str(&format!("            {}: {},\n", field.rust_name, field.codegen_decode_expr()));
+                code.push_str(&format!(
+                    "            {}: {},\n",
+                    field.rust_name,
+                    field.codegen_decode_expr()
+                ));
             }
             code.push_str("        })\n    }\n}\n\n");
 
@@ -776,6 +778,14 @@ impl TypeInfo {
             code.push_str("}\n\n");
             code
         }
+    }
+
+    fn codegen_alias(&self, base_type: &str) -> String {
+        let name = self
+            .rust_name
+            .strip_prefix(&format!("super::{}::", self.rust_module))
+            .unwrap_or(&self.rust_name);
+        format!("pub type {} = {};\n\n", name, base_type)
     }
 
     fn build_derive_attribute(default_derives: &[&str], custom_derives: &[String]) -> String {
