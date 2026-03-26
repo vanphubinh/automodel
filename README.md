@@ -346,7 +346,8 @@ If no metadata is provided, sensible defaults are used.
 --    module: custom_module    # Override directory-based module name
 --    expect: exactly_one       # exactly_one | possible_one | at_least_one | multiple
 --    types:                    # Custom type mappings
---      profile: "crate::models::UserProfile"
+--      profile: "crate::models::UserProfile"                         # query params/output by name
+--      public.users.social_links: "Vec<crate::models::UserSocialLink>"  # composite type field
 --    telemetry:                # Per-query telemetry settings
 --      level: trace
 --      include_params: [id, name]
@@ -425,6 +426,55 @@ By default, custom types use JSON serialization. Control this with suffixes:
 
 - **`@native`**: Type implements `sqlx::Encode`/`Decode` (or `tokio_postgres::ToSql`/`FromSql`)
 - **`@json`** or no suffix: Uses JSON serialization (requires `serde::Serialize`/`Deserialize`)
+
+**Composite Type Field Mappings:**
+
+Use 3-segment keys (`schema.type.field`) to map fields inside PostgreSQL composite types. This changes the generated struct field type from `serde_json::Value` to your custom Rust type, wrapped in `sqlx::types::Json<T>`:
+
+```sql
+-- @automodel
+--    types:
+--      public.user_with_links_input.social_links: "Vec<crate::models::UserSocialLink>"
+-- @end
+
+INSERT INTO public.users (name, email, social_links)
+SELECT r.name, r.email, r.social_links
+FROM UNNEST(#{items}::public.user_with_links_input[]) AS r(name, email, social_links)
+RETURNING id, name, email, social_links
+```
+
+This generates the composite type struct with a typed field instead of `serde_json::Value`:
+
+```rust
+#[derive(sqlx::Type)]
+#[sqlx(type_name = "user_with_links_input")]
+pub struct UserWithLinksInput {
+    pub name: Option<String>,
+    pub email: Option<String>,
+    pub social_links: Option<Vec<UserSocialLink>>,
+}
+```
+
+Key details:
+
+- **`jsonb` fields** → wrapped as `Json<T>` (e.g., `Option<Json<Vec<UserSocialLink>>>`)
+- **`jsonb[]` fields** → per-element wrapping as `Vec<Json<T>>` (e.g., `Vec<Option<Json<UserTag>>>`)
+- Works for both standalone composite types (`CREATE TYPE`) and table-backed types
+- The `@json`/`@native` suffixes apply here too
+- Mappings are **global**: if two queries reference the same composite type field, both must specify the same target type (conflicting mappings produce a build error)
+- Multiple queries can contribute mappings for different fields of the same composite type
+
+```sql
+-- Both queries map the same composite type field — types must agree
+-- Query A:
+--    types:
+--      public.users.social_links: "Vec<crate::models::UserSocialLink>"
+
+-- Query B:
+--    types:
+--      public.users.social_links: "Vec<crate::models::UserSocialLink>"  # OK: same type
+--      public.users.profile: "crate::models::UserProfile"               # OK: different field
+```
 
 ### Named Parameters
 

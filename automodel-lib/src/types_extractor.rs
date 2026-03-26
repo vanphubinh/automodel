@@ -461,9 +461,9 @@ fn extract_input_types(
                 type_ref,
                 mapped_type_ref,
                 is_nullable: is_nullable_value,
+                needs_json_wrapper,
             },
             is_optional,
-            needs_json_wrapper,
             is_nullable_element: has_element_nullable,
         });
     }
@@ -583,8 +583,8 @@ async fn extract_output_types(
                 is_nullable: final_nullable,
                 type_ref: base_type_name,
                 mapped_type_ref,
+                needs_json_wrapper,
             },
-            needs_json_wrapper,
         });
     }
 

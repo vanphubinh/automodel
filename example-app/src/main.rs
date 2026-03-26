@@ -1996,19 +1996,16 @@ async fn test_social_links_composite_unnest(
         generated::types::public::UserWithLinksInput {
             name: Some("Composite User 1".to_string()),
             email: Some(format!("composite1.{}@example.com", timestamp)),
-            social_links: Some(
-                serde_json::to_value(&vec![
-                    UserSocialLink {
-                        name: "GitHub".to_string(),
-                        url: "https://github.com/composite1".to_string(),
-                    },
-                    UserSocialLink {
-                        name: "LinkedIn".to_string(),
-                        url: "https://linkedin.com/in/composite1".to_string(),
-                    },
-                ])
-                .unwrap(),
-            ),
+            social_links: Some(vec![
+                UserSocialLink {
+                    name: "GitHub".to_string(),
+                    url: "https://github.com/composite1".to_string(),
+                },
+                UserSocialLink {
+                    name: "LinkedIn".to_string(),
+                    url: "https://linkedin.com/in/composite1".to_string(),
+                },
+            ]),
         },
         generated::types::public::UserWithLinksInput {
             name: Some("Composite User 2".to_string()),
@@ -2018,13 +2015,10 @@ async fn test_social_links_composite_unnest(
         generated::types::public::UserWithLinksInput {
             name: Some("Composite User 3".to_string()),
             email: Some(format!("composite3.{}@example.com", timestamp)),
-            social_links: Some(
-                serde_json::to_value(&vec![UserSocialLink {
-                    name: "Website".to_string(),
-                    url: "https://composite3.dev".to_string(),
-                }])
-                .unwrap(),
-            ),
+            social_links: Some(vec![UserSocialLink {
+                name: "Website".to_string(),
+                url: "https://composite3.dev".to_string(),
+            }]),
         },
     ];
 

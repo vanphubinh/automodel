@@ -237,7 +237,7 @@ impl TypeSystem {
             nullability.entry(oid).or_default().push((name, !not_null));
         }
 
-        // Apply nullability to struct fields
+        // Apply nullability to struct types
         for type_info in self.types.values_mut() {
             if let TypeKind::Struct(ref mut fields) = type_info.kind {
                 if let Some(field_nulls) = nullability.get(&type_info.id) {
@@ -251,6 +251,33 @@ impl TypeSystem {
         }
 
         Ok(())
+    }
+
+    /// Apply a single custom type mapping to a composite type field.
+    ///
+    /// Finds the composite type by `schema.type_name` and sets `mapped_type_ref`
+    /// and `needs_json_wrapper` on the matching field.
+    pub fn apply_field_mapping(
+        &mut self,
+        schema: &str,
+        type_name: &str,
+        field_name: &str,
+        mapped_type: &str,
+        needs_json_wrapper: bool,
+    ) {
+        let type_info = self
+            .types
+            .values_mut()
+            .find(|ti| ti.pg_schema == schema && ti.pg_name == type_name);
+
+        if let Some(type_info) = type_info {
+            if let TypeKind::Struct(ref mut fields) = type_info.kind {
+                if let Some(field) = fields.iter_mut().find(|f| f.pg_name == *field_name) {
+                    field.mapped_type_ref = Some(mapped_type.to_string());
+                    field.needs_json_wrapper = needs_json_wrapper;
+                }
+            }
+        }
     }
 
     /// Generate type definition files grouped by rust_module, plus a mod.rs.
@@ -401,6 +428,8 @@ pub struct StructField {
     pub mapped_type_ref: Option<String>,
     /// Whether this field is nullable (wraps in Option<T>)
     pub is_nullable: bool,
+    /// Whether this field needs JSON serialization wrapper (for custom type mappings)
+    pub needs_json_wrapper: bool,
 }
 
 impl TryFrom<&PgField> for StructField {
@@ -413,6 +442,7 @@ impl TryFrom<&PgField> for StructField {
             type_ref: pg_field.type_().rust_name()?,
             mapped_type_ref: None,
             is_nullable: false,
+            needs_json_wrapper: false,
         })
     }
 }
@@ -429,19 +459,116 @@ impl StructField {
     }
 
     /// Generates a struct field declaration line: `pub field_name: Type,`
+    /// Always produces clean types without `sqlx::types::Json` wrappers.
     pub fn codegen(&self) -> String {
-        let rename = if self.rust_name != self.pg_name {
-            format!("    #[sqlx(rename = \"{}\")]\n", self.pg_name)
-        } else {
-            String::new()
-        };
         let rust_type = self.rust_type();
         let type_str = if self.is_nullable {
             format!("Option<{}>", rust_type)
         } else {
             rust_type.to_string()
         };
-        format!("{}    pub {}: {},\n", rename, self.rust_name, type_str)
+        format!("    pub {}: {},\n", self.rust_name, type_str)
+    }
+
+    /// Generates the encode expression for this field inside a `PgRecordEncoder`.
+    /// For JSON-wrapped fields, wraps the value in `sqlx::types::Json` internally.
+    fn codegen_encode_expr(&self) -> String {
+        if !self.needs_json_wrapper {
+            return format!(
+                "        encoder.encode(&self.{})?;\n",
+                self.rust_name
+            );
+        }
+
+        if self.is_pg_array() {
+            let rust_type = self.rust_type();
+            let inner = &rust_type[4..rust_type.len() - 1]; // strip "Vec<" and ">"
+            let has_inner_option = inner.starts_with("Option<");
+
+            if self.is_nullable && has_inner_option {
+                format!(
+                    "        encoder.encode(&self.{f}.as_ref().map(|v| v.iter().map(|e| e.as_ref().map(sqlx::types::Json)).collect::<Vec<_>>()))?;\n",
+                    f = self.rust_name
+                )
+            } else if self.is_nullable {
+                format!(
+                    "        encoder.encode(&self.{f}.as_ref().map(|v| v.iter().map(|e| sqlx::types::Json(e)).collect::<Vec<_>>()))?;\n",
+                    f = self.rust_name
+                )
+            } else if has_inner_option {
+                format!(
+                    "        encoder.encode(&self.{f}.iter().map(|e| e.as_ref().map(sqlx::types::Json)).collect::<Vec<_>>())?;\n",
+                    f = self.rust_name
+                )
+            } else {
+                format!(
+                    "        encoder.encode(&self.{f}.iter().map(|e| sqlx::types::Json(e)).collect::<Vec<_>>())?;\n",
+                    f = self.rust_name
+                )
+            }
+        } else if self.is_nullable {
+            format!(
+                "        encoder.encode(&self.{f}.as_ref().map(sqlx::types::Json))?;\n",
+                f = self.rust_name
+            )
+        } else {
+            format!(
+                "        encoder.encode(&sqlx::types::Json(&self.{f}))?;\n",
+                f = self.rust_name
+            )
+        }
+    }
+
+    /// Generates an inline decode expression for use in struct field initialization.
+    /// For JSON-wrapped fields, decodes as `Json<T>` and unwraps to the clean type.
+    fn codegen_decode_expr(&self) -> String {
+        if !self.needs_json_wrapper {
+            return "decoder.try_decode()?".to_string();
+        }
+
+        let rust_type = self.rust_type();
+
+        if self.is_pg_array() {
+            let inner = &rust_type[4..rust_type.len() - 1]; // strip "Vec<" and ">"
+            let has_inner_option = inner.starts_with("Option<");
+            let elem = if has_inner_option {
+                &inner[7..inner.len() - 1] // strip "Option<" and ">"
+            } else {
+                inner
+            };
+
+            if self.is_nullable && has_inner_option {
+                format!(
+                    "decoder.try_decode::<Option<Vec<Option<sqlx::types::Json<{e}>>>>>()?.map(|v| v.into_iter().map(|e| e.map(|j| j.0)).collect())",
+                    e = elem
+                )
+            } else if self.is_nullable {
+                format!(
+                    "decoder.try_decode::<Option<Vec<sqlx::types::Json<{e}>>>>()?.map(|v| v.into_iter().map(|j| j.0).collect())",
+                    e = elem
+                )
+            } else if has_inner_option {
+                format!(
+                    "decoder.try_decode::<Vec<Option<sqlx::types::Json<{e}>>>>()?.into_iter().map(|e| e.map(|j| j.0)).collect::<Vec<_>>()",
+                    e = elem
+                )
+            } else {
+                format!(
+                    "decoder.try_decode::<Vec<sqlx::types::Json<{e}>>>()?.into_iter().map(|j| j.0).collect::<Vec<_>>()",
+                    e = elem
+                )
+            }
+        } else if self.is_nullable {
+            format!(
+                "decoder.try_decode::<Option<sqlx::types::Json<{t}>>>()?.map(|v| v.0)",
+                t = rust_type
+            )
+        } else {
+            format!(
+                "decoder.try_decode::<sqlx::types::Json<{t}>>()?.0",
+                t = rust_type
+            )
+        }
     }
 }
 
@@ -451,8 +578,6 @@ pub struct InputParam {
     pub field: StructField,
     /// Whether this is an optional (conditional) parameter (`?` suffix)
     pub is_optional: bool,
-    /// Whether this field needs JSON serialization wrapper (for custom type mappings)
-    pub needs_json_wrapper: bool,
     /// Whether array elements are nullable (`[?]` suffix): Vec<T> → Vec<Option<T>>
     /// The actual type wrapping happens during extraction; this field records the annotation.
     #[allow(dead_code)]
@@ -470,8 +595,6 @@ impl std::ops::Deref for InputParam {
 #[derive(Debug, Clone)]
 pub struct OutputColumn {
     pub field: StructField,
-    /// Whether this field needs JSON serialization wrapper (for custom type mappings)
-    pub needs_json_wrapper: bool,
 }
 
 impl std::ops::Deref for OutputColumn {
@@ -561,26 +684,98 @@ impl TypeInfo {
             .rust_name
             .strip_prefix(&format!("super::{}::", self.rust_module))
             .unwrap_or(&self.rust_name);
-        let derive_attr = Self::build_derive_attribute(
-            &[
-                "Debug",
-                "Clone",
-                "serde::Serialize",
-                "serde::Deserialize",
-                "sqlx::Type",
-            ],
-            custom_derives,
-        );
 
-        let mut code = format!(
-            "{}\n#[sqlx(type_name = \"{}\")]\npub struct {} {{\n",
-            derive_attr, self.pg_name, name
-        );
-        for field in fields {
-            code.push_str(&field.codegen());
+        let has_json_fields = fields.iter().any(|f| f.needs_json_wrapper);
+
+        if has_json_fields {
+            // Manual impl path: clean struct + hand-written Type/Encode/Decode
+            let derive_attr = Self::build_derive_attribute(
+                &["Debug", "Clone", "serde::Serialize", "serde::Deserialize"],
+                custom_derives,
+            );
+
+            let mut code = format!("{}\npub struct {} {{\n", derive_attr, name);
+            for field in fields {
+                code.push_str(&field.codegen());
+            }
+            code.push_str("}\n\n");
+
+            // impl Type
+            code.push_str(&format!(
+                "impl sqlx::Type<sqlx::Postgres> for {} {{\n    \
+                 fn type_info() -> sqlx::postgres::PgTypeInfo {{\n        \
+                 sqlx::postgres::PgTypeInfo::with_name(\"{}\")\n    \
+                 }}\n}}\n\n",
+                name, self.pg_name
+            ));
+
+            // impl PgHasArrayType (needed when the type is used as an array parameter)
+            code.push_str(&format!(
+                "impl sqlx::postgres::PgHasArrayType for {} {{\n    \
+                 fn array_type_info() -> sqlx::postgres::PgTypeInfo {{\n        \
+                 sqlx::postgres::PgTypeInfo::with_name(\"_{}\")\n    \
+                 }}\n}}\n\n",
+                name, self.pg_name
+            ));
+
+            // impl Encode
+            code.push_str(&format!(
+                "impl sqlx::Encode<'_, sqlx::Postgres> for {} {{\n    \
+                 fn encode_by_ref(\n        \
+                 &self,\n        \
+                 buf: &mut sqlx::postgres::PgArgumentBuffer,\n    \
+                 ) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {{\n        \
+                 let mut encoder = sqlx::postgres::types::PgRecordEncoder::new(buf);\n",
+                name
+            ));
+            for field in fields {
+                code.push_str(&field.codegen_encode_expr());
+            }
+            code.push_str(
+                "        encoder.finish();\n        \
+                 Ok(sqlx::encode::IsNull::No)\n    \
+                 }\n}\n\n",
+            );
+
+            // impl Decode
+            code.push_str(&format!(
+                "impl<'r> sqlx::Decode<'r, sqlx::Postgres> for {} {{\n    \
+                 fn decode(\n        \
+                 value: sqlx::postgres::PgValueRef<'r>,\n    \
+                 ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {{\n        \
+                 let mut decoder = sqlx::postgres::types::PgRecordDecoder::new(value)?;\n",
+                name
+            ));
+            code.push_str("        Ok(Self {\n");
+            for field in fields {
+                code.push_str(&format!("            {}: {},\n", field.rust_name, field.codegen_decode_expr()));
+            }
+            code.push_str("        })\n    }\n}\n\n");
+
+            code
+        } else {
+            // Derive path: standard #[derive(sqlx::Type)]
+            let derive_attr = Self::build_derive_attribute(
+                &[
+                    "Debug",
+                    "Clone",
+                    "serde::Serialize",
+                    "serde::Deserialize",
+                    "sqlx::Type",
+                ],
+                custom_derives,
+            );
+
+            let mut code = format!(
+                "{}\n#[sqlx(type_name = \"{}\")]\npub struct {} {{\n",
+                derive_attr, self.pg_name, name
+            );
+            for field in fields {
+                code.push_str(&field.codegen());
+            }
+            code.push_str("}\n\n");
+            code
         }
-        code.push_str("}\n\n");
-        code
     }
 
     fn build_derive_attribute(default_derives: &[&str], custom_derives: &[String]) -> String {

@@ -327,11 +327,11 @@ pub struct FindUsersByNameAndAgeItem {
 /// Bitmap Heap Scan on users
 ///   Recheck Cond: (age >= 0)
 ///   Filter: (((name)::text ~~* 'dummy'::text) AND ((name)::text = 'dummy'::text))
-///   ->  Bitmap Index Scan on idx_users_age_updated_at
+///   ->  Bitmap Index Scan on idx_users_age
 ///         Index Cond: (age >= 0)
 /// 
 /// === find_users_by_name_and_age (variant 2) ===
-/// Index Scan using idx_users_age_updated_at on users
+/// Index Scan using idx_users_age on users
 ///   Index Cond: (age <= 0)
 ///   Filter: (((name)::text ~~* 'dummy'::text) AND ((name)::text = 'dummy'::text))
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, age \nFROM public.users \nWHERE name ILIKE #{name_pattern} \n#[AND age >= #{min_age?}] \nAND name = #{name_exact} \n#[AND age <= #{max_age?}] \nORDER BY name"))]
@@ -570,7 +570,7 @@ pub struct SearchUsersAdvancedItem {
 ///   Sort Key: created_at DESC
 ///   ->  Bitmap Heap Scan on users
 ///         Recheck Cond: (age >= 0)
-///         ->  Bitmap Index Scan on idx_users_age_updated_at
+///         ->  Bitmap Index Scan on idx_users_age
 ///               Index Cond: (age >= 0)
 /// 
 /// === search_users_advanced (variant 3) ===

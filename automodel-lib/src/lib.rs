@@ -372,6 +372,74 @@ impl AutoModel {
             .await
             .unwrap_or_else(|e| eprintln!("Warning: failed to resolve field nullability: {}", e));
 
+        // Apply custom type mappings to composite type fields (from query-level `types:` configs)
+        // Collect all 3-segment keys (schema.type.field) from all queries, detect conflicts,
+        // then apply the merged mappings to the type system.
+        //
+        // Key: (schema.type_name, field_name) → (mapped_type, needs_json_wrapper, source_query)
+        let mut merged: std::collections::HashMap<(String, String), (String, bool, String)> =
+            std::collections::HashMap::new();
+
+        for query in analyzed_queries {
+            let Some(ref mappings) = query.definition.types else {
+                continue;
+            };
+            for (key, value) in mappings {
+                let parts: Vec<&str> = key.splitn(3, '.').collect();
+                if parts.len() != 3 {
+                    continue;
+                }
+                let composite_key = format!("{}.{}", parts[0], parts[1]);
+                let field_name = parts[2].to_string();
+
+                // Parse @json/@native suffix
+                let (clean_type, needs_wrapper) = if value.ends_with("@json") {
+                    (&value[..value.len() - 5], true)
+                } else if value.ends_with("@native") {
+                    (&value[..value.len() - 7], false)
+                } else {
+                    (value.as_str(), true)
+                };
+
+                let map_key = (composite_key.clone(), field_name.clone());
+                if let Some((existing_type, _, existing_source)) = merged.get(&map_key) {
+                    if existing_type != clean_type {
+                        anyhow::bail!(
+                            "Conflicting type mappings for composite field `{}.{}`:\n  \
+                             - {}: \"{}\"\n  \
+                             - {}: \"{}\"",
+                            composite_key,
+                            field_name,
+                            existing_source,
+                            existing_type,
+                            query.definition.name,
+                            clean_type,
+                        );
+                    }
+                } else {
+                    merged.insert(
+                        map_key,
+                        (
+                            clean_type.to_string(),
+                            needs_wrapper,
+                            query.definition.name.clone(),
+                        ),
+                    );
+                }
+            }
+        }
+
+        for ((composite_key, field_name), (mapped_type, needs_wrapper, _)) in &merged {
+            let parts: Vec<&str> = composite_key.splitn(2, '.').collect();
+            type_system.apply_field_mapping(
+                parts[0],
+                parts[1],
+                field_name,
+                mapped_type,
+                *needs_wrapper,
+            );
+        }
+
         Ok(type_system)
     }
 

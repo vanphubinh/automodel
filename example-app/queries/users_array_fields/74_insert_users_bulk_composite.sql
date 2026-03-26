@@ -3,6 +3,7 @@
 --    expect: multiple
 --    types:
 --      public.users.social_links: "Vec<crate::models::UserSocialLink>"
+--      public.user_with_links_input.social_links: "Vec<crate::models::UserSocialLink>"
 -- @end
 
 INSERT INTO public.users (name, email, social_links)

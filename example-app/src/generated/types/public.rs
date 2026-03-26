@@ -40,31 +40,129 @@ impl std::fmt::Display for UserStatus {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::Type)]
-#[sqlx(type_name = "users")]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Users {
     pub id: i32,
     pub name: String,
     pub email: String,
     pub status: Option<super::public::UserStatus>,
-    pub profile: Option<serde_json::Value>,
+    pub profile: Option<crate::models::UserProfile>,
     pub settings: Option<serde_json::Value>,
     pub is_active: Option<bool>,
     pub age: Option<i32>,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
     pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
     pub referrer_id: Option<i32>,
-    pub social_links: Option<serde_json::Value>,
-    pub tags: Option<Vec<serde_json::Value>>,
-    pub labels: Vec<serde_json::Value>,
+    pub social_links: Option<Vec<crate::models::UserSocialLink>>,
+    pub tags: Option<Vec<Option<crate::models::UserTag>>>,
+    pub labels: Vec<Option<crate::models::UserTag>>,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::Type)]
-#[sqlx(type_name = "user_with_links_input")]
+impl sqlx::Type<sqlx::Postgres> for Users {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        sqlx::postgres::PgTypeInfo::with_name("users")
+    }
+}
+
+impl sqlx::postgres::PgHasArrayType for Users {
+    fn array_type_info() -> sqlx::postgres::PgTypeInfo {
+        sqlx::postgres::PgTypeInfo::with_name("_users")
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for Users {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+        let mut encoder = sqlx::postgres::types::PgRecordEncoder::new(buf);
+        encoder.encode(&self.id)?;
+        encoder.encode(&self.name)?;
+        encoder.encode(&self.email)?;
+        encoder.encode(&self.status)?;
+        encoder.encode(&self.profile.as_ref().map(sqlx::types::Json))?;
+        encoder.encode(&self.settings)?;
+        encoder.encode(&self.is_active)?;
+        encoder.encode(&self.age)?;
+        encoder.encode(&self.created_at)?;
+        encoder.encode(&self.updated_at)?;
+        encoder.encode(&self.referrer_id)?;
+        encoder.encode(&self.social_links.as_ref().map(sqlx::types::Json))?;
+        encoder.encode(&self.tags.as_ref().map(|v| v.iter().map(|e| e.as_ref().map(sqlx::types::Json)).collect::<Vec<_>>()))?;
+        encoder.encode(&self.labels.iter().map(|e| e.as_ref().map(sqlx::types::Json)).collect::<Vec<_>>())?;
+        encoder.finish();
+        Ok(sqlx::encode::IsNull::No)
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Users {
+    fn decode(
+        value: sqlx::postgres::PgValueRef<'r>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let mut decoder = sqlx::postgres::types::PgRecordDecoder::new(value)?;
+        Ok(Self {
+            id: decoder.try_decode()?,
+            name: decoder.try_decode()?,
+            email: decoder.try_decode()?,
+            status: decoder.try_decode()?,
+            profile: decoder.try_decode::<Option<sqlx::types::Json<crate::models::UserProfile>>>()?.map(|v| v.0),
+            settings: decoder.try_decode()?,
+            is_active: decoder.try_decode()?,
+            age: decoder.try_decode()?,
+            created_at: decoder.try_decode()?,
+            updated_at: decoder.try_decode()?,
+            referrer_id: decoder.try_decode()?,
+            social_links: decoder.try_decode::<Option<sqlx::types::Json<Vec<crate::models::UserSocialLink>>>>()?.map(|v| v.0),
+            tags: decoder.try_decode::<Option<Vec<Option<sqlx::types::Json<crate::models::UserTag>>>>>()?.map(|v| v.into_iter().map(|e| e.map(|j| j.0)).collect()),
+            labels: decoder.try_decode::<Vec<Option<sqlx::types::Json<crate::models::UserTag>>>>()?.into_iter().map(|e| e.map(|j| j.0)).collect::<Vec<_>>(),
+        })
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UserWithLinksInput {
     pub name: Option<String>,
     pub email: Option<String>,
-    pub social_links: Option<serde_json::Value>,
+    pub social_links: Option<Vec<crate::models::UserSocialLink>>,
+}
+
+impl sqlx::Type<sqlx::Postgres> for UserWithLinksInput {
+    fn type_info() -> sqlx::postgres::PgTypeInfo {
+        sqlx::postgres::PgTypeInfo::with_name("user_with_links_input")
+    }
+}
+
+impl sqlx::postgres::PgHasArrayType for UserWithLinksInput {
+    fn array_type_info() -> sqlx::postgres::PgTypeInfo {
+        sqlx::postgres::PgTypeInfo::with_name("_user_with_links_input")
+    }
+}
+
+impl sqlx::Encode<'_, sqlx::Postgres> for UserWithLinksInput {
+    fn encode_by_ref(
+        &self,
+        buf: &mut sqlx::postgres::PgArgumentBuffer,
+    ) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync>> {
+        let mut encoder = sqlx::postgres::types::PgRecordEncoder::new(buf);
+        encoder.encode(&self.name)?;
+        encoder.encode(&self.email)?;
+        encoder.encode(&self.social_links.as_ref().map(sqlx::types::Json))?;
+        encoder.finish();
+        Ok(sqlx::encode::IsNull::No)
+    }
+}
+
+impl<'r> sqlx::Decode<'r, sqlx::Postgres> for UserWithLinksInput {
+    fn decode(
+        value: sqlx::postgres::PgValueRef<'r>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let mut decoder = sqlx::postgres::types::PgRecordDecoder::new(value)?;
+        Ok(Self {
+            name: decoder.try_decode()?,
+            email: decoder.try_decode()?,
+            social_links: decoder.try_decode::<Option<sqlx::types::Json<Vec<crate::models::UserSocialLink>>>>()?.map(|v| v.0),
+        })
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::Type)]
