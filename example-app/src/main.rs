@@ -50,6 +50,10 @@ async fn run_examples(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
     println!("\n=== Testing Conditional Update with Diff ===");
     test_conditional_update_diff(pool).await?;
 
+    // Test optional+nullable parameter (??)
+    println!("\n=== Testing Optional+Nullable Parameter (??) ===");
+    test_optional_nullable_update(pool).await?;
+
     // Test structured parameters
     println!("\n=== Testing Structured Parameters ===");
     test_structured_parameters(pool).await?;
@@ -374,6 +378,54 @@ async fn test_conditional_update_diff(pool: &PgPool) -> Result<(), Box<dyn std::
 
     println!("\n✓ Diff-based conditional update examples completed successfully!");
     println!("With conditions_type: true, the function compares old.field != new.field to decide which SET clauses to include");
+
+    Ok(())
+}
+
+async fn test_optional_nullable_update(pool: &PgPool) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Demonstrating ?? suffix for Option<Option<T>>...");
+
+    // Create a test user
+    let timestamp = chrono::Utc::now().timestamp();
+    let email = format!("nullable.test.{}@example.com", timestamp);
+    let user = generated::user_model::create_user(pool, "Nullable Test".to_string(), email, Some(25)).await?;
+    println!("✓ Created user: id={}, name={}, age={:?}", user.id, user.name, user.age);
+
+    // Case 1: None → skip the age block entirely (no change)
+    println!("\n1. Passing None for age → skip conditional block (age unchanged)...");
+    let updated = generated::user_model::update_user_nullable(
+        pool,
+        Some("Nullable Test v2".to_string()), // update name
+        None,                                   // age?? = None → skip block
+        user.id,
+    ).await?;
+    println!("✓ age unchanged: {:?} (was {:?})", updated.age, user.age);
+    assert_eq!(updated.age, Some(25), "age should be unchanged when None");
+
+    // Case 2: Some(None) → include block, set age to NULL
+    println!("\n2. Passing Some(None) for age → set age to NULL...");
+    let updated = generated::user_model::update_user_nullable(
+        pool,
+        None,           // skip name block
+        Some(None),     // age?? = Some(None) → SET age = NULL
+        user.id,
+    ).await?;
+    println!("✓ age set to NULL: {:?}", updated.age);
+    assert_eq!(updated.age, None, "age should be NULL when Some(None)");
+
+    // Case 3: Some(Some(42)) → include block, set age to 42
+    println!("\n3. Passing Some(Some(42)) for age → set age to 42...");
+    let updated = generated::user_model::update_user_nullable(
+        pool,
+        None,             // skip name block
+        Some(Some(42)),   // age?? = Some(Some(42)) → SET age = 42
+        user.id,
+    ).await?;
+    println!("✓ age set to 42: {:?}", updated.age);
+    assert_eq!(updated.age, Some(42), "age should be 42 when Some(Some(42))");
+
+    println!("\n✓ Optional+nullable (??) test completed!");
+    println!("  None → skip block, Some(None) → set NULL, Some(Some(v)) → set value");
 
     Ok(())
 }

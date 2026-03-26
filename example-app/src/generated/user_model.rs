@@ -203,3 +203,65 @@ pub async fn find_user_by_email(executor: impl sqlx::Executor<'_, Database = sql
     }
 }
 
+/// Update user with optional-nullable age - demonstrates ?? suffix for Option<Option<T>>
+#[tracing::instrument(level = "debug", skip_all, fields(sql = "UPDATE public.users \nSET updated_at = NOW() \n  #[, name = #{name?}] \n  #[, age = #{age??}] \nWHERE id = #{id} \nRETURNING id, name, email, age"))]
+pub async fn update_user_nullable(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, name: Option<String>, age: Option<Option<i32>>, id: i32) -> Result<UserModel, super::Error<UserContentConstraints>> {
+    let mut final_sql = r"UPDATE public.users 
+SET updated_at = NOW() 
+  #[, name = #{name?}] 
+  #[, age = #{age??}] 
+WHERE id = $1 
+RETURNING id, name, email, age".to_string();
+    let mut included_params = Vec::new();
+
+    if name.is_some() {
+        final_sql = final_sql.replace(r"#[, name = #{name?}]", r", name = #{name?}");
+        included_params.push("name");
+    } else {
+        final_sql = final_sql.replace(r"#[, name = #{name?}]", "");
+    }
+
+    if age.is_some() {
+        final_sql = final_sql.replace(r"#[, age = #{age??}]", r", age = #{age??}");
+        included_params.push("age");
+    } else {
+        final_sql = final_sql.replace(r"#[, age = #{age??}]", "");
+    }
+
+    #[allow(unused_assignments)]
+    let mut param_counter = 1;
+    final_sql = final_sql.replace(r"#{id}", &format!("${}", param_counter));
+    param_counter += 1;
+    if included_params.contains(&r"name") {
+        final_sql = final_sql.replace(r"#{name?}", &format!("${}", param_counter));
+        param_counter += 1;
+    }
+    if included_params.contains(&r"age") {
+        final_sql = final_sql.replace(r"#{age??}", &format!("${}", param_counter));
+        param_counter += 1;
+    }
+    let _ = param_counter; // Suppress unused assignment warning
+
+    let mut query = sqlx::query(&final_sql);
+
+    query = query.bind(&id);
+    if included_params.contains(&r"name") {
+        query = query.bind(name.as_ref().unwrap());
+    }
+
+    if included_params.contains(&r"age") {
+        query = query.bind(age.as_ref().unwrap());
+    }
+
+    let row = query.fetch_one(executor).await?;
+    let result: Result<_, sqlx::Error> = (|| {
+        Ok(UserModel {
+        id: row.try_get::<i32, _>("id")?,
+        name: row.try_get::<String, _>("name")?,
+        email: row.try_get::<String, _>("email")?,
+        age: row.try_get::<Option<i32>, _>("age")?,
+    })
+    })();
+    result.map_err(Into::into)
+}
+
