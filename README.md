@@ -443,24 +443,47 @@ WHERE user_id = #{user_id}
   AND (#{category?} IS NULL OR category = #{category?})
 ```
 
-**Array Parameters with Nullable Elements:**
-Use `??` suffix for array parameters where individual elements can be NULL, resulting in `Vec<Option<T>>`:
+**Optional + Nullable Parameters (`??`):**
+Use `??` suffix in conditional blocks when a parameter is both optional (controls block inclusion) and nullable (can set the column to NULL). Generates `Option<Option<T>>`:
+
+```sql
+UPDATE users 
+SET updated_at = NOW() 
+  #[, age = #{age??}] 
+WHERE id = #{user_id} 
+RETURNING *
+```
+
+- `None` → skip the conditional block entirely (no change)  
+- `Some(None)` → include the block, set value to NULL  
+- `Some(Some(35))` → include the block, set value to 35
+
+**Array Parameters with Nullable Elements (`[?]`):**
+Use `[?]` suffix for array parameters where individual elements can be NULL, resulting in `Vec<Option<T>>`:
 
 ```sql
 INSERT INTO users (name, email, age)
 SELECT * FROM UNNEST(
   #{names}::text[],
   #{emails}::text[],
-  #{ages??}::int4[]  -- Vec<Option<i32>>: array where elements can be NULL
+  #{ages[?]}::int4[]  -- Vec<Option<i32>>: array where elements can be NULL
 )
 ```
 
-**Comparison:**
-- `#{param}` → `T` - Regular parameter
-- `#{param?}` → `Option<T>` - Optional parameter (entire value can be NULL)
-- `#{param}::type[]` → `Vec<T>` - Array parameter
-- `#{param?}::type[]` → `Option<Vec<T>>` - Optional array (entire array can be NULL)
-- `#{param??}::type[]` → `Vec<Option<T>>` - Array with nullable elements
+**Parameter Suffix Reference:**
+
+| Suffix | Generated Type | Use Case |
+|--------|---------------|----------|
+| (none) | `T` | Required parameter |
+| `?` | `Option<T>` | Optional / conditional block parameter |
+| `??` | `Option<Option<T>>` | Conditional block + nullable (skip / set NULL / set value) |
+| `[?]` | `Vec<Option<T>>` | Array with nullable elements |
+| `?[?]` | `Option<Vec<Option<T>>>` | Optional array with nullable elements |
+| `??[?]` | `Option<Option<Vec<Option<T>>>>` | Conditional + nullable array with nullable elements |
+
+Suffixes are orthogonal and compose: `?` controls optionality, second `?` adds value nullability, `[?]` adds element nullability.
+
+> **Note:** Top-level `Option<>` in type mappings is banned. Use suffix annotations instead. If a custom type mapping like `Vec<Option<T>>` already has nullable elements, the `[?]` suffix is a no-op (no double-wrapping).
 
 ### Per-Query Telemetry Configuration
 
@@ -852,10 +875,35 @@ update_user_fields_diff(executor, &old, &new, 42).await?;
 ```
 
 **How It Works:**
-- The struct contains only conditional parameters (those ending with `?`)
+- The struct contains only conditional parameters (those ending with `?` or `??`)
 - Non-conditional parameters remain as individual function parameters
 - At runtime, the function compares `old.field != new.field`
 - Only clauses where the field differs are included in the query
+
+**Nullable Fields with `??`:**
+
+Use `??` in conditional blocks when a field is nullable (e.g., `age` column that allows NULL):
+
+```sql
+-- @automodel
+--    conditions_type: true
+-- @end
+
+UPDATE users 
+SET updated_at = NOW() 
+  #[, name = #{name?}] 
+  #[, age = #{age??}] 
+WHERE id = #{user_id}
+```
+
+```rust
+pub struct UpdateUserParamsParams {
+    pub name: String,          // ? → non-nullable field
+    pub age: Option<i32>,      // ?? → nullable field (can be set to NULL)
+}
+```
+
+With `conditions_type`, the diff comparison works naturally: if `old.age != new.age`, the clause is included — and `new.age` being `None` means "set to NULL".
 
 **Struct Reuse:**
 

@@ -453,6 +453,10 @@ pub struct InputParam {
     pub is_optional: bool,
     /// Whether this field needs JSON serialization wrapper (for custom type mappings)
     pub needs_json_wrapper: bool,
+    /// Whether array elements are nullable (`[?]` suffix): Vec<T> → Vec<Option<T>>
+    /// The actual type wrapping happens during extraction; this field records the annotation.
+    #[allow(dead_code)]
+    pub is_nullable_element: bool,
 }
 
 impl std::ops::Deref for InputParam {

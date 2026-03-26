@@ -3,6 +3,22 @@ use crate::{
     utils::{to_pascal_case, to_snake_case},
 };
 
+/// Strip input parameter suffixes (??[?], ?[?], ??, [?], ?) from a raw parameter name
+pub fn strip_input_suffix(name: &str) -> String {
+    let s = if name.ends_with("[?]") {
+        &name[..name.len() - 3]
+    } else {
+        name
+    };
+    if s.ends_with("??") {
+        s[..s.len() - 2].to_string()
+    } else if s.ends_with('?') {
+        s[..s.len() - 1].to_string()
+    } else {
+        s.to_string()
+    }
+}
+
 /// Build derive attribute string from a list of custom derives and default derives
 /// Returns a string like "#[derive(Debug, Clone, Serialize, Deserialize)]"
 fn build_derive_attribute(default_derives: &[&str], custom_derives: &[String]) -> String {
@@ -38,18 +54,15 @@ pub fn generate_input_params_with_names(
         let default_name = format!("param_{}", i + 1);
         let raw_param_name = param_names.get(i).unwrap_or(&default_name);
 
-        // Strip the ?? or ? suffix for parameters when generating function parameter names
-        let clean_param_name = if raw_param_name.ends_with("??") {
-            raw_param_name[..raw_param_name.len() - 2].to_string()
-        } else if raw_param_name.ends_with('?') {
-            raw_param_name.trim_end_matches('?').to_string()
-        } else {
-            raw_param_name.clone()
-        };
+        // Strip all suffixes (??[?], ?[?], ??, [?], ?) for parameter names
+        let clean_param_name = strip_input_suffix(raw_param_name);
 
         // Only add if we haven't seen this parameter name before
         if !unique_params.contains_key(&clean_param_name) {
-            let final_type = if rust_type.is_nullable || rust_type.is_optional {
+            let final_type = if rust_type.is_optional && rust_type.is_nullable {
+                // ?? suffix: Option<Option<T>> for conditional + nullable
+                format!("Option<Option<{}>>", rust_type.rust_type())
+            } else if rust_type.is_nullable || rust_type.is_optional {
                 format!("Option<{}>", rust_type.rust_type())
             } else {
                 rust_type.rust_type().to_string()
@@ -196,10 +209,10 @@ pub fn generate_conditional_diff_struct(
         let default_name = format!("param_{}", i + 1);
         let raw_param_name = param_names.get(i).unwrap_or(&default_name);
 
-        // Only process conditional parameters (those ending with '?')
+        // Only process conditional parameters (those ending with '?' or '??')
         if raw_param_name.ends_with('?') {
-            // Strip the ? suffix
-            let clean_param_name = raw_param_name.trim_end_matches('?').to_string();
+            // Strip all suffixes
+            let clean_param_name = strip_input_suffix(raw_param_name);
 
             // Only add if we haven't seen this parameter name before
             if !unique_params.contains_key(&clean_param_name) {
@@ -257,7 +270,11 @@ pub fn generate_conditional_diff_params(
                 } else {
                     rust_type.rust_type().to_string()
                 };
-                non_conditional_params.push(format!("{}: {}", param_name, final_type));
+                non_conditional_params.push(format!(
+                    "{}: {}",
+                    strip_input_suffix(param_name),
+                    final_type
+                ));
             }
         }
     }
@@ -302,8 +319,8 @@ pub fn generate_structured_params_struct(
         let default_name = format!("param_{}", i + 1);
         let param_name = param_names.get(i).unwrap_or(&default_name);
 
-        // Clean parameter name (remove '?' if present for conditional params)
-        let clean_param_name = param_name.trim_end_matches('?').to_string();
+        // Clean parameter name (remove suffixes if present)
+        let clean_param_name = strip_input_suffix(param_name);
 
         // Only add if we haven't seen this parameter name before
         if !unique_params.contains_key(&clean_param_name) {

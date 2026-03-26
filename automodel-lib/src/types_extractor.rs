@@ -330,11 +330,16 @@ fn qualify_type_for_query_module(type_name: &str) -> String {
     type_name.replace("super::", "super::types::")
 }
 
-/// Transform `Vec<T>` into `Vec<Option<T>>` for array parameters with nullable elements (`??` suffix).
+/// Transform `Vec<T>` into `Vec<Option<T>>` for array parameters with nullable elements (`[?]` suffix).
+/// If the inner type is already `Option<...>`, returns the input unchanged to avoid double-wrapping.
 fn wrap_vec_elements_nullable(type_name: &str) -> String {
     if type_name.starts_with("Vec<") && type_name.ends_with('>') {
         let inner = &type_name[4..type_name.len() - 1];
-        format!("Vec<Option<{}>>", inner)
+        if inner.starts_with("Option<") {
+            type_name.to_string()
+        } else {
+            format!("Vec<Option<{}>>", inner)
+        }
     } else {
         type_name.to_string()
     }
@@ -353,23 +358,31 @@ fn extract_input_types(
         // Check if this parameter has special suffixes
         let param_name = param_names.get(i).map(|s| s.as_str()).unwrap_or("");
 
-        // Check for ?? suffix (array with nullable elements)
-        let is_nullable_elements = param_name.ends_with("??");
-
-        // Check for ? suffix (optional parameter)
-        let is_optional_param = if is_nullable_elements {
-            false // ?? takes precedence over ?
-        } else {
-            param_name.ends_with('?')
-        };
-
-        // Get clean parameter name (without ?, or ?? suffix)
-        let clean_param_name = if is_nullable_elements {
-            &param_name[..param_name.len() - 2] // Remove ??
-        } else if is_optional_param {
-            &param_name[..param_name.len() - 1] // Remove ?
+        // Parse suffix combination: ??[?], ?[?], ??, [?], ?, or none
+        // [?] = nullable elements (Vec<T> → Vec<Option<T>>)
+        // ?  = optional (conditional block inclusion) / nullable (non-conditional)
+        // ?? = optional + nullable (conditional block: None=skip, Some(None)=NULL, Some(Some(v))=value)
+        let has_element_nullable = param_name.ends_with("[?]");
+        let base_for_suffix = if has_element_nullable {
+            &param_name[..param_name.len() - 3] // Strip [?]
         } else {
             param_name
+        };
+        let is_optional_and_nullable = base_for_suffix.ends_with("??");
+        let is_optional_param = if is_optional_and_nullable {
+            true
+        } else {
+            base_for_suffix.ends_with('?')
+        };
+        let is_nullable_value = is_optional_and_nullable;
+
+        // Get clean parameter name (without all suffixes)
+        let clean_param_name = if is_optional_and_nullable {
+            &base_for_suffix[..base_for_suffix.len() - 2] // Remove ??
+        } else if is_optional_param {
+            &base_for_suffix[..base_for_suffix.len() - 1] // Remove ?
+        } else {
+            base_for_suffix
         };
 
         let base_type_name = qualify_type_for_query_module(
@@ -378,8 +391,8 @@ fn extract_input_types(
                 .map_err(|e| anyhow::anyhow!("{}", e))?,
         );
 
-        // For ?? suffix: wrap array element type in Option (Vec<T> -> Vec<Option<T>>)
-        let type_ref = if is_nullable_elements {
+        // For [?] suffix: wrap array element type in Option (Vec<T> -> Vec<Option<T>>)
+        let type_ref = if has_element_nullable {
             wrap_vec_elements_nullable(&base_type_name)
         } else {
             base_type_name
@@ -401,6 +414,24 @@ fn extract_input_types(
                 .map(|(_, rust_type_name)| rust_type_name.clone());
 
             if let Some(custom_type) = custom_type {
+                // Reject top-level Option<> in type mappings
+                let stripped = custom_type.trim();
+                let without_suffix = if stripped.ends_with("@json") {
+                    &stripped[..stripped.len() - 5]
+                } else if stripped.ends_with("@native") {
+                    &stripped[..stripped.len() - 7]
+                } else {
+                    stripped
+                };
+                if without_suffix.starts_with("Option<") {
+                    anyhow::bail!(
+                        "Type mapping for '{}' must not use Option<>. \
+                         For output columns, nullability is automatically inferred from the database schema. \
+                         For input parameters, use the ?, ??, or [?] suffix annotations in the query.",
+                        clean_param_name
+                    );
+                }
+
                 // Check for explicit JSON wrapper control via @json or @native suffix
                 // - Type@json: Force JSON wrapper (for custom types without sqlx traits)
                 // - Type@native: No JSON wrapper (for types implementing sqlx::Encode/Decode)
@@ -413,7 +444,7 @@ fn extract_input_types(
                     (custom_type.as_str(), true)
                 };
 
-                mapped_type_ref = Some(if is_nullable_elements {
+                mapped_type_ref = Some(if has_element_nullable {
                     wrap_vec_elements_nullable(clean_type)
                 } else {
                     clean_type.to_string()
@@ -429,10 +460,11 @@ fn extract_input_types(
                 rust_name: to_snake_case(clean_param_name),
                 type_ref,
                 mapped_type_ref,
-                is_nullable: false,
+                is_nullable: is_nullable_value,
             },
             is_optional,
             needs_json_wrapper,
+            is_nullable_element: has_element_nullable,
         });
     }
 
@@ -501,29 +533,48 @@ async fn extract_output_types(
         );
 
         // Check if there's a custom type mapping for this field
-        let (mapped_type_ref, final_nullable, needs_json_wrapper) =
-            if let Some(mappings) = field_type_mappings {
-                let custom_type = mappings
-                    .iter()
-                    .find(|(key, _)| key.ends_with(&format!(".{}", column_name)))
-                    .map(|(_, rust_type)| rust_type.clone());
+        let (mapped_type_ref, final_nullable, needs_json_wrapper) = if let Some(mappings) =
+            field_type_mappings
+        {
+            let custom_type = mappings
+                .iter()
+                .find(|(key, _)| key.ends_with(&format!(".{}", column_name)))
+                .map(|(_, rust_type)| rust_type.clone());
 
-                if let Some(custom_type) = custom_type {
-                    let (clean_type, needs_wrapper) = if custom_type.ends_with("@json") {
-                        (&custom_type[..custom_type.len() - 5], true)
-                    } else if custom_type.ends_with("@native") {
-                        (&custom_type[..custom_type.len() - 7], false)
-                    } else {
-                        (custom_type.as_str(), true)
-                    };
-
-                    (Some(clean_type.to_string()), is_nullable, needs_wrapper)
+            if let Some(custom_type) = custom_type {
+                // Reject top-level Option<> in type mappings
+                let stripped = custom_type.trim();
+                let without_suffix = if stripped.ends_with("@json") {
+                    &stripped[..stripped.len() - 5]
+                } else if stripped.ends_with("@native") {
+                    &stripped[..stripped.len() - 7]
                 } else {
-                    (None, is_nullable, false)
+                    stripped
+                };
+                if without_suffix.starts_with("Option<") {
+                    anyhow::bail!(
+                            "Type mapping for '{}' must not use Option<>. \
+                             For output columns, nullability is automatically inferred from the database schema. \
+                             For input parameters, use the ?, ??, or [?] suffix annotations in the query.",
+                            column_name
+                        );
                 }
+
+                let (clean_type, needs_wrapper) = if custom_type.ends_with("@json") {
+                    (&custom_type[..custom_type.len() - 5], true)
+                } else if custom_type.ends_with("@native") {
+                    (&custom_type[..custom_type.len() - 7], false)
+                } else {
+                    (custom_type.as_str(), true)
+                };
+
+                (Some(clean_type.to_string()), is_nullable, needs_wrapper)
             } else {
                 (None, is_nullable, false)
-            };
+            }
+        } else {
+            (None, is_nullable, false)
+        };
 
         output_types.push(OutputColumn {
             field: StructField {

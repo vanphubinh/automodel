@@ -324,12 +324,14 @@ pub struct FindUsersByNameAndAgeItem {
 ///   Options: Inlining true, Optimization true, Expressions true, Deforming true
 /// 
 /// === find_users_by_name_and_age (variant 1) ===
-/// Index Scan using idx_users_age_updated_at on users
-///   Index Cond: (age >= 0)
+/// Bitmap Heap Scan on users
+///   Recheck Cond: (age >= 0)
 ///   Filter: (((name)::text ~~* 'dummy'::text) AND ((name)::text = 'dummy'::text))
+///   ->  Bitmap Index Scan on idx_users_age_updated_at
+///         Index Cond: (age >= 0)
 /// 
 /// === find_users_by_name_and_age (variant 2) ===
-/// Index Scan using idx_users_age_updated_at on users
+/// Index Scan using idx_users_age on users
 ///   Index Cond: (age <= 0)
 ///   Filter: (((name)::text ~~* 'dummy'::text) AND ((name)::text = 'dummy'::text))
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, age \nFROM public.users \nWHERE name ILIKE #{name_pattern} \n#[AND age >= #{min_age?}] \nAND name = #{name_exact} \n#[AND age <= #{max_age?}] \nORDER BY name"))]
@@ -566,8 +568,10 @@ pub struct SearchUsersAdvancedItem {
 /// === search_users_advanced (variant 2) ===
 /// Sort
 ///   Sort Key: created_at DESC
-///   ->  Index Scan using idx_users_age_updated_at on users
-///         Index Cond: (age >= 0)
+///   ->  Bitmap Heap Scan on users
+///         Recheck Cond: (age >= 0)
+///         ->  Bitmap Index Scan on idx_users_age_updated_at
+///               Index Cond: (age >= 0)
 /// 
 /// === search_users_advanced (variant 3) ===
 /// Sort
@@ -2425,7 +2429,7 @@ pub struct TestOptionalWithoutMultiunzipItem {
 }
 
 /// Test batch insert with nullable array elements (not entire array optional)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.users (name, email, age)\nSELECT name, email, age\nFROM UNNEST(\n        #{name}::text [],\n        #{email}::text [],\n        #{age??}::int4 []\n    ) AS t(name, email, age)\nRETURNING id, name, email, age, created_at"))]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.users (name, email, age)\nSELECT name, email, age\nFROM UNNEST(\n        #{name}::text [],\n        #{email}::text [],\n        #{age[?]}::int4 []\n    ) AS t(name, email, age)\nRETURNING id, name, email, age, created_at"))]
 pub async fn test_optional_without_multiunzip(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, name: Vec<String>, email: Vec<String>, age: Vec<Option<i32>>) -> Result<Vec<TestOptionalWithoutMultiunzipItem>, super::Error<TestOptionalWithoutMultiunzipConstraints>> {
     let query = sqlx::query(
         r"INSERT INTO public.users (name, email, age)

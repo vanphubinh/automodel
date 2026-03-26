@@ -2,7 +2,7 @@ use crate::codegen::types_generator::{
     generate_conditional_diff_params, generate_conditional_diff_struct,
     generate_input_params_with_names, generate_multiunzip_input_struct, generate_multiunzip_param,
     generate_result_struct_with_name, generate_return_type, generate_structured_params_signature,
-    generate_structured_params_struct,
+    generate_structured_params_struct, strip_input_suffix,
 };
 use crate::query_definition::{ExpectedResult, QueryDefinition, TelemetryLevel};
 use crate::query_definition_rt::QueryDefinitionRuntime;
@@ -10,17 +10,6 @@ use crate::rust_type::{InputParam, OutputColumn};
 use crate::types_extractor::{parse_parameter_names_from_sql, QueryTypeInfo};
 use crate::utils::{to_pascal_case, to_snake_case};
 use anyhow::Result;
-
-/// Helper function to strip parameter suffixes (? or []?) from parameter names
-fn strip_param_suffix(param_name: &str) -> String {
-    if param_name.ends_with("??") {
-        param_name[..param_name.len() - 2].to_string()
-    } else if param_name.ends_with('?') {
-        param_name.trim_end_matches('?').to_string()
-    } else {
-        param_name.to_string()
-    }
-}
 
 pub fn generate_root_module(modules: &Vec<String>, source_hash: u64) -> String {
     let mut mod_content = String::new();
@@ -521,7 +510,7 @@ pub fn generate_function_code_without_enums(
     let original_param_names = parse_parameter_names_from_sql(&query.sql);
     let clean_param_names: Vec<String> = original_param_names
         .iter()
-        .map(|name| strip_param_suffix(name))
+        .map(|name| strip_input_suffix(name))
         .collect();
 
     let use_multiunzip = query.multiunzip;
@@ -814,7 +803,7 @@ fn generate_static_function_body(
             let original_param_names = parse_parameter_names_from_sql(&query.sql);
             let clean_param_names: Vec<String> = original_param_names
                 .iter()
-                .map(|name| strip_param_suffix(name))
+                .map(|name| strip_input_suffix(name))
                 .collect();
 
             // Generate the tuple pattern based on number of types
@@ -969,7 +958,7 @@ fn generate_static_function_body(
         } else {
             // Use meaningful parameter names from SQL
             for (i, name) in param_names.iter().enumerate() {
-                let clean_name = strip_param_suffix(name);
+                let clean_name = strip_input_suffix(name);
 
                 let rust_type_info = &type_info.input_types[i];
                 let param_type = rust_type_info.rust_type();
