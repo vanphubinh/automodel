@@ -388,17 +388,23 @@ async fn test_optional_nullable_update(pool: &PgPool) -> Result<(), Box<dyn std:
     // Create a test user
     let timestamp = chrono::Utc::now().timestamp();
     let email = format!("nullable.test.{}@example.com", timestamp);
-    let user = generated::user_model::create_user(pool, "Nullable Test".to_string(), email, Some(25)).await?;
-    println!("✓ Created user: id={}, name={}, age={:?}", user.id, user.name, user.age);
+    let user =
+        generated::user_model::create_user(pool, "Nullable Test".to_string(), email, Some(25))
+            .await?;
+    println!(
+        "✓ Created user: id={}, name={}, age={:?}",
+        user.id, user.name, user.age
+    );
 
     // Case 1: None → skip the age block entirely (no change)
     println!("\n1. Passing None for age → skip conditional block (age unchanged)...");
     let updated = generated::user_model::update_user_nullable(
         pool,
         Some("Nullable Test v2".to_string()), // update name
-        None,                                   // age?? = None → skip block
+        None,                                 // age?? = None → skip block
         user.id,
-    ).await?;
+    )
+    .await?;
     println!("✓ age unchanged: {:?} (was {:?})", updated.age, user.age);
     assert_eq!(updated.age, Some(25), "age should be unchanged when None");
 
@@ -406,10 +412,11 @@ async fn test_optional_nullable_update(pool: &PgPool) -> Result<(), Box<dyn std:
     println!("\n2. Passing Some(None) for age → set age to NULL...");
     let updated = generated::user_model::update_user_nullable(
         pool,
-        None,           // skip name block
-        Some(None),     // age?? = Some(None) → SET age = NULL
+        None,       // skip name block
+        Some(None), // age?? = Some(None) → SET age = NULL
         user.id,
-    ).await?;
+    )
+    .await?;
     println!("✓ age set to NULL: {:?}", updated.age);
     assert_eq!(updated.age, None, "age should be NULL when Some(None)");
 
@@ -417,12 +424,17 @@ async fn test_optional_nullable_update(pool: &PgPool) -> Result<(), Box<dyn std:
     println!("\n3. Passing Some(Some(42)) for age → set age to 42...");
     let updated = generated::user_model::update_user_nullable(
         pool,
-        None,             // skip name block
-        Some(Some(42)),   // age?? = Some(Some(42)) → SET age = 42
+        None,           // skip name block
+        Some(Some(42)), // age?? = Some(Some(42)) → SET age = 42
         user.id,
-    ).await?;
+    )
+    .await?;
     println!("✓ age set to 42: {:?}", updated.age);
-    assert_eq!(updated.age, Some(42), "age should be 42 when Some(Some(42))");
+    assert_eq!(
+        updated.age,
+        Some(42),
+        "age should be 42 when Some(Some(42))"
+    );
 
     println!("\n✓ Optional+nullable (??) test completed!");
     println!("  None → skip block, Some(None) → set NULL, Some(Some(v)) → set value");
