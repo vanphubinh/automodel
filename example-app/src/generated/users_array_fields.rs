@@ -1486,48 +1486,6 @@ impl TryFrom<super::ErrorConstraintInfo> for InsertUsersBulkCompositeConstraints
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct UserWithLinksInput {
-    pub name: Option<String>,
-    pub email: Option<String>,
-    pub social_links: Option<serde_json::Value>,
-}
-
-impl sqlx::Type<sqlx::Postgres> for UserWithLinksInput {
-    fn type_info() -> sqlx::postgres::PgTypeInfo {
-        sqlx::postgres::PgTypeInfo::with_name("user_with_links_input")
-    }
-}
-
-impl<'r> sqlx::Decode<'r, sqlx::Postgres> for UserWithLinksInput {
-    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
-        let mut decoder = sqlx::postgres::types::PgRecordDecoder::new(value)?;
-        Ok(Self {
-            name: decoder.try_decode()?,
-            email: decoder.try_decode()?,
-            social_links: decoder.try_decode()?,
-        })
-    }
-}
-
-impl<'q> sqlx::Encode<'q, sqlx::Postgres> for UserWithLinksInput {
-    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync + 'static>> {
-        let mut encoder = sqlx::postgres::types::PgRecordEncoder::new(buf);
-        encoder.encode(&self.name)?;
-        encoder.encode(&self.email)?;
-        encoder.encode(&self.social_links)?;
-        encoder.finish();
-        Ok(sqlx::encode::IsNull::No)
-    }
-}
-
-impl sqlx::postgres::PgHasArrayType for UserWithLinksInput {
-    fn array_type_info() -> sqlx::postgres::PgTypeInfo {
-        sqlx::postgres::PgTypeInfo::with_name("_user_with_links_input")
-    }
-}
-
-
 #[derive(Debug, Clone)]
 pub struct InsertUsersBulkCompositeItem {
     pub id: i32,
@@ -1538,7 +1496,7 @@ pub struct InsertUsersBulkCompositeItem {
 
 /// Bulk insert users with social links using composite type UNNEST
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.users (name, email, social_links)\nSELECT r.name, r.email, r.social_links\nFROM UNNEST(#{items}::public.user_with_links_input[]) AS r(name, email, social_links)\nRETURNING id, name, email, social_links"))]
-pub async fn insert_users_bulk_composite(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, items: Vec<UserWithLinksInput>) -> Result<Vec<InsertUsersBulkCompositeItem>, super::Error<InsertUsersBulkCompositeConstraints>> {
+pub async fn insert_users_bulk_composite(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, items: Vec<super::types::public::UserWithLinksInput>) -> Result<Vec<InsertUsersBulkCompositeItem>, super::Error<InsertUsersBulkCompositeConstraints>> {
     let query = sqlx::query(
         r"INSERT INTO public.users (name, email, social_links)
         SELECT r.name, r.email, r.social_links

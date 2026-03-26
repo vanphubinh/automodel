@@ -370,6 +370,11 @@ impl AutoModel {
             }
         }
 
+        type_system
+            .resolve_nullability(client)
+            .await
+            .unwrap_or_else(|e| eprintln!("Warning: failed to resolve field nullability: {}", e));
+
         Ok(type_system)
     }
 

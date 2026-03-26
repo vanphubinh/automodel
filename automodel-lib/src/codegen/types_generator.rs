@@ -1,5 +1,5 @@
 use crate::{
-    types_extractor::{OutputColumn, RustType},
+    rust_type::{InputParam, OutputColumn},
     utils::{to_pascal_case, to_snake_case},
 };
 
@@ -22,7 +22,7 @@ fn build_derive_attribute(default_derives: &[&str], custom_derives: &[String]) -
 
 /// Generate function parameter list with custom parameter names
 pub fn generate_input_params_with_names(
-    input_types: &[RustType],
+    input_types: &[InputParam],
     param_names: &[String],
 ) -> String {
     if input_types.is_empty() {
@@ -49,19 +49,10 @@ pub fn generate_input_params_with_names(
 
         // Only add if we haven't seen this parameter name before
         if !unique_params.contains_key(&clean_param_name) {
-            let final_type = if rust_type.is_nullable_elements {
-                // For arrays with nullable elements: Vec<i32> -> Vec<Option<i32>>
-                if rust_type.rust_type.starts_with("Vec<") && rust_type.rust_type.ends_with(">") {
-                    let inner_type = &rust_type.rust_type[4..rust_type.rust_type.len() - 1];
-                    format!("Vec<Option<{}>>", inner_type)
-                } else {
-                    // Shouldn't happen, but fallback
-                    rust_type.rust_type.clone()
-                }
-            } else if rust_type.is_nullable || rust_type.is_optional {
-                format!("Option<{}>", rust_type.rust_type)
+            let final_type = if rust_type.is_nullable || rust_type.is_optional {
+                format!("Option<{}>", rust_type.rust_type())
             } else {
-                rust_type.rust_type.clone()
+                rust_type.rust_type().to_string()
             };
             unique_params.insert(clean_param_name.clone(), final_type);
             param_order.push(clean_param_name);
@@ -92,251 +83,13 @@ pub fn generate_return_type(output_column: Option<&OutputColumn>) -> String {
     match output_column {
         None => "()".to_string(),
         Some(col) => {
-            if col.rust_type.is_nullable {
-                format!("Option<{}>", col.rust_type.rust_type)
+            if col.is_nullable {
+                format!("Option<{}>", col.rust_type())
             } else {
-                col.rust_type.rust_type.clone()
+                col.rust_type().to_string()
             }
         }
     }
-}
-
-/// Generate Rust enum definition from enum type info
-pub fn generate_enum_definition(
-    enum_variants: &[String],
-    enum_name: &str,
-    pg_type_name: &str,
-) -> String {
-    let mut enum_def = format!(
-        "#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]\npub enum {} {{\n",
-        enum_name
-    );
-
-    for variant in enum_variants {
-        let variant_name = to_pascal_case(variant);
-        enum_def.push_str(&format!("    {},\n", variant_name));
-    }
-
-    enum_def.push_str("}\n\n");
-
-    // Add FromStr implementation for converting from database strings
-    enum_def.push_str(&format!(
-        r#"impl std::str::FromStr for {} {{
-    type Err = String;
-    
-    fn from_str(s: &str) -> Result<Self, Self::Err> {{
-        match s {{
-"#,
-        enum_name
-    ));
-
-    for variant in enum_variants {
-        let variant_name = to_pascal_case(variant);
-        enum_def.push_str(&format!(
-            "            \"{}\" => Ok({}::{}),\n",
-            variant, enum_name, variant_name
-        ));
-    }
-
-    enum_def.push_str(&format!(
-        r#"            _ => Err(format!("Invalid {} variant: {{}}", s)),
-        }}
-    }}
-}}
-
-"#,
-        enum_name
-    ));
-
-    // Add Display implementation for converting to database strings
-    enum_def.push_str(&format!(
-        r#"impl std::fmt::Display for {} {{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{
-        let s = match self {{
-"#,
-        enum_name
-    ));
-
-    for variant in enum_variants {
-        let variant_name = to_pascal_case(variant);
-        enum_def.push_str(&format!(
-            "            {}::{} => \"{}\",\n",
-            enum_name, variant_name, variant
-        ));
-    }
-
-    enum_def.push_str(&format!(
-        r#"        }};
-        write!(f, "{{}}", s)
-    }}
-}}
-
-"#
-    ));
-
-    // Add SQLx Type implementation for enum
-    // Strip schema prefix (e.g., "public.user_status" -> "user_status")
-    // because sqlx doesn't use schema-qualified names when decoding nested types in composites
-    let type_name_for_sqlx = pg_type_name.split('.').last().unwrap_or(pg_type_name);
-
-    enum_def.push_str(&format!(
-        r#"impl sqlx::Type<sqlx::Postgres> for {} {{
-    fn type_info() -> sqlx::postgres::PgTypeInfo {{
-        sqlx::postgres::PgTypeInfo::with_name("{}")
-    }}
-}}
-
-impl<'r> sqlx::Decode<'r, sqlx::Postgres> for {} {{
-    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {{
-        let s = <&str as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
-        s.parse().map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)) as Box<dyn std::error::Error + Send + Sync + 'static>)
-    }}
-}}
-
-impl<'q> sqlx::Encode<'q, sqlx::Postgres> for {} {{
-    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync + 'static>> {{
-        <&str as sqlx::Encode<sqlx::Postgres>>::encode(&self.to_string(), buf)
-    }}
-}}
-
-"#,
-        enum_name, type_name_for_sqlx, enum_name, enum_name
-    ));
-
-    enum_def
-}
-
-/// Generate struct definitions for composite types (recursively)
-/// Includes sqlx::Type, sqlx::Decode, and sqlx::Encode implementations
-/// Uses `emitted` set to avoid generating the same struct twice in one module.
-fn generate_composite_type_struct(
-    rust_type: &RustType,
-    custom_derives: &[String],
-    emitted: &mut std::collections::HashSet<String>,
-) -> String {
-    let mut structs = String::new();
-
-    if let Some(composite_fields) = &rust_type.composite_fields {
-        // Skip if already emitted
-        if emitted.contains(&rust_type.rust_type) {
-            return structs;
-        }
-
-        // First, generate any nested composite types
-        for field in composite_fields {
-            if field.rust_type.composite_fields.is_some() {
-                structs.push_str(&generate_composite_type_struct(
-                    &field.rust_type,
-                    custom_derives,
-                    emitted,
-                ));
-                structs.push('\n');
-            }
-        }
-
-        // Then generate this composite type struct
-        let derive_attr = build_derive_attribute(
-            &["Debug", "Clone", "serde::Serialize", "serde::Deserialize"],
-            custom_derives,
-        );
-        structs.push_str(&format!(
-            "{}\npub struct {} {{\n",
-            derive_attr, rust_type.rust_type
-        ));
-
-        for field in composite_fields {
-            let field_type = if field.rust_type.is_nullable {
-                format!("Option<{}>", field.rust_type.rust_type)
-            } else {
-                field.rust_type.rust_type.clone()
-            };
-            structs.push_str(&format!(
-                "    pub {}: {},\n",
-                to_snake_case(&field.name),
-                field_type
-            ));
-        }
-
-        structs.push_str("}\n\n");
-
-        // Add sqlx Type, Decode, and Encode implementations for composite types
-        let struct_name = &rust_type.rust_type;
-        let pg_type_name = rust_type
-            .pg_type_name
-            .as_deref()
-            .unwrap_or_else(|| struct_name);
-
-        structs.push_str(&format!(
-            r#"impl sqlx::Type<sqlx::Postgres> for {} {{
-    fn type_info() -> sqlx::postgres::PgTypeInfo {{
-        sqlx::postgres::PgTypeInfo::with_name("{}")
-    }}
-}}
-
-impl<'r> sqlx::Decode<'r, sqlx::Postgres> for {} {{
-    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {{
-        let mut decoder = sqlx::postgres::types::PgRecordDecoder::new(value)?;
-        Ok(Self {{
-"#,
-            struct_name, pg_type_name, struct_name
-        ));
-
-        // Generate field decoding for each composite field
-        for field in composite_fields {
-            let field_name = to_snake_case(&field.name);
-            structs.push_str(&format!(
-                "            {}: decoder.try_decode()?,\n",
-                field_name
-            ));
-        }
-
-        structs.push_str(&format!(
-            r#"        }})
-    }}
-}}
-
-"#
-        ));
-
-        // Generate Encode implementation using PgRecordEncoder
-        structs.push_str(&format!(
-            r#"impl<'q> sqlx::Encode<'q, sqlx::Postgres> for {} {{
-    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync + 'static>> {{
-        let mut encoder = sqlx::postgres::types::PgRecordEncoder::new(buf);
-"#,
-            struct_name
-        ));
-
-        for field in composite_fields {
-            let field_name = to_snake_case(&field.name);
-            structs.push_str(&format!("        encoder.encode(&self.{})?;\n", field_name));
-        }
-
-        structs.push_str(
-            r#"        encoder.finish();
-        Ok(sqlx::encode::IsNull::No)
-    }
-}
-
-"#,
-        );
-
-        // Generate PgHasArrayType implementation so Vec<T> can be used as a bind parameter
-        structs.push_str(&format!(
-            r#"impl sqlx::postgres::PgHasArrayType for {} {{
-    fn array_type_info() -> sqlx::postgres::PgTypeInfo {{
-        sqlx::postgres::PgTypeInfo::with_name("_{}")
-    }}
-}}
-
-"#,
-            struct_name, pg_type_name
-        ));
-
-        emitted.insert(rust_type.rust_type.clone());
-    }
-
-    structs
 }
 
 /// Generate a result struct with a custom struct name
@@ -344,7 +97,7 @@ pub fn generate_result_struct_with_name(
     struct_name: &str,
     output_types: &[OutputColumn],
     custom_derives: &[String],
-    emitted_struct_names: &mut std::collections::HashSet<String>,
+    _emitted_struct_names: &mut std::collections::HashSet<String>,
 ) -> Option<String> {
     if output_types.is_empty() {
         return None;
@@ -352,33 +105,17 @@ pub fn generate_result_struct_with_name(
 
     let mut all_structs = String::new();
 
-    // First, generate any nested composite type structs
-    for col in output_types {
-        if col.rust_type.composite_fields.is_some() {
-            all_structs.push_str(&generate_composite_type_struct(
-                &col.rust_type,
-                custom_derives,
-                emitted_struct_names,
-            ));
-            all_structs.push('\n');
-        }
-    }
-
-    // Then generate the main result struct
+    // Generate the main result struct
     let derive_attr = build_derive_attribute(&["Debug", "Clone"], custom_derives);
     all_structs.push_str(&format!("{}\npub struct {} {{\n", derive_attr, struct_name));
 
     for col in output_types {
-        let field_type = if col.rust_type.is_nullable {
-            format!("Option<{}>", col.rust_type.rust_type)
+        let field_type = if col.is_nullable {
+            format!("Option<{}>", col.rust_type())
         } else {
-            col.rust_type.rust_type.clone()
+            col.rust_type().to_string()
         };
-        all_structs.push_str(&format!(
-            "    pub {}: {},\n",
-            to_snake_case(&col.name),
-            field_type
-        ));
+        all_structs.push_str(&format!("    pub {}: {},\n", col.rust_name, field_type));
     }
 
     all_structs.push_str("}\n");
@@ -390,7 +127,7 @@ pub fn generate_result_struct_with_name(
 pub fn generate_multiunzip_input_struct(
     query_name: &str,
     param_names: &[String],
-    input_types: &[RustType],
+    input_types: &[InputParam],
     custom_derives: &[String],
 ) -> Option<String> {
     if input_types.is_empty() {
@@ -405,13 +142,10 @@ pub fn generate_multiunzip_input_struct(
         if let Some(rust_type) = input_types.get(i) {
             // Extract base type from Vec<T> for array parameters
             // But NOT for JSON-wrapped types where Vec<T> is the actual value type (e.g., JSONB arrays)
-            let base_type = if !rust_type.needs_json_wrapper
-                && rust_type.rust_type.starts_with("Vec<")
-                && rust_type.rust_type.ends_with('>')
-            {
-                &rust_type.rust_type[4..rust_type.rust_type.len() - 1]
+            let base_type = if !rust_type.needs_json_wrapper && rust_type.is_pg_array() {
+                &rust_type.rust_type()[4..rust_type.rust_type().len() - 1]
             } else {
-                &rust_type.rust_type
+                rust_type.rust_type()
             };
 
             let field_type = if rust_type.is_nullable || rust_type.is_optional {
@@ -438,7 +172,7 @@ pub fn generate_multiunzip_input_struct(
 pub fn generate_conditional_diff_struct(
     struct_name: &str,
     param_names: &[String],
-    input_types: &[RustType],
+    input_types: &[InputParam],
     custom_derives: &[String],
 ) -> Option<String> {
     if input_types.is_empty() {
@@ -471,9 +205,9 @@ pub fn generate_conditional_diff_struct(
             if !unique_params.contains_key(&clean_param_name) {
                 // For conditions_type, preserve nullable types to support setting values to NULL
                 let final_type = if rust_type.is_nullable {
-                    format!("Option<{}>", rust_type.rust_type)
+                    format!("Option<{}>", rust_type.rust_type())
                 } else {
-                    rust_type.rust_type.clone()
+                    rust_type.rust_type().to_string()
                 };
                 unique_params.insert(clean_param_name.clone(), final_type);
                 param_order.push(clean_param_name);
@@ -502,7 +236,7 @@ pub fn generate_conditional_diff_struct(
 pub fn generate_conditional_diff_params(
     query_name: &str,
     param_names: &[String],
-    input_types: &[RustType],
+    input_types: &[InputParam],
     struct_name_override: Option<&str>,
 ) -> String {
     let struct_name = if let Some(override_name) = struct_name_override {
@@ -519,9 +253,9 @@ pub fn generate_conditional_diff_params(
         if !param_name.ends_with('?') {
             if let Some(rust_type) = input_types.get(i) {
                 let final_type = if rust_type.is_nullable {
-                    format!("Option<{}>", rust_type.rust_type)
+                    format!("Option<{}>", rust_type.rust_type())
                 } else {
-                    rust_type.rust_type.clone()
+                    rust_type.rust_type().to_string()
                 };
                 non_conditional_params.push(format!("{}: {}", param_name, final_type));
             }
@@ -544,7 +278,7 @@ pub fn generate_conditional_diff_params(
 pub fn generate_structured_params_struct(
     query_name: &str,
     param_names: &[String],
-    input_types: &[RustType],
+    input_types: &[InputParam],
     custom_derives: &[String],
 ) -> Option<String> {
     if input_types.is_empty() {
@@ -575,9 +309,9 @@ pub fn generate_structured_params_struct(
         if !unique_params.contains_key(&clean_param_name) {
             // Use the type as-is (including Option wrapper if nullable)
             let final_type = if rust_type.is_nullable {
-                format!("Option<{}>", rust_type.rust_type)
+                format!("Option<{}>", rust_type.rust_type())
             } else {
-                rust_type.rust_type.clone()
+                rust_type.rust_type().to_string()
             };
             unique_params.insert(clean_param_name.clone(), final_type);
             param_order.push(clean_param_name);
@@ -607,64 +341,4 @@ pub fn generate_structured_params_signature(
         format!("{}Params", to_pascal_case(query_name))
     };
     format!("params: &{}", struct_name)
-}
-
-/// Generate composite type structs for input parameters that are composite or array-of-composite types.
-/// For array-of-composite (e.g., Vec<Widgets>), generates a struct for the element type.
-/// For direct composite (e.g., Widgets), generates the struct directly.
-/// Returns the generated code and a list of struct names that were generated.
-pub fn generate_input_composite_structs(
-    input_types: &[RustType],
-    custom_derives: &[String],
-    emitted_struct_names: &mut std::collections::HashSet<String>,
-) -> String {
-    let mut all_structs = String::new();
-
-    for rt in input_types {
-        if rt.composite_fields.is_none() {
-            continue;
-        }
-
-        // Determine the element struct name
-        let element_struct_name = if rt.is_pg_array {
-            // For Vec<Widgets>, extract element type name from pg_type_name
-            rt.pg_type_name
-                .as_ref()
-                .map(|n| to_pascal_case(n))
-                .unwrap_or_else(|| rt.rust_type.clone())
-        } else {
-            rt.rust_type.clone()
-        };
-
-        // Skip if already generated
-        if emitted_struct_names.contains(&element_struct_name) {
-            continue;
-        }
-
-        // Create an element-level RustType for struct generation
-        let element_rt = if rt.is_pg_array {
-            RustType {
-                rust_type: element_struct_name.clone(),
-                is_nullable: false,
-                is_optional: false,
-                is_nullable_elements: false,
-                needs_json_wrapper: false,
-                is_pg_array: false,
-                enum_variants: None,
-                pg_type_name: rt.pg_type_name.clone(),
-                composite_fields: rt.composite_fields.clone(),
-            }
-        } else {
-            rt.clone()
-        };
-
-        let struct_code =
-            generate_composite_type_struct(&element_rt, custom_derives, emitted_struct_names);
-        if !struct_code.is_empty() {
-            all_structs.push_str(&struct_code);
-            all_structs.push('\n');
-        }
-    }
-
-    all_structs
 }

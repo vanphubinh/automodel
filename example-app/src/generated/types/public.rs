@@ -41,54 +41,54 @@ impl std::fmt::Display for UserStatus {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::Type)]
+#[sqlx(type_name = "users")]
+pub struct Users {
+    pub id: i32,
+    pub name: String,
+    pub email: String,
+    pub status: Option<super::public::UserStatus>,
+    pub profile: Option<serde_json::Value>,
+    pub settings: Option<serde_json::Value>,
+    pub is_active: Option<bool>,
+    pub age: Option<i32>,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub referrer_id: Option<i32>,
+    pub social_links: Option<serde_json::Value>,
+    pub tags: Option<Vec<serde_json::Value>>,
+    pub labels: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::Type)]
+#[sqlx(type_name = "user_with_links_input")]
+pub struct UserWithLinksInput {
+    pub name: Option<String>,
+    pub email: Option<String>,
+    pub social_links: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::Type)]
 #[sqlx(type_name = "widgets")]
 pub struct Widgets {
     pub id: i32,
     pub name: String,
-    pub weight: f64,
-    pub metadata: super::public::WidgetMetadata,
-    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub weight: Option<f64>,
+    pub metadata: Option<super::public::WidgetMetadata>,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::Type)]
+#[sqlx(type_name = "widget_metadata")]
+pub struct WidgetMetadata {
+    pub color: Option<String>,
+    pub version: Option<i32>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::Type)]
 #[sqlx(type_name = "widget_input")]
 pub struct WidgetInput {
     pub name: String,
-    pub weight: f64,
-    pub metadata: super::public::WidgetMetadata,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::Type)]
-#[sqlx(type_name = "widget_metadata")]
-pub struct WidgetMetadata {
-    pub color: String,
-    pub version: i32,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::Type)]
-#[sqlx(type_name = "user_with_links_input")]
-pub struct UserWithLinksInput {
-    pub name: String,
-    pub email: String,
-    pub social_links: serde_json::Value,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::Type)]
-#[sqlx(type_name = "users")]
-pub struct Users {
-    pub id: i32,
-    pub name: String,
-    pub email: String,
-    pub status: super::public::UserStatus,
-    pub profile: serde_json::Value,
-    pub settings: serde_json::Value,
-    pub is_active: bool,
-    pub age: i32,
-    pub created_at: chrono::DateTime<chrono::Utc>,
-    pub updated_at: chrono::DateTime<chrono::Utc>,
-    pub referrer_id: i32,
-    pub social_links: serde_json::Value,
-    pub tags: std::vec::Vec<serde_json::Value>,
-    pub labels: std::vec::Vec<serde_json::Value>,
+    pub weight: Option<f64>,
+    pub metadata: Option<super::public::WidgetMetadata>,
 }
 

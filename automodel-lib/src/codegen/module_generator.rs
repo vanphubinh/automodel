@@ -1,14 +1,13 @@
 use crate::codegen::types_generator::{
-    generate_conditional_diff_params, generate_conditional_diff_struct, generate_enum_definition,
-    generate_input_composite_structs, generate_input_params_with_names,
-    generate_multiunzip_input_struct, generate_multiunzip_param, generate_result_struct_with_name,
-    generate_return_type, generate_structured_params_signature, generate_structured_params_struct,
+    generate_conditional_diff_params, generate_conditional_diff_struct,
+    generate_input_params_with_names, generate_multiunzip_input_struct, generate_multiunzip_param,
+    generate_result_struct_with_name, generate_return_type, generate_structured_params_signature,
+    generate_structured_params_struct,
 };
 use crate::query_definition::{ExpectedResult, QueryDefinition, TelemetryLevel};
 use crate::query_definition_rt::QueryDefinitionRuntime;
-use crate::types_extractor::{
-    extract_enum_types, parse_parameter_names_from_sql, OutputColumn, QueryTypeInfo,
-};
+use crate::rust_type::{InputParam, OutputColumn};
+use crate::types_extractor::{parse_parameter_names_from_sql, QueryTypeInfo};
 use crate::utils::{to_pascal_case, to_snake_case};
 use anyhow::Result;
 
@@ -545,18 +544,6 @@ pub fn generate_function_code_without_enums(
         _ => (false, None),
     };
 
-    // Generate composite type structs for any input parameters that are composite or array-of-composite
-    {
-        let composite_structs = generate_input_composite_structs(
-            &type_info.input_types,
-            &query.parameters_type_derives,
-            emitted_struct_names,
-        );
-        if !composite_structs.is_empty() {
-            code.push_str(&composite_structs);
-        }
-    }
-
     // Generate input struct for multiunzip if needed
     if use_multiunzip {
         let struct_name = format!("{}Record", to_pascal_case(&query.name));
@@ -927,11 +914,11 @@ fn generate_static_function_body(
                 };
 
                 let rust_type_info = &type_info.input_types[i];
-                let param_type = &rust_type_info.rust_type;
+                let param_type = rust_type_info.rust_type();
 
                 // Check if this is a custom type that needs JSON serialization
                 if rust_type_info.needs_json_wrapper {
-                    if rust_type_info.is_pg_array {
+                    if rust_type_info.is_pg_array() {
                         // For jsonb[] columns: serialize each element individually
                         body.push_str(&format!(
                             "    let {}_json: Vec<Option<serde_json::Value>> = params.{}.iter().map(|el| el.as_ref().map(|v| serde_json::to_value(v)).transpose().map_err(|e| sqlx::Error::Encode(Box::new(e)))).collect::<Result<_, _>>()?;\n",
@@ -942,7 +929,6 @@ fn generate_static_function_body(
                             clean_name
                         ));
                     } else if rust_type_info.is_optional {
-                        // For optional custom types, map through Option to produce Option<serde_json::Value>
                         // so that None becomes SQL NULL rather than JSON null
                         body.push_str(&format!(
                             "    let query = query.bind(params.{}.as_ref().map(|v| serde_json::to_value(v)).transpose().map_err(|e| sqlx::Error::Encode(Box::new(e)))?);\n",
@@ -986,11 +972,11 @@ fn generate_static_function_body(
                 let clean_name = strip_param_suffix(name);
 
                 let rust_type_info = &type_info.input_types[i];
-                let param_type = &rust_type_info.rust_type;
+                let param_type = rust_type_info.rust_type();
 
                 // Check if this is a custom type that needs JSON serialization
                 if rust_type_info.needs_json_wrapper {
-                    if rust_type_info.is_pg_array {
+                    if rust_type_info.is_pg_array() {
                         // For jsonb[] columns: serialize each element individually
                         body.push_str(&format!(
                             "    let {}_json: Vec<Option<serde_json::Value>> = {}.iter().map(|el| el.as_ref().map(|v| serde_json::to_value(v)).transpose().map_err(|e| sqlx::Error::Encode(Box::new(e)))).collect::<Result<_, _>>()?;\n",
@@ -1174,7 +1160,7 @@ fn generate_conditional_function_body(
             }) {
                 if let Some(rust_type_info) = type_info.input_types.get(param_index) {
                     if rust_type_info.needs_json_wrapper {
-                        if rust_type_info.is_pg_array {
+                        if rust_type_info.is_pg_array() {
                             // For jsonb[] columns: serialize each element individually
                             if use_structured_params {
                                 body.push_str(&format!("    let {}_json: Vec<Option<serde_json::Value>> = params.{}.iter().map(|el| el.as_ref().map(|v| serde_json::to_value(v)).transpose().map_err(|e| sqlx::Error::Encode(Box::new(e)))).collect::<Result<_, _>>()?;\n", clean_param, clean_param));
@@ -1227,7 +1213,7 @@ fn generate_conditional_function_body(
         }) {
             if let Some(rust_type_info) = type_info.input_types.get(param_index) {
                 if rust_type_info.needs_json_wrapper {
-                    if rust_type_info.is_pg_array {
+                    if rust_type_info.is_pg_array() {
                         // For jsonb[] columns: serialize each element individually
                         if use_conditional_diff {
                             body.push_str(&format!("        let {}_json: Vec<Option<serde_json::Value>> = new.{}.iter().map(|el| el.as_ref().map(|v| serde_json::to_value(v)).transpose().map_err(|e| sqlx::Error::Encode(Box::new(e)))).collect::<Result<_, _>>()?;\n", clean_param, clean_param));
@@ -1311,7 +1297,7 @@ fn generate_query_execution(
                 body.push_str("        Some(row) => {\n");
                 let value_extraction =
                     generate_sqlx_value_extraction(&type_info.output_types[0], 0);
-                if type_info.output_types[0].rust_type.is_nullable {
+                if type_info.output_types[0].is_nullable {
                     body.push_str(&format!("            Ok({})\n", value_extraction));
                 } else {
                     body.push_str(&format!("            Ok(Some({}))\n", value_extraction));
@@ -1403,12 +1389,12 @@ fn generate_query_execution(
 
 /// Generate SQLx value extraction for a single column
 fn generate_sqlx_value_extraction(output_col: &OutputColumn, _index: usize) -> String {
-    let column_name = &output_col.name;
+    let column_name = &output_col.pg_name;
 
-    if output_col.rust_type.needs_json_wrapper {
+    if output_col.needs_json_wrapper {
         // For custom types, we need to extract as serde_json::Value and then deserialize
-        let inner_type = &output_col.rust_type.rust_type;
-        if output_col.rust_type.is_pg_array {
+        let inner_type = output_col.rust_type();
+        if output_col.is_pg_array() {
             // For jsonb[] columns: extract as Vec<Option<serde_json::Value>>, deserialize each element
             // The inner_type is already Vec<Option<T>>, extract the element type T
             let element_type =
@@ -1417,11 +1403,11 @@ fn generate_sqlx_value_extraction(output_col: &OutputColumn, _index: usize) -> S
                 } else if inner_type.starts_with("Vec<") && inner_type.ends_with(">") {
                     &inner_type[4..inner_type.len() - 1]
                 } else {
-                    inner_type.as_str()
+                    inner_type
                 };
             // Note: sqlx may return jsonb null as Some(Value::Null) rather than None,
             // so we filter through .and_then() to normalize both to None
-            if output_col.rust_type.is_nullable {
+            if output_col.is_nullable {
                 format!(
                     "row.try_get::<Option<Vec<Option<serde_json::Value>>>, _>(\"{}\")?
             .map(|arr| arr.into_iter().map(|el| el.and_then(|v| if v.is_null() {{ None }} else {{ Some(v) }}).map(|v| serde_json::from_value::<{}>(v).map_err(|e| sqlx::Error::Decode(Box::new(e)))).transpose()).collect::<Result<Vec<_>, _>>())
@@ -1435,7 +1421,7 @@ fn generate_sqlx_value_extraction(output_col: &OutputColumn, _index: usize) -> S
                     column_name, element_type
                 )
             }
-        } else if output_col.rust_type.is_nullable {
+        } else if output_col.is_nullable {
             format!(
                 "row.try_get::<Option<serde_json::Value>, _>(\"{}\")?
             .map(|v| serde_json::from_value::<{}>(v)
@@ -1453,15 +1439,17 @@ fn generate_sqlx_value_extraction(output_col: &OutputColumn, _index: usize) -> S
         }
     } else {
         // For standard types, extract directly
-        if output_col.rust_type.is_nullable {
+        if output_col.is_nullable {
             format!(
                 "row.try_get::<Option<{}>, _>(\"{}\")?",
-                output_col.rust_type.rust_type, column_name
+                output_col.rust_type(),
+                column_name
             )
         } else {
             format!(
                 "row.try_get::<{}, _>(\"{}\")?",
-                output_col.rust_type.rust_type, column_name
+                output_col.rust_type(),
+                column_name
             )
         }
     }
@@ -1472,9 +1460,11 @@ fn generate_sqlx_struct_creation(struct_name: &str, output_types: &[OutputColumn
     let mut creation = format!("{} {{\n", struct_name);
 
     for (i, col) in output_types.iter().enumerate() {
-        let field_name = to_snake_case(&col.name);
         let value_extraction = generate_sqlx_value_extraction(col, i);
-        creation.push_str(&format!("        {}: {},\n", field_name, value_extraction));
+        creation.push_str(&format!(
+            "        {}: {},\n",
+            col.rust_name, value_extraction
+        ));
     }
 
     creation.push_str("    }");
@@ -1486,7 +1476,7 @@ fn generate_sqlx_struct_creation(struct_name: &str, output_types: &[OutputColumn
 pub fn validate_struct_reference(
     struct_name: &str,
     query_params: &[String],
-    query_param_types: &[crate::types_extractor::RustType],
+    query_param_types: &[InputParam],
     available_structs: &std::collections::HashMap<String, Vec<(String, String)>>,
     is_conditional_diff: bool,
 ) -> Result<()> {
@@ -1505,9 +1495,9 @@ pub fn validate_struct_reference(
         let clean_param = param_name.trim_end_matches('?');
         if let Some(param_type) = query_param_types.get(i) {
             let type_str = if param_type.is_nullable || param_type.is_optional {
-                format!("Option<{}>", param_type.rust_type)
+                format!("Option<{}>", param_type.rust_type())
             } else {
-                param_type.rust_type.clone()
+                param_type.rust_type().to_string()
             };
             query_field_map.insert(clean_param.to_string(), type_str);
         }
@@ -1598,27 +1588,8 @@ pub fn generate_code_for_module(
         generated_code.push_str("use sqlx::Row;\n\n");
     }
 
-    // Extract and generate all unique enum types for this module
-    let mut all_enum_types = std::collections::HashMap::new();
-    for analyzed in &module_queries {
-        let enum_types = extract_enum_types(
-            &analyzed.type_info.input_types,
-            &analyzed.type_info.output_types,
-        );
-        for (enum_name, enum_variants, pg_type_name) in enum_types {
-            all_enum_types.insert(enum_name, (enum_variants, pg_type_name));
-        }
-    }
-
-    // Generate enum definitions once at the top of the module
-    for (enum_name, (enum_variants, pg_type_name)) in all_enum_types {
-        generated_code.push_str(&generate_enum_definition(
-            &enum_variants,
-            &enum_name,
-            &pg_type_name,
-        ));
-        generated_code.push('\n');
-    }
+    // Enum and composite types are now generated by TypeSystem::codegen() into types/ directory.
+    // No per-module inline enum/struct generation is needed.
 
     // Track generated structs for validation
     let mut generated_structs: std::collections::HashMap<String, Vec<(String, String)>> =
@@ -1639,9 +1610,9 @@ pub fn generate_code_for_module(
                         let clean_param = param_name.trim_end_matches('?');
                         if let Some(param_type) = type_info.input_types.get(i) {
                             let type_str = if param_type.is_nullable {
-                                format!("Option<{}>", param_type.rust_type)
+                                format!("Option<{}>", param_type.rust_type())
                             } else {
-                                param_type.rust_type.clone()
+                                param_type.rust_type().to_string()
                             };
                             if !fields.iter().any(|(name, _)| name == clean_param) {
                                 fields.push((clean_param.to_string(), type_str));
@@ -1682,9 +1653,9 @@ pub fn generate_code_for_module(
                     let clean_param = param_name.trim_end_matches('?');
                     if let Some(param_type) = type_info.input_types.get(i) {
                         let type_str = if param_type.is_nullable {
-                            format!("Option<{}>", param_type.rust_type)
+                            format!("Option<{}>", param_type.rust_type())
                         } else {
-                            param_type.rust_type.clone()
+                            param_type.rust_type().to_string()
                         };
                         if !fields.iter().any(|(name, _)| name == clean_param) {
                             fields.push((clean_param.to_string(), type_str));
@@ -1704,9 +1675,9 @@ pub fn generate_code_for_module(
                     let clean_param = param_name.trim_end_matches('?');
                     if let Some(param_type) = type_info.input_types.get(i) {
                         let type_str = if param_type.is_nullable || param_type.is_optional {
-                            format!("Option<{}>", param_type.rust_type)
+                            format!("Option<{}>", param_type.rust_type())
                         } else {
-                            param_type.rust_type.clone()
+                            param_type.rust_type().to_string()
                         };
                         if !fields.iter().any(|(name, _)| name == clean_param) {
                             fields.push((clean_param.to_string(), type_str));
@@ -1732,9 +1703,9 @@ pub fn generate_code_for_module(
                 let clean_param = param_name.trim_end_matches('?');
                 if let Some(param_type) = type_info.input_types.get(i) {
                     let type_str = if param_type.is_nullable || param_type.is_optional {
-                        format!("Option<{}>", param_type.rust_type)
+                        format!("Option<{}>", param_type.rust_type())
                     } else {
-                        param_type.rust_type.clone()
+                        param_type.rust_type().to_string()
                     };
                     if !fields.iter().any(|(name, _)| name == clean_param) {
                         fields.push((clean_param.to_string(), type_str));
@@ -1761,12 +1732,12 @@ pub fn generate_code_for_module(
                     .output_types
                     .iter()
                     .map(|ot| {
-                        let type_str = if ot.rust_type.is_nullable {
-                            format!("Option<{}>", ot.rust_type.rust_type)
+                        let type_str = if ot.is_nullable {
+                            format!("Option<{}>", ot.rust_type())
                         } else {
-                            ot.rust_type.rust_type.clone()
+                            ot.rust_type().to_string()
                         };
-                        (ot.name.clone(), type_str)
+                        (ot.pg_name.clone(), type_str)
                     })
                     .collect();
 
@@ -1794,12 +1765,12 @@ pub fn generate_code_for_module(
             } else {
                 let mut fields = Vec::new();
                 for output_type in &type_info.output_types {
-                    let type_str = if output_type.rust_type.is_nullable {
-                        format!("Option<{}>", output_type.rust_type.rust_type)
+                    let type_str = if output_type.is_nullable {
+                        format!("Option<{}>", output_type.rust_type())
                     } else {
-                        output_type.rust_type.rust_type.clone()
+                        output_type.rust_type().to_string()
                     };
-                    fields.push((output_type.name.clone(), type_str));
+                    fields.push((output_type.pg_name.clone(), type_str));
                 }
                 generated_structs.insert(struct_name, fields);
             }

@@ -1,14 +1,10 @@
 use anyhow::{Context, Result};
 use std::collections::{HashMap, HashSet};
-use std::sync::OnceLock;
-use tokio::sync::Mutex;
 use tokio_postgres::types::{Kind as PgKind, Type as PgType};
 use tokio_postgres::Statement;
 
-use crate::utils::to_pascal_case;
-
-// Global cache for enum type information to avoid repeated database queries
-static ENUM_CACHE: OnceLock<Mutex<HashMap<u32, Option<EnumTypeInfo>>>> = OnceLock::new();
+use crate::rust_type::{InputParam, OutputColumn, RustName, StructField};
+use crate::utils::to_snake_case;
 
 /// Constraint information extracted from database schema
 #[derive(Debug, Clone)]
@@ -26,61 +22,11 @@ pub struct ConstraintInfo {
 #[derive(Debug, Clone)]
 pub struct QueryTypeInfo {
     /// Input parameter types
-    pub input_types: Vec<RustType>,
+    pub input_types: Vec<InputParam>,
     /// Output column types and names
     pub output_types: Vec<OutputColumn>,
     /// Parsed SQL with conditional blocks (if any)
     pub parsed_sql: Option<ParsedSql>,
-}
-
-/// Represents a Rust type mapping from PostgreSQL types
-#[derive(Debug, Clone)]
-pub struct RustType {
-    /// The Rust type name (e.g., "i32", "String")
-    pub rust_type: String,
-    /// Whether this type is nullable
-    pub is_nullable: bool,
-    /// Whether this type is optional (conditional) parameter in a query
-    pub is_optional: bool,
-    /// Whether this is an array with nullable elements (Vec<Option<T>>)
-    pub is_nullable_elements: bool,
-    /// Whether this is a custom type that needs JSON wrapper
-    pub needs_json_wrapper: bool,
-    /// Whether the underlying PostgreSQL type is an array (e.g., jsonb[])
-    pub is_pg_array: bool,
-    /// If this is an enum type, contains the enum variants
-    pub enum_variants: Option<Vec<String>>,
-    /// If this is an enum type, contains the original PostgreSQL type name
-    pub pg_type_name: Option<String>,
-    /// If this is a composite type (RECORD), contains the field definitions
-    pub composite_fields: Option<Vec<CompositeField>>,
-}
-
-/// Information about a field in a PostgreSQL composite type
-#[derive(Debug, Clone)]
-pub struct CompositeField {
-    /// The name of the field
-    pub name: String,
-    /// The Rust type for this field
-    pub rust_type: RustType,
-}
-
-/// Information about a PostgreSQL enum type
-#[derive(Debug, Clone)]
-pub struct EnumTypeInfo {
-    /// The name of the enum type
-    pub type_name: String,
-    /// The variants of the enum
-    pub variants: Vec<String>,
-}
-
-/// Represents an output column with its name and type
-#[derive(Debug, Clone)]
-pub struct OutputColumn {
-    /// Column name
-    pub name: String,
-    /// Rust type information
-    pub rust_type: RustType,
 }
 
 /// Represents a conditional block in a SQL query
@@ -126,8 +72,7 @@ pub async fn extract_query_types(
     })?;
 
     // Extract types
-    let input_types =
-        extract_input_types(&client, &statement, &param_names, field_type_mappings).await?;
+    let input_types = extract_input_types(&statement, &param_names, field_type_mappings)?;
     let output_types = extract_output_types(&client, &statement, field_type_mappings).await?;
 
     let has_conditionals = !parsed_sql.conditional_blocks.is_empty();
@@ -375,13 +320,29 @@ async fn query_table_constraints(
     Ok(constraints)
 }
 
+/// Transform a type reference from types-module context to query-module context.
+/// `PgType::rust_name()` returns `super::module::Type` for custom PG types,
+/// but query modules need `super::types::module::Type`.
+fn qualify_type_for_query_module(type_name: &str) -> String {
+    type_name.replace("super::", "super::types::")
+}
+
+/// Transform `Vec<T>` into `Vec<Option<T>>` for array parameters with nullable elements (`??` suffix).
+fn wrap_vec_elements_nullable(type_name: &str) -> String {
+    if type_name.starts_with("Vec<") && type_name.ends_with('>') {
+        let inner = &type_name[4..type_name.len() - 1];
+        format!("Vec<Option<{}>>", inner)
+    } else {
+        type_name.to_string()
+    }
+}
+
 /// Extract input parameter types from a prepared statement
-async fn extract_input_types(
-    client: &tokio_postgres::Client,
+fn extract_input_types(
     statement: &Statement,
     param_names: &[String],
     field_type_mappings: Option<&HashMap<String, String>>,
-) -> Result<Vec<RustType>> {
+) -> Result<Vec<InputParam>> {
     let params = statement.params();
     let mut input_types = Vec::new();
 
@@ -408,7 +369,22 @@ async fn extract_input_types(
             param_name
         };
 
-        let mut rust_type = pg_type_to_rust_type(client, param_type, false).await?; // Always get base type
+        let base_type_name = qualify_type_for_query_module(
+            &param_type
+                .rust_name()
+                .map_err(|e| anyhow::anyhow!("{}", e))?,
+        );
+
+        // For ?? suffix: wrap array element type in Option (Vec<T> -> Vec<Option<T>>)
+        let type_ref = if is_nullable_elements {
+            wrap_vec_elements_nullable(&base_type_name)
+        } else {
+            base_type_name
+        };
+
+        let mut is_optional = is_optional_param;
+        let mut needs_json_wrapper = false;
+        let mut mapped_type_ref: Option<String> = None;
 
         // Check if there's a custom type mapping for this parameter
         if let Some(mappings) = field_type_mappings {
@@ -434,35 +410,27 @@ async fn extract_input_types(
                     (custom_type.as_str(), true)
                 };
 
-                rust_type = RustType {
-                    rust_type: clean_type.to_string(),
-                    is_nullable: false,
-                    is_optional: is_optional_param,
-                    is_nullable_elements,
-                    needs_json_wrapper: needs_wrapper,
-                    is_pg_array: param_type.name().starts_with('_'),
-                    enum_variants: None,
-                    pg_type_name: None,
-                    composite_fields: None,
-                };
-            } else if is_optional_param {
-                // If it's an optional parameter but no custom type, mark as nullable
-                rust_type.is_nullable = false;
-                rust_type.is_optional = true;
-            } else if is_nullable_elements {
-                // Mark as array with nullable elements
-                rust_type.is_nullable_elements = true;
+                mapped_type_ref = Some(if is_nullable_elements {
+                    wrap_vec_elements_nullable(clean_type)
+                } else {
+                    clean_type.to_string()
+                });
+                needs_json_wrapper = needs_wrapper;
+                is_optional = is_optional_param;
             }
-        } else if is_optional_param {
-            // If no mappings and it's optional parameter, mark as nullable
-            rust_type.is_nullable = false;
-            rust_type.is_optional = true;
-        } else if is_nullable_elements {
-            // Mark as array with nullable elements
-            rust_type.is_nullable_elements = true;
         }
 
-        input_types.push(rust_type);
+        input_types.push(InputParam {
+            field: StructField {
+                pg_name: clean_param_name.to_string(),
+                rust_name: to_snake_case(clean_param_name),
+                type_ref,
+                mapped_type_ref,
+                is_nullable: false,
+            },
+            is_optional,
+            needs_json_wrapper,
+        });
     }
 
     Ok(input_types)
@@ -507,59 +475,6 @@ async fn get_column_nullability(
     Ok(nullability)
 }
 
-/// Get enum type information from PostgreSQL system catalogs with caching
-pub async fn get_enum_type_info(
-    client: &tokio_postgres::Client,
-    type_oid: u32,
-) -> Result<Option<EnumTypeInfo>> {
-    // Initialize cache if not already done
-    let cache = ENUM_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-
-    // Check cache first
-    {
-        let cache_lock = cache.lock().await;
-        if let Some(cached_result) = cache_lock.get(&type_oid) {
-            return Ok(cached_result.clone());
-        }
-    }
-
-    // Not in cache, query the database
-    let rows = client
-        .query(
-            r#"
-            SELECT n.nspname || '.' || t.typname as full_type_name, 
-                   array_agg(e.enumlabel ORDER BY e.enumsortorder) as enum_values
-            FROM pg_type t
-            JOIN pg_enum e ON t.oid = e.enumtypid
-            JOIN pg_namespace n ON t.typnamespace = n.oid
-            WHERE t.oid = $1
-            GROUP BY n.nspname, t.typname
-            "#,
-            &[&type_oid],
-        )
-        .await?;
-
-    let result = if let Some(row) = rows.first() {
-        let type_name: String = row.get(0);
-        let enum_values: Vec<String> = row.get(1);
-
-        Some(EnumTypeInfo {
-            type_name,
-            variants: enum_values,
-        })
-    } else {
-        None
-    };
-
-    // Cache the result
-    {
-        let mut cache_lock = cache.lock().await;
-        cache_lock.insert(type_oid, result.clone());
-    }
-
-    Ok(result)
-}
-
 /// Extract output column types from a prepared statement
 async fn extract_output_types(
     client: &tokio_postgres::Client,
@@ -575,384 +490,51 @@ async fn extract_output_types(
     for (i, column) in columns.iter().enumerate() {
         let column_name = column.name();
         let is_nullable = nullability_info.get(i).copied().unwrap_or(true); // Default to nullable if unknown
-        let base_rust_type = pg_type_to_rust_type(client, column.type_(), is_nullable).await?;
+        let base_type_name = qualify_type_for_query_module(
+            &column
+                .type_()
+                .rust_name()
+                .map_err(|e| anyhow::anyhow!("{}", e))?,
+        );
 
         // Check if there's a custom type mapping for this field
-        // Note: Since we only have the column name here, we can't determine the exact table
-        // For now, we'll check for exact column name matches in the mappings
-        let rust_type = if let Some(mappings) = field_type_mappings {
-            // Look for any mapping that ends with the column name
-            let custom_type = mappings
-                .iter()
-                .find(|(key, _)| key.ends_with(&format!(".{}", column_name)))
-                .map(|(_, rust_type)| rust_type.clone());
+        let (mapped_type_ref, final_nullable, needs_json_wrapper) =
+            if let Some(mappings) = field_type_mappings {
+                let custom_type = mappings
+                    .iter()
+                    .find(|(key, _)| key.ends_with(&format!(".{}", column_name)))
+                    .map(|(_, rust_type)| rust_type.clone());
 
-            if let Some(custom_type) = custom_type {
-                // Check for explicit JSON wrapper control via @json or @native suffix
-                // - Type@json: Force JSON wrapper (for custom types without sqlx traits)
-                // - Type@native: No JSON wrapper (for types implementing sqlx::Decode)
-                // - Type (no suffix): Default - JSON wrapper enabled
-                let (clean_type, needs_wrapper) = if custom_type.ends_with("@json") {
-                    (&custom_type[..custom_type.len() - 5], true)
-                } else if custom_type.ends_with("@native") {
-                    (&custom_type[..custom_type.len() - 7], false)
+                if let Some(custom_type) = custom_type {
+                    let (clean_type, needs_wrapper) = if custom_type.ends_with("@json") {
+                        (&custom_type[..custom_type.len() - 5], true)
+                    } else if custom_type.ends_with("@native") {
+                        (&custom_type[..custom_type.len() - 7], false)
+                    } else {
+                        (custom_type.as_str(), true)
+                    };
+
+                    (Some(clean_type.to_string()), is_nullable, needs_wrapper)
                 } else {
-                    (custom_type.as_str(), true)
-                };
-
-                RustType {
-                    rust_type: clean_type.to_string(),
-                    is_nullable: base_rust_type.is_nullable,
-                    is_optional: false,
-                    is_nullable_elements: false,
-                    needs_json_wrapper: needs_wrapper,
-                    is_pg_array: column.type_().name().starts_with('_'),
-                    enum_variants: None,
-                    pg_type_name: None,
-                    composite_fields: None,
+                    (None, is_nullable, false)
                 }
             } else {
-                base_rust_type
-            }
-        } else {
-            base_rust_type
-        };
+                (None, is_nullable, false)
+            };
 
         output_types.push(OutputColumn {
-            name: column_name.to_string(),
-            rust_type,
+            field: StructField {
+                pg_name: column_name.to_string(),
+                rust_name: to_snake_case(column_name),
+                is_nullable: final_nullable,
+                type_ref: base_type_name,
+                mapped_type_ref,
+            },
+            needs_json_wrapper,
         });
     }
 
     Ok(output_types)
-}
-
-/// Convert PostgreSQL type to Rust type
-fn pg_type_to_rust_type<'a>(
-    client: &'a tokio_postgres::Client,
-    pg_type: &'a PgType,
-    is_nullable: bool,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<RustType>> + 'a + Send>> {
-    Box::pin(async move {
-        // Check if this is an array type with a composite element type
-        // Handles patterns like $1::widgets[] or $1::widget_input[]
-        // where the parameter is an array of a composite (table or custom) type
-        if let PgKind::Array(element_type) = pg_type.kind() {
-            if let PgKind::Composite(fields) = element_type.kind() {
-                // Query nullability for the composite element type's fields
-                let nullability_map = if let Ok(rows) = client
-                    .query(
-                        "SELECT a.attname, NOT a.attnotnull as is_nullable 
-                         FROM pg_type t
-                         JOIN pg_attribute a ON a.attrelid = t.typrelid
-                         WHERE t.oid = $1 AND a.attnum > 0 AND NOT a.attisdropped
-                         ORDER BY a.attnum",
-                        &[&element_type.oid()],
-                    )
-                    .await
-                {
-                    rows.iter()
-                        .map(|row| {
-                            let name: String = row.get(0);
-                            let nullable: bool = row.get(1);
-                            (name, nullable)
-                        })
-                        .collect::<std::collections::HashMap<String, bool>>()
-                } else {
-                    std::collections::HashMap::new()
-                };
-
-                let mut composite_fields = Vec::new();
-                for field in fields {
-                    let field_name = field.name().to_string();
-                    let is_field_nullable =
-                        nullability_map.get(&field_name).copied().unwrap_or(true);
-                    let field_type =
-                        pg_type_to_rust_type(client, field.type_(), is_field_nullable).await?;
-                    composite_fields.push(CompositeField {
-                        name: field_name,
-                        rust_type: field_type,
-                    });
-                }
-
-                let element_type_name = to_pascal_case(element_type.name());
-
-                return Ok(RustType {
-                    rust_type: format!("Vec<{}>", element_type_name),
-                    is_nullable,
-                    is_optional: false,
-                    is_nullable_elements: false,
-                    needs_json_wrapper: false,
-                    is_pg_array: true,
-                    enum_variants: None,
-                    pg_type_name: Some(element_type.name().to_string()),
-                    composite_fields: Some(composite_fields),
-                });
-            }
-        }
-
-        // Check if this is a composite type using kind()
-        // This works for named composite types (table types, CREATE TYPE, etc.)
-        // but NOT for anonymous RECORD types from ROW() constructors
-        if let PgKind::Composite(fields) = pg_type.kind() {
-            // For table row types, query the actual column nullability from pg_attribute
-            // First, get the table OID from pg_type.typrelid
-            let nullability_map = if let Ok(rows) = client
-                .query(
-                    "SELECT a.attname, NOT a.attnotnull as is_nullable 
-                     FROM pg_type t
-                     JOIN pg_attribute a ON a.attrelid = t.typrelid
-                     WHERE t.oid = $1 AND a.attnum > 0 AND NOT a.attisdropped
-                     ORDER BY a.attnum",
-                    &[&pg_type.oid()],
-                )
-                .await
-            {
-                rows.iter()
-                    .map(|row| {
-                        let name: String = row.get(0);
-                        let nullable: bool = row.get(1);
-                        (name, nullable)
-                    })
-                    .collect::<std::collections::HashMap<String, bool>>()
-            } else {
-                // If query fails, assume all fields are nullable (safer default)
-                std::collections::HashMap::new()
-            };
-
-            let mut composite_fields = Vec::new();
-            for field in fields {
-                let field_name = field.name().to_string();
-                let is_field_nullable = nullability_map.get(&field_name).copied().unwrap_or(true);
-                let field_type =
-                    pg_type_to_rust_type(client, field.type_(), is_field_nullable).await?;
-                composite_fields.push(CompositeField {
-                    name: field_name,
-                    rust_type: field_type,
-                });
-            }
-
-            // Generate a struct name from the type name
-            let type_name = to_pascal_case(pg_type.name());
-
-            return Ok(RustType {
-                rust_type: type_name,
-                is_nullable,
-                is_optional: false,
-                is_nullable_elements: false,
-                needs_json_wrapper: false,
-                is_pg_array: false,
-                enum_variants: None,
-                pg_type_name: Some(pg_type.name().to_string()),
-                composite_fields: Some(composite_fields),
-            });
-        }
-
-        let base_type = match *pg_type {
-            // Boolean & Numeric Types
-            PgType::BOOL => "bool",
-            PgType::BOOL_ARRAY => "Vec<bool>",
-            PgType::CHAR => "i8",
-            PgType::CHAR_ARRAY => "Vec<i8>",
-            PgType::INT2 => "i16",
-            PgType::INT2_ARRAY => "Vec<i16>",
-            PgType::INT4 => "i32",
-            PgType::INT4_ARRAY => "Vec<i32>",
-            PgType::INT8 => "i64",
-            PgType::INT8_ARRAY => "Vec<i64>",
-            PgType::FLOAT4 => "f32",
-            PgType::FLOAT4_ARRAY => "Vec<f32>",
-            PgType::FLOAT8 => "f64",
-            PgType::FLOAT8_ARRAY => "Vec<f64>",
-            PgType::NUMERIC => "rust_decimal::Decimal",
-            PgType::NUMERIC_ARRAY => "Vec<rust_decimal::Decimal>",
-            PgType::REGPROC => "u32",
-            PgType::OID => "u32",
-            PgType::TID => "(u32, u32)",
-            PgType::XID => "u32",
-            PgType::CID => "u32",
-            PgType::XID8 => "u64",
-
-            // String & Text Types
-            PgType::NAME => "String",
-            PgType::NAME_ARRAY => "Vec<String>",
-            PgType::TEXT => "String",
-            PgType::TEXT_ARRAY => "Vec<String>",
-            PgType::BPCHAR => "String",
-            PgType::BPCHAR_ARRAY => "Vec<String>",
-            PgType::VARCHAR => "String",
-            PgType::VARCHAR_ARRAY => "Vec<String>",
-            PgType::XML => "String",
-            PgType::XML_ARRAY => "Vec<String>",
-            PgType::JSON => "serde_json::Value",
-            PgType::JSON_ARRAY => "Vec<serde_json::Value>",
-            PgType::JSONB => "serde_json::Value",
-            PgType::JSONB_ARRAY => "Vec<serde_json::Value>",
-            PgType::JSONPATH => "String",
-
-            // Binary & Bit Types
-            PgType::BYTEA => "Vec<u8>",
-            PgType::BYTEA_ARRAY => "Vec<Vec<u8>>",
-            PgType::BIT => "bit_vec::BitVec",
-            PgType::BIT_ARRAY => "Vec<bit_vec::BitVec>",
-            PgType::VARBIT => "bit_vec::BitVec",
-            PgType::VARBIT_ARRAY => "Vec<bit_vec::BitVec>",
-
-            // Date & Time Types
-            PgType::DATE => "chrono::NaiveDate",
-            PgType::DATE_ARRAY => "Vec<chrono::NaiveDate>",
-            PgType::TIME => "chrono::NaiveTime",
-            PgType::TIME_ARRAY => "Vec<chrono::NaiveTime>",
-            PgType::TIMESTAMP => "chrono::NaiveDateTime",
-            PgType::TIMESTAMP_ARRAY => "Vec<chrono::NaiveDateTime>",
-            PgType::TIMESTAMPTZ => "chrono::DateTime<chrono::Utc>",
-            PgType::TIMESTAMPTZ_ARRAY => "Vec<chrono::DateTime<chrono::Utc>>",
-            PgType::INTERVAL => "sqlx::postgres::types::PgInterval",
-            PgType::INTERVAL_ARRAY => "Vec<sqlx::postgres::types::PgInterval>",
-            PgType::TIMETZ => "sqlx::postgres::types::PgTimeTz",
-            PgType::TIMETZ_ARRAY => "Vec<sqlx::postgres::types::PgTimeTz>",
-
-            // Range Types
-            PgType::INT4_RANGE => "sqlx::postgres::types::PgRange<i32>",
-            PgType::INT4_RANGE_ARRAY => "Vec<sqlx::postgres::types::PgRange<i32>>",
-            PgType::INT8_RANGE => "sqlx::postgres::types::PgRange<i64>",
-            PgType::INT8_RANGE_ARRAY => "Vec<sqlx::postgres::types::PgRange<i64>>",
-            PgType::NUM_RANGE => "sqlx::postgres::types::PgRange<rust_decimal::Decimal>",
-            PgType::NUM_RANGE_ARRAY => "Vec<sqlx::postgres::types::PgRange<rust_decimal::Decimal>>",
-            PgType::TS_RANGE => "sqlx::postgres::types::PgRange<chrono::NaiveDateTime>",
-            PgType::TS_RANGE_ARRAY => "Vec<sqlx::postgres::types::PgRange<chrono::NaiveDateTime>>",
-            PgType::TSTZ_RANGE => "sqlx::postgres::types::PgRange<chrono::DateTime<chrono::Utc>>",
-            PgType::TSTZ_RANGE_ARRAY => {
-                "Vec<sqlx::postgres::types::PgRange<chrono::DateTime<chrono::Utc>>>"
-            }
-            PgType::DATE_RANGE => "sqlx::postgres::types::PgRange<chrono::NaiveDate>",
-            PgType::DATE_RANGE_ARRAY => "Vec<sqlx::postgres::types::PgRange<chrono::NaiveDate>>",
-
-            // Multirange Types - sqlx doesn't support multirange types natively, use JSON
-            PgType::INT4MULTI_RANGE => "serde_json::Value",
-            PgType::INT4MULTI_RANGE_ARRAY => "serde_json::Value",
-            PgType::INT8MULTI_RANGE => "serde_json::Value",
-            PgType::INT8MULTI_RANGE_ARRAY => "serde_json::Value",
-            PgType::NUMMULTI_RANGE => "serde_json::Value",
-            PgType::NUMMULTI_RANGE_ARRAY => "serde_json::Value",
-            PgType::TSMULTI_RANGE => "serde_json::Value",
-            PgType::TSMULTI_RANGE_ARRAY => "serde_json::Value",
-            PgType::TSTZMULTI_RANGE => "serde_json::Value",
-            PgType::TSTZMULTI_RANGE_ARRAY => "serde_json::Value",
-            PgType::DATEMULTI_RANGE => "serde_json::Value",
-            PgType::DATEMULTI_RANGE_ARRAY => "serde_json::Value",
-
-            // Network & Address Types
-            PgType::CIDR => "std::net::IpAddr",
-            PgType::CIDR_ARRAY => "Vec<std::net::IpAddr>",
-            PgType::INET => "std::net::IpAddr",
-            PgType::INET_ARRAY => "Vec<std::net::IpAddr>",
-            PgType::MACADDR => "mac_address::MacAddress",
-            PgType::MACADDR_ARRAY => "Vec<mac_address::MacAddress>",
-
-            // Geometric Types
-            PgType::POINT => "sqlx::postgres::types::PgPoint",
-            PgType::POINT_ARRAY => "Vec<sqlx::postgres::types::PgPoint>",
-            PgType::LSEG => "sqlx::postgres::types::PgLseg",
-            PgType::LSEG_ARRAY => "Vec<sqlx::postgres::types::PgLseg>",
-            PgType::PATH => "sqlx::postgres::types::PgPath",
-            PgType::PATH_ARRAY => "Vec<sqlx::postgres::types::PgPath>",
-            PgType::BOX => "sqlx::postgres::types::PgBox",
-            PgType::BOX_ARRAY => "Vec<sqlx::postgres::types::PgBox>",
-            PgType::POLYGON => "sqlx::postgres::types::PgPolygon",
-            PgType::POLYGON_ARRAY => "Vec<sqlx::postgres::types::PgPolygon>",
-            PgType::CIRCLE => "sqlx::postgres::types::PgCircle",
-            PgType::CIRCLE_ARRAY => "Vec<sqlx::postgres::types::PgCircle>",
-            PgType::LINE => "sqlx::postgres::types::PgLine",
-            PgType::LINE_ARRAY => "Vec<sqlx::postgres::types::PgLine>",
-
-            // Special & System Types
-            PgType::TSQUERY => "String",
-            PgType::TSQUERY_ARRAY => "Vec<String>",
-            PgType::REGCONFIG => "u32",
-            PgType::REGDICTIONARY => "u32",
-            PgType::REGNAMESPACE => "u32",
-            PgType::REGROLE => "u32",
-            PgType::REGCOLLATION => "u32",
-            PgType::ACLITEM => "String",
-            PgType::PG_NDISTINCT => "String",
-            PgType::PG_DEPENDENCIES => "String",
-            PgType::PG_BRIN_BLOOM_SUMMARY => "String",
-            PgType::PG_BRIN_MINMAX_MULTI_SUMMARY => "String",
-            PgType::PG_MCV_LIST => "String",
-            PgType::PG_SNAPSHOT => "String",
-            PgType::TXID_SNAPSHOT => "String",
-            PgType::UUID => "uuid::Uuid",
-            PgType::UUID_ARRAY => "Vec<uuid::Uuid>",
-
-            PgType::PG_LSN => "u64",
-            PgType::PG_LSN_ARRAY => "Vec<u64>",
-
-            // Pseudo-types, handlers, and unknowns: map to serde_json::Value
-            PgType::UNKNOWN
-            | PgType::RECORD
-            | PgType::ANY
-            | PgType::ANYARRAY
-            | PgType::VOID
-            | PgType::TRIGGER
-            | PgType::LANGUAGE_HANDLER
-            | PgType::INTERNAL
-            | PgType::ANYELEMENT
-            | PgType::RECORD_ARRAY
-            | PgType::ANYNONARRAY
-            | PgType::FDW_HANDLER
-            | PgType::TSM_HANDLER
-            | PgType::ANYENUM => "serde_json::Value",
-
-            // Enum types and fallback
-            _ => {
-                // Check if this is an enum type by trying to get enum info
-                if let Some(enum_info) = get_enum_type_info(client, pg_type.oid()).await? {
-                    // Extract just the type name without schema for Rust enum name
-                    let type_name_only = enum_info
-                        .type_name
-                        .split('.')
-                        .last()
-                        .unwrap_or(&enum_info.type_name);
-                    let enum_name = to_pascal_case(type_name_only);
-                    return Ok(RustType {
-                        rust_type: enum_name,
-                        is_nullable,
-                        is_optional: false,
-                        is_nullable_elements: false,
-                        needs_json_wrapper: false,
-                        is_pg_array: false,
-                        enum_variants: Some(enum_info.variants),
-                        pg_type_name: Some(enum_info.type_name), // Keep fully-qualified for SQL
-                        composite_fields: None,
-                    });
-                }
-                return Ok(RustType {
-                    rust_type: format!("/* Unknown type: {} */ String", pg_type.name()),
-                    is_nullable,
-                    is_optional: false,
-                    is_nullable_elements: false,
-                    needs_json_wrapper: false,
-                    is_pg_array: pg_type.name().starts_with('_'),
-                    enum_variants: None,
-                    pg_type_name: None,
-                    composite_fields: None,
-                });
-            }
-        };
-
-        Ok(RustType {
-            rust_type: base_type.to_string(),
-            is_nullable,
-            is_optional: false,
-            is_nullable_elements: false,
-            needs_json_wrapper: false,
-            is_pg_array: pg_type.name().starts_with('_'),
-            enum_variants: None,
-            pg_type_name: None,
-            composite_fields: None,
-        })
-    })
 }
 
 /// Parse SQL to extract meaningful parameter names from named parameters
@@ -1128,50 +710,6 @@ pub fn convert_named_params_to_positional(sql: &str) -> (String, Vec<String>) {
     }
 }
 
-/// Recursively collect enum types from a RustType (including nested composite fields)
-fn collect_enums_from_rust_type(
-    rust_type: &RustType,
-    enum_types: &mut std::collections::HashMap<String, (Vec<String>, String)>,
-) {
-    if let Some(ref variants) = rust_type.enum_variants {
-        if let Some(ref pg_type_name) = rust_type.pg_type_name {
-            enum_types.insert(
-                rust_type.rust_type.clone(),
-                (variants.clone(), pg_type_name.clone()),
-            );
-        }
-    }
-    // Recurse into composite fields
-    if let Some(ref composite_fields) = rust_type.composite_fields {
-        for field in composite_fields {
-            collect_enums_from_rust_type(&field.rust_type, enum_types);
-        }
-    }
-}
-
-/// Extract all unique enum types from input and output types (recursively including composite fields)
-pub fn extract_enum_types(
-    input_types: &[RustType],
-    output_types: &[OutputColumn],
-) -> Vec<(String, Vec<String>, String)> {
-    let mut enum_types = std::collections::HashMap::new();
-
-    // Check input types for enums (including nested in composites)
-    for input_type in input_types {
-        collect_enums_from_rust_type(input_type, &mut enum_types);
-    }
-
-    // Check output types for enums (including nested in composites)
-    for output_col in output_types {
-        collect_enums_from_rust_type(&output_col.rust_type, &mut enum_types);
-    }
-
-    enum_types
-        .into_iter()
-        .map(|(rust_name, (variants, pg_name))| (rust_name, variants, pg_name))
-        .collect()
-}
-
 /// Create dummy parameter values for EXPLAIN queries
 /// Returns (dummy_params, special_params) where special_params contains info about enums and numeric types
 pub async fn create_dummy_params(
@@ -1211,13 +749,10 @@ pub async fn create_dummy_params(
             continue;
         }
 
-        // Check if this is an enum type and get actual enum values
-        if let Ok(Some(enum_info)) = get_enum_type_info(client, param_type.oid()).await {
-            special_params.push((
-                dummy_params.len(),
-                enum_info.type_name.clone(),
-                enum_info.variants[0].clone(),
-            ));
+        // Check if this is an enum type
+        if let PgKind::Enum(variants) = param_type.kind() {
+            let type_name = format!("{}.{}", param_type.schema(), param_type.name());
+            special_params.push((dummy_params.len(), type_name, variants[0].clone()));
             dummy_params.push(Box::new("ENUM_PLACEHOLDER".to_string()));
             continue;
         }

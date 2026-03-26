@@ -123,7 +123,7 @@ impl RustName for PgType {
                 to_pascal_case(self.name())
             )),
             tokio_postgres::types::Kind::Array(elem_type) => {
-                Ok(format!("std::vec::Vec<{}>", elem_type.rust_name()?))
+                Ok(format!("Vec<{}>", elem_type.rust_name()?))
             }
             tokio_postgres::types::Kind::Range(elem_type) => Ok(format!(
                 "sqlx::postgres::types::PgRange<{}>",
@@ -159,40 +159,95 @@ impl RustName for PgType {
 }
 
 pub struct TypeSystem {
-    types: std::collections::HashMap<TypeRef, TypeInfo>,
+    types: indexmap::IndexMap<TypeRef, TypeInfo>,
 }
 
 impl TypeSystem {
     pub fn new() -> Self {
         Self {
-            types: std::collections::HashMap::new(),
+            types: indexmap::IndexMap::new(),
         }
-    }
-
-    pub fn get(&self, type_ref: &TypeRef) -> Option<&TypeInfo> {
-        self.types.get(type_ref)
     }
 
     pub fn insert(&mut self, pg_type: &PgType) -> Result<(), UnsupportedTypeError> {
         let type_info = TypeInfo::try_from(pg_type)?;
+        if self.types.contains_key(&type_info.rust_name) {
+            return Ok(());
+        }
         self.types.insert(type_info.rust_name.clone(), type_info);
 
         match pg_type.kind() {
             tokio_postgres::types::Kind::Composite(fields) => {
                 for field in fields {
-                    self.insert(field.type_())?; // Ensure the field's type is also in the system
+                    self.insert(field.type_())?;
                 }
             }
             tokio_postgres::types::Kind::Array(elem_type) => {
-                self.insert(elem_type)?; // Ensure the element type is also in the system
+                self.insert(elem_type)?;
             }
             tokio_postgres::types::Kind::Range(elem_type) => {
-                self.insert(elem_type)?; // Ensure the element type is also in the system
+                self.insert(elem_type)?;
             }
             tokio_postgres::types::Kind::Domain(base_type) => {
-                self.insert(base_type)?; // Ensure the base type is also in the system
+                self.insert(base_type)?;
             }
             _ => {}
+        }
+
+        Ok(())
+    }
+
+    /// Query pg_attribute for all composite/table types and set field nullability.
+    /// Call once after the type system is fully built.
+    pub async fn resolve_nullability(
+        &mut self,
+        client: &tokio_postgres::Client,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Collect OIDs for all struct types
+        let struct_oids: Vec<u32> = self
+            .types
+            .values()
+            .filter(|ti| matches!(ti.kind, TypeKind::Struct(_)))
+            .map(|ti| ti.id)
+            .collect();
+
+        if struct_oids.is_empty() {
+            return Ok(());
+        }
+
+        // Batch query all fields for all composite/table types at once
+        let rows = client
+            .query(
+                "SELECT t.oid, a.attname, a.attnotnull \
+                 FROM pg_attribute a \
+                 JOIN pg_type t ON t.typrelid = a.attrelid \
+                 WHERE t.oid = ANY($1) AND a.attnum > 0 AND NOT a.attisdropped \
+                 ORDER BY t.oid, a.attnum",
+                &[&struct_oids],
+            )
+            .await?;
+
+        // Build a lookup: type OID -> Vec<(field_name, is_nullable)>
+        let mut nullability: std::collections::HashMap<u32, Vec<(String, bool)>> =
+            std::collections::HashMap::new();
+        for row in &rows {
+            let oid: u32 = row.get(0);
+            let name: String = row.get(1);
+            let not_null: bool = row.get(2);
+            nullability.entry(oid).or_default().push((name, !not_null));
+        }
+
+        // Apply nullability to struct fields
+        for type_info in self.types.values_mut() {
+            if let TypeKind::Struct(ref mut fields) = type_info.kind {
+                if let Some(field_nulls) = nullability.get(&type_info.id) {
+                    for (name, is_nullable) in field_nulls {
+                        if let Some(field) = fields.iter_mut().find(|f| f.pg_name == *name) {
+                            field.is_nullable = *is_nullable;
+                        }
+                    }
+                }
+            }
         }
 
         Ok(())
@@ -335,13 +390,17 @@ impl TryFrom<&String> for EnumVariant {
     }
 }
 
-/// Information about a field in a PostgreSQL composite type
+/// Core field info shared between composite type fields, input params, and output columns
 #[derive(Debug, Clone)]
 pub struct StructField {
     pub pg_name: String,
     pub rust_name: String,
-    pub is_nullable: bool,
+    /// The Rust type derived from the PostgreSQL type (e.g. "serde_json::Value" for jsonb)
     pub type_ref: TypeRef,
+    /// Custom type mapping override (e.g. "Vec<crate::models::UserSocialLink>" for jsonb)
+    pub mapped_type_ref: Option<String>,
+    /// Whether this field is nullable (wraps in Option<T>)
+    pub is_nullable: bool,
 }
 
 impl TryFrom<&PgField> for StructField {
@@ -351,20 +410,22 @@ impl TryFrom<&PgField> for StructField {
         Ok(Self {
             pg_name: pg_field.name().to_string(),
             rust_name: to_snake_case(pg_field.name()),
-            is_nullable: false,
             type_ref: pg_field.type_().rust_name()?,
+            mapped_type_ref: None,
+            is_nullable: false,
         })
     }
 }
 
 impl StructField {
-    pub fn with_nullable(mut self) -> Self {
-        self.is_nullable = true;
-        self
+    /// Whether the underlying PostgreSQL type is an array
+    pub fn is_pg_array(&self) -> bool {
+        self.type_ref.starts_with("Vec<")
     }
 
-    pub fn make_nullable(&mut self) {
-        self.is_nullable = true;
+    /// The effective Rust type for codegen (mapped type if set, otherwise type_ref)
+    pub fn rust_type(&self) -> &str {
+        self.mapped_type_ref.as_deref().unwrap_or(&self.type_ref)
     }
 
     /// Generates a struct field declaration line: `pub field_name: Type,`
@@ -374,14 +435,45 @@ impl StructField {
         } else {
             String::new()
         };
-        if self.is_nullable {
-            format!(
-                "{}    pub {}: Option<{}>,\n",
-                rename, self.rust_name, self.type_ref
-            )
+        let rust_type = self.rust_type();
+        let type_str = if self.is_nullable {
+            format!("Option<{}>", rust_type)
         } else {
-            format!("{}    pub {}: {},\n", rename, self.rust_name, self.type_ref)
-        }
+            rust_type.to_string()
+        };
+        format!("{}    pub {}: {},\n", rename, self.rust_name, type_str)
+    }
+}
+
+/// An input parameter to a SQL query
+#[derive(Debug, Clone)]
+pub struct InputParam {
+    pub field: StructField,
+    /// Whether this is an optional (conditional) parameter (`?` suffix)
+    pub is_optional: bool,
+    /// Whether this field needs JSON serialization wrapper (for custom type mappings)
+    pub needs_json_wrapper: bool,
+}
+
+impl std::ops::Deref for InputParam {
+    type Target = StructField;
+    fn deref(&self) -> &StructField {
+        &self.field
+    }
+}
+
+/// An output column from a SQL query
+#[derive(Debug, Clone)]
+pub struct OutputColumn {
+    pub field: StructField,
+    /// Whether this field needs JSON serialization wrapper (for custom type mappings)
+    pub needs_json_wrapper: bool,
+}
+
+impl std::ops::Deref for OutputColumn {
+    type Target = StructField;
+    fn deref(&self) -> &StructField {
+        &self.field
     }
 }
 

@@ -27,105 +27,17 @@ impl TryFrom<super::ErrorConstraintInfo> for InsertWidgetsBulkConstraints {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct WidgetMetadata {
-    pub color: Option<String>,
-    pub version: Option<i32>,
-}
-
-impl sqlx::Type<sqlx::Postgres> for WidgetMetadata {
-    fn type_info() -> sqlx::postgres::PgTypeInfo {
-        sqlx::postgres::PgTypeInfo::with_name("widget_metadata")
-    }
-}
-
-impl<'r> sqlx::Decode<'r, sqlx::Postgres> for WidgetMetadata {
-    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
-        let mut decoder = sqlx::postgres::types::PgRecordDecoder::new(value)?;
-        Ok(Self {
-            color: decoder.try_decode()?,
-            version: decoder.try_decode()?,
-        })
-    }
-}
-
-impl<'q> sqlx::Encode<'q, sqlx::Postgres> for WidgetMetadata {
-    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync + 'static>> {
-        let mut encoder = sqlx::postgres::types::PgRecordEncoder::new(buf);
-        encoder.encode(&self.color)?;
-        encoder.encode(&self.version)?;
-        encoder.finish();
-        Ok(sqlx::encode::IsNull::No)
-    }
-}
-
-impl sqlx::postgres::PgHasArrayType for WidgetMetadata {
-    fn array_type_info() -> sqlx::postgres::PgTypeInfo {
-        sqlx::postgres::PgTypeInfo::with_name("_widget_metadata")
-    }
-}
-
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Widgets {
-    pub id: i32,
-    pub name: String,
-    pub weight: Option<f64>,
-    pub metadata: Option<WidgetMetadata>,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-impl sqlx::Type<sqlx::Postgres> for Widgets {
-    fn type_info() -> sqlx::postgres::PgTypeInfo {
-        sqlx::postgres::PgTypeInfo::with_name("widgets")
-    }
-}
-
-impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Widgets {
-    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
-        let mut decoder = sqlx::postgres::types::PgRecordDecoder::new(value)?;
-        Ok(Self {
-            id: decoder.try_decode()?,
-            name: decoder.try_decode()?,
-            weight: decoder.try_decode()?,
-            metadata: decoder.try_decode()?,
-            created_at: decoder.try_decode()?,
-        })
-    }
-}
-
-impl<'q> sqlx::Encode<'q, sqlx::Postgres> for Widgets {
-    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync + 'static>> {
-        let mut encoder = sqlx::postgres::types::PgRecordEncoder::new(buf);
-        encoder.encode(&self.id)?;
-        encoder.encode(&self.name)?;
-        encoder.encode(&self.weight)?;
-        encoder.encode(&self.metadata)?;
-        encoder.encode(&self.created_at)?;
-        encoder.finish();
-        Ok(sqlx::encode::IsNull::No)
-    }
-}
-
-impl sqlx::postgres::PgHasArrayType for Widgets {
-    fn array_type_info() -> sqlx::postgres::PgTypeInfo {
-        sqlx::postgres::PgTypeInfo::with_name("_widgets")
-    }
-}
-
-
-
 #[derive(Debug, Clone)]
 pub struct InsertWidgetsBulkItem {
     pub id: i32,
     pub name: String,
     pub weight: Option<f64>,
-    pub metadata: Option<WidgetMetadata>,
+    pub metadata: Option<super::types::public::WidgetMetadata>,
 }
 
 /// Bulk insert widgets using table composite type array with UNNEST
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.widgets (name, weight, metadata)\nSELECT r.name, r.weight, r.metadata\nFROM UNNEST(#{items}::public.widgets[]) AS r(id, name, weight, metadata, created_at)\nRETURNING id, name, weight, metadata"))]
-pub async fn insert_widgets_bulk(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, items: Vec<Widgets>) -> Result<Vec<InsertWidgetsBulkItem>, super::Error<InsertWidgetsBulkConstraints>> {
+pub async fn insert_widgets_bulk(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, items: Vec<super::types::public::Widgets>) -> Result<Vec<InsertWidgetsBulkItem>, super::Error<InsertWidgetsBulkConstraints>> {
     let query = sqlx::query(
         r"INSERT INTO public.widgets (name, weight, metadata)
         SELECT r.name, r.weight, r.metadata
@@ -139,7 +51,7 @@ pub async fn insert_widgets_bulk(executor: impl sqlx::Executor<'_, Database = sq
         id: row.try_get::<i32, _>("id")?,
         name: row.try_get::<String, _>("name")?,
         weight: row.try_get::<Option<f64>, _>("weight")?,
-        metadata: row.try_get::<Option<WidgetMetadata>, _>("metadata")?,
+        metadata: row.try_get::<Option<super::types::public::WidgetMetadata>, _>("metadata")?,
     })
     }).collect();
     result.map_err(Into::into)
@@ -169,61 +81,17 @@ impl TryFrom<super::ErrorConstraintInfo> for InsertWidgetsCustomTypeConstraints 
     }
 }
 
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct WidgetInput {
-    pub name: Option<String>,
-    pub weight: Option<f64>,
-    pub metadata: Option<WidgetMetadata>,
-}
-
-impl sqlx::Type<sqlx::Postgres> for WidgetInput {
-    fn type_info() -> sqlx::postgres::PgTypeInfo {
-        sqlx::postgres::PgTypeInfo::with_name("widget_input")
-    }
-}
-
-impl<'r> sqlx::Decode<'r, sqlx::Postgres> for WidgetInput {
-    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
-        let mut decoder = sqlx::postgres::types::PgRecordDecoder::new(value)?;
-        Ok(Self {
-            name: decoder.try_decode()?,
-            weight: decoder.try_decode()?,
-            metadata: decoder.try_decode()?,
-        })
-    }
-}
-
-impl<'q> sqlx::Encode<'q, sqlx::Postgres> for WidgetInput {
-    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync + 'static>> {
-        let mut encoder = sqlx::postgres::types::PgRecordEncoder::new(buf);
-        encoder.encode(&self.name)?;
-        encoder.encode(&self.weight)?;
-        encoder.encode(&self.metadata)?;
-        encoder.finish();
-        Ok(sqlx::encode::IsNull::No)
-    }
-}
-
-impl sqlx::postgres::PgHasArrayType for WidgetInput {
-    fn array_type_info() -> sqlx::postgres::PgTypeInfo {
-        sqlx::postgres::PgTypeInfo::with_name("_widget_input")
-    }
-}
-
-
-
 #[derive(Debug, Clone)]
 pub struct InsertWidgetsCustomTypeItem {
     pub id: i32,
     pub name: String,
     pub weight: Option<f64>,
-    pub metadata: Option<WidgetMetadata>,
+    pub metadata: Option<super::types::public::WidgetMetadata>,
 }
 
 /// Bulk insert widgets using custom composite type array with UNNEST
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.widgets (name, weight, metadata)\nSELECT r.name, r.weight, r.metadata\nFROM UNNEST(#{items}::public.widget_input[]) AS r(name, weight, metadata)\nRETURNING id, name, weight, metadata"))]
-pub async fn insert_widgets_custom_type(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, items: Vec<WidgetInput>) -> Result<Vec<InsertWidgetsCustomTypeItem>, super::Error<InsertWidgetsCustomTypeConstraints>> {
+pub async fn insert_widgets_custom_type(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, items: Vec<super::types::public::WidgetInput>) -> Result<Vec<InsertWidgetsCustomTypeItem>, super::Error<InsertWidgetsCustomTypeConstraints>> {
     let query = sqlx::query(
         r"INSERT INTO public.widgets (name, weight, metadata)
         SELECT r.name, r.weight, r.metadata
@@ -237,19 +105,18 @@ pub async fn insert_widgets_custom_type(executor: impl sqlx::Executor<'_, Databa
         id: row.try_get::<i32, _>("id")?,
         name: row.try_get::<String, _>("name")?,
         weight: row.try_get::<Option<f64>, _>("weight")?,
-        metadata: row.try_get::<Option<WidgetMetadata>, _>("metadata")?,
+        metadata: row.try_get::<Option<super::types::public::WidgetMetadata>, _>("metadata")?,
     })
     }).collect();
     result.map_err(Into::into)
 }
-
 
 #[derive(Debug, Clone)]
 pub struct GetAllWidgetsItem {
     pub id: i32,
     pub name: String,
     pub weight: Option<f64>,
-    pub metadata: Option<WidgetMetadata>,
+    pub metadata: Option<super::types::public::WidgetMetadata>,
     pub created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
@@ -268,7 +135,7 @@ pub async fn get_all_widgets(executor: impl sqlx::Executor<'_, Database = sqlx::
         id: row.try_get::<i32, _>("id")?,
         name: row.try_get::<String, _>("name")?,
         weight: row.try_get::<Option<f64>, _>("weight")?,
-        metadata: row.try_get::<Option<WidgetMetadata>, _>("metadata")?,
+        metadata: row.try_get::<Option<super::types::public::WidgetMetadata>, _>("metadata")?,
         created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
     })
     }).collect();
@@ -299,18 +166,17 @@ impl TryFrom<super::ErrorConstraintInfo> for InsertWidgetSingleConstraints {
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub struct InsertWidgetSingleItem {
     pub id: i32,
     pub name: String,
     pub weight: Option<f64>,
-    pub metadata: Option<WidgetMetadata>,
+    pub metadata: Option<super::types::public::WidgetMetadata>,
 }
 
 /// Insert a single widget using a singular composite type parameter
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.widgets (name, weight, metadata)\nSELECT r.name, r.weight, r.metadata\nFROM (SELECT (#{item}::public.widget_input).*) AS r\nRETURNING id, name, weight, metadata"))]
-pub async fn insert_widget_single(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, item: WidgetInput) -> Result<InsertWidgetSingleItem, super::Error<InsertWidgetSingleConstraints>> {
+pub async fn insert_widget_single(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, item: super::types::public::WidgetInput) -> Result<InsertWidgetSingleItem, super::Error<InsertWidgetSingleConstraints>> {
     let query = sqlx::query(
         r"INSERT INTO public.widgets (name, weight, metadata)
         SELECT r.name, r.weight, r.metadata
@@ -324,7 +190,7 @@ pub async fn insert_widget_single(executor: impl sqlx::Executor<'_, Database = s
         id: row.try_get::<i32, _>("id")?,
         name: row.try_get::<String, _>("name")?,
         weight: row.try_get::<Option<f64>, _>("weight")?,
-        metadata: row.try_get::<Option<WidgetMetadata>, _>("metadata")?,
+        metadata: row.try_get::<Option<super::types::public::WidgetMetadata>, _>("metadata")?,
     })
     })();
     result.map_err(Into::into)

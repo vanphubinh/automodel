@@ -148,6 +148,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "futures",
+ "indexmap",
  "regex",
  "rust_decimal",
  "sea-query",

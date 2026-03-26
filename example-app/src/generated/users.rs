@@ -3,60 +3,6 @@
 
 use sqlx::Row;
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum UserStatus {
-    Active,
-    Inactive,
-    Suspended,
-    Pending,
-}
-
-impl std::str::FromStr for UserStatus {
-    type Err = String;
-    
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "active" => Ok(UserStatus::Active),
-            "inactive" => Ok(UserStatus::Inactive),
-            "suspended" => Ok(UserStatus::Suspended),
-            "pending" => Ok(UserStatus::Pending),
-            _ => Err(format!("Invalid UserStatus variant: {}", s)),
-        }
-    }
-}
-
-impl std::fmt::Display for UserStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            UserStatus::Active => "active",
-            UserStatus::Inactive => "inactive",
-            UserStatus::Suspended => "suspended",
-            UserStatus::Pending => "pending",
-        };
-        write!(f, "{}", s)
-    }
-}
-
-impl sqlx::Type<sqlx::Postgres> for UserStatus {
-    fn type_info() -> sqlx::postgres::PgTypeInfo {
-        sqlx::postgres::PgTypeInfo::with_name("user_status")
-    }
-}
-
-impl<'r> sqlx::Decode<'r, sqlx::Postgres> for UserStatus {
-    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
-        let s = <&str as sqlx::Decode<sqlx::Postgres>>::decode(value)?;
-        s.parse().map_err(|e| Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)) as Box<dyn std::error::Error + Send + Sync + 'static>)
-    }
-}
-
-impl<'q> sqlx::Encode<'q, sqlx::Postgres> for UserStatus {
-    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync + 'static>> {
-        <&str as sqlx::Encode<sqlx::Postgres>>::encode(&self.to_string(), buf)
-    }
-}
-
-
 /// Constraint violations specific to this query
 #[derive(Debug, Clone)]
 pub enum InsertUserConstraints {
@@ -378,11 +324,9 @@ pub struct FindUsersByNameAndAgeItem {
 ///   Options: Inlining true, Optimization true, Expressions true, Deforming true
 /// 
 /// === find_users_by_name_and_age (variant 1) ===
-/// Bitmap Heap Scan on users
-///   Recheck Cond: (age >= 0)
+/// Index Scan using idx_users_age_updated_at on users
+///   Index Cond: (age >= 0)
 ///   Filter: (((name)::text ~~* 'dummy'::text) AND ((name)::text = 'dummy'::text))
-///   ->  Bitmap Index Scan on idx_users_age_updated_at
-///         Index Cond: (age >= 0)
 /// 
 /// === find_users_by_name_and_age (variant 2) ===
 /// Index Scan using idx_users_age_updated_at on users
@@ -622,10 +566,8 @@ pub struct SearchUsersAdvancedItem {
 /// === search_users_advanced (variant 2) ===
 /// Sort
 ///   Sort Key: created_at DESC
-///   ->  Bitmap Heap Scan on users
-///         Recheck Cond: (age >= 0)
-///         ->  Bitmap Index Scan on idx_users_age_updated_at
-///               Index Cond: (age >= 0)
+///   ->  Index Scan using idx_users_age_updated_at on users
+///         Index Cond: (age >= 0)
 /// 
 /// === search_users_advanced (variant 3) ===
 /// Sort
@@ -715,7 +657,7 @@ pub struct GetUsersByStatusItem {
     pub id: i32,
     pub name: String,
     pub email: String,
-    pub status: Option<UserStatus>,
+    pub status: Option<super::types::public::UserStatus>,
 }
 
 /// Get public.users by their status (enum parameter and enum output)
@@ -729,7 +671,7 @@ pub struct GetUsersByStatusItem {
 ///   Functions: 4
 ///   Options: Inlining true, Optimization true, Expressions true, Deforming true
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, status \nFROM public.users \nWHERE status = #{user_status} \nORDER BY name"))]
-pub async fn get_users_by_status(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, user_status: UserStatus) -> Result<Vec<GetUsersByStatusItem>, super::ErrorReadOnly> {
+pub async fn get_users_by_status(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, user_status: super::types::public::UserStatus) -> Result<Vec<GetUsersByStatusItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, name, email, status 
         FROM public.users 
@@ -743,7 +685,7 @@ pub async fn get_users_by_status(executor: impl sqlx::Executor<'_, Database = sq
         id: row.try_get::<i32, _>("id")?,
         name: row.try_get::<String, _>("name")?,
         email: row.try_get::<String, _>("email")?,
-        status: row.try_get::<Option<UserStatus>, _>("status")?,
+        status: row.try_get::<Option<super::types::public::UserStatus>, _>("status")?,
     })
     }).collect();
     result.map_err(Into::into)
@@ -788,12 +730,12 @@ impl TryFrom<super::ErrorConstraintInfo> for UpdateUserStatusConstraints {
 #[derive(Debug, Clone)]
 pub struct UpdateUserStatusItem {
     pub id: i32,
-    pub status: Option<UserStatus>,
+    pub status: Option<super::types::public::UserStatus>,
 }
 
 /// Update user status and return the new status
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "UPDATE public.users \nSET status = #{new_status} \nWHERE id = #{user_id} \nRETURNING id, status"))]
-pub async fn update_user_status(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, new_status: UserStatus, user_id: i32) -> Result<UpdateUserStatusItem, super::Error<UpdateUserStatusConstraints>> {
+pub async fn update_user_status(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, new_status: super::types::public::UserStatus, user_id: i32) -> Result<UpdateUserStatusItem, super::Error<UpdateUserStatusConstraints>> {
     let query = sqlx::query(
         r"UPDATE public.users 
         SET status = $1 
@@ -806,7 +748,7 @@ pub async fn update_user_status(executor: impl sqlx::Executor<'_, Database = sql
     let result: Result<_, sqlx::Error> = (|| {
         Ok(UpdateUserStatusItem {
         id: row.try_get::<i32, _>("id")?,
-        status: row.try_get::<Option<UserStatus>, _>("status")?,
+        status: row.try_get::<Option<super::types::public::UserStatus>, _>("status")?,
     })
     })();
     result.map_err(Into::into)
@@ -1154,7 +1096,7 @@ pub async fn insert_user_structured(executor: impl sqlx::Executor<'_, Database =
 ///   Functions: 3
 ///   Options: Inlining true, Optimization true, Expressions true, Deforming true
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT DISTINCT status \nFROM public.users \nORDER BY status"))]
-pub async fn get_all_user_statuses(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>) -> Result<Vec<Option<UserStatus>>, super::ErrorReadOnly> {
+pub async fn get_all_user_statuses(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>) -> Result<Vec<Option<super::types::public::UserStatus>>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT DISTINCT status 
         FROM public.users 
@@ -1162,7 +1104,7 @@ pub async fn get_all_user_statuses(executor: impl sqlx::Executor<'_, Database = 
     );
     let rows = query.fetch_all(executor).await?;
     let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
-        Ok(row.try_get::<Option<UserStatus>, _>("status")?)
+        Ok(row.try_get::<Option<super::types::public::UserStatus>, _>("status")?)
     }).collect();
     result.map_err(Into::into)
 }
@@ -1172,7 +1114,7 @@ pub struct GetAllUsersWithStarItem {
     pub id: i32,
     pub name: String,
     pub email: String,
-    pub status: Option<UserStatus>,
+    pub status: Option<super::types::public::UserStatus>,
     pub profile: Option<crate::models::UserProfile>,
     pub settings: Option<serde_json::Value>,
     pub is_active: Option<bool>,
@@ -1207,7 +1149,7 @@ pub async fn get_all_users_with_star(executor: impl sqlx::Executor<'_, Database 
         id: row.try_get::<i32, _>("id")?,
         name: row.try_get::<String, _>("name")?,
         email: row.try_get::<String, _>("email")?,
-        status: row.try_get::<Option<UserStatus>, _>("status")?,
+        status: row.try_get::<Option<super::types::public::UserStatus>, _>("status")?,
         profile: row.try_get::<Option<serde_json::Value>, _>("profile")?
             .map(|v| serde_json::from_value::<crate::models::UserProfile>(v)
             .map_err(|e| sqlx::Error::Decode(Box::new(e))))
@@ -1231,7 +1173,7 @@ pub struct GetUserByIdWithStarItem {
     pub id: i32,
     pub name: String,
     pub email: String,
-    pub status: Option<UserStatus>,
+    pub status: Option<super::types::public::UserStatus>,
     pub profile: Option<crate::models::UserProfile>,
     pub settings: Option<serde_json::Value>,
     pub is_active: Option<bool>,
@@ -1265,7 +1207,7 @@ pub async fn get_user_by_id_with_star(executor: impl sqlx::Executor<'_, Database
         id: row.try_get::<i32, _>("id")?,
         name: row.try_get::<String, _>("name")?,
         email: row.try_get::<String, _>("email")?,
-        status: row.try_get::<Option<UserStatus>, _>("status")?,
+        status: row.try_get::<Option<super::types::public::UserStatus>, _>("status")?,
         profile: row.try_get::<Option<serde_json::Value>, _>("profile")?
             .map(|v| serde_json::from_value::<crate::models::UserProfile>(v)
             .map_err(|e| sqlx::Error::Decode(Box::new(e))))
@@ -2316,86 +2258,11 @@ pub async fn test_explicit_native_without_multiunzip(executor: impl sqlx::Execut
     result.map_err(Into::into)
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct Users {
-    pub id: i32,
-    pub name: String,
-    pub email: String,
-    pub status: Option<UserStatus>,
-    pub profile: Option<serde_json::Value>,
-    pub settings: Option<serde_json::Value>,
-    pub is_active: Option<bool>,
-    pub age: Option<i32>,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub referrer_id: Option<i32>,
-    pub social_links: Option<serde_json::Value>,
-    pub tags: Option<Vec<serde_json::Value>>,
-    pub labels: Vec<serde_json::Value>,
-}
-
-impl sqlx::Type<sqlx::Postgres> for Users {
-    fn type_info() -> sqlx::postgres::PgTypeInfo {
-        sqlx::postgres::PgTypeInfo::with_name("users")
-    }
-}
-
-impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Users {
-    fn decode(value: sqlx::postgres::PgValueRef<'r>) -> Result<Self, Box<dyn std::error::Error + Send + Sync + 'static>> {
-        let mut decoder = sqlx::postgres::types::PgRecordDecoder::new(value)?;
-        Ok(Self {
-            id: decoder.try_decode()?,
-            name: decoder.try_decode()?,
-            email: decoder.try_decode()?,
-            status: decoder.try_decode()?,
-            profile: decoder.try_decode()?,
-            settings: decoder.try_decode()?,
-            is_active: decoder.try_decode()?,
-            age: decoder.try_decode()?,
-            created_at: decoder.try_decode()?,
-            updated_at: decoder.try_decode()?,
-            referrer_id: decoder.try_decode()?,
-            social_links: decoder.try_decode()?,
-            tags: decoder.try_decode()?,
-            labels: decoder.try_decode()?,
-        })
-    }
-}
-
-impl<'q> sqlx::Encode<'q, sqlx::Postgres> for Users {
-    fn encode_by_ref(&self, buf: &mut sqlx::postgres::PgArgumentBuffer) -> Result<sqlx::encode::IsNull, Box<dyn std::error::Error + Send + Sync + 'static>> {
-        let mut encoder = sqlx::postgres::types::PgRecordEncoder::new(buf);
-        encoder.encode(&self.id)?;
-        encoder.encode(&self.name)?;
-        encoder.encode(&self.email)?;
-        encoder.encode(&self.status)?;
-        encoder.encode(&self.profile)?;
-        encoder.encode(&self.settings)?;
-        encoder.encode(&self.is_active)?;
-        encoder.encode(&self.age)?;
-        encoder.encode(&self.created_at)?;
-        encoder.encode(&self.updated_at)?;
-        encoder.encode(&self.referrer_id)?;
-        encoder.encode(&self.social_links)?;
-        encoder.encode(&self.tags)?;
-        encoder.encode(&self.labels)?;
-        encoder.finish();
-        Ok(sqlx::encode::IsNull::No)
-    }
-}
-
-impl sqlx::postgres::PgHasArrayType for Users {
-    fn array_type_info() -> sqlx::postgres::PgTypeInfo {
-        sqlx::postgres::PgTypeInfo::with_name("_users")
-    }
-}
-
-
 #[derive(Debug, Clone)]
 pub struct TestNestedRowItem {
     pub id: i32,
     pub name: String,
-    pub user_details: Option<Users>,
+    pub user_details: Option<super::types::public::Users>,
 }
 
 /// Test returning table row type as nested data
@@ -2419,7 +2286,7 @@ pub async fn test_nested_row(executor: impl sqlx::Executor<'_, Database = sqlx::
         Ok(TestNestedRowItem {
         id: row.try_get::<i32, _>("id")?,
         name: row.try_get::<String, _>("name")?,
-        user_details: row.try_get::<Option<Users>, _>("user_details")?,
+        user_details: row.try_get::<Option<super::types::public::Users>, _>("user_details")?,
     })
     })();
     result.map_err(Into::into)
