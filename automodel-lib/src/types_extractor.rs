@@ -837,7 +837,6 @@ pub fn convert_named_params_to_positional(sql: &str) -> (String, Vec<String>) {
 /// Create dummy parameter values for EXPLAIN queries
 /// Returns (dummy_params, special_params) where special_params contains info about enums and numeric types
 pub async fn create_dummy_params(
-    client: &tokio_postgres::Client,
     param_types: &[tokio_postgres::types::Type],
 ) -> Result<(
     Vec<Box<dyn tokio_postgres::types::ToSql + Sync>>,

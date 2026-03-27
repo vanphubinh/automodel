@@ -584,7 +584,6 @@ impl AutoModel {
                     Ok(statement) => {
                         let param_types = statement.params();
                         match Self::prepare_explain_params_for_variant(
-                            client,
                             converted_sql,
                             param_types,
                         )
@@ -656,7 +655,7 @@ impl AutoModel {
                         Ok(statement) => {
                             let param_types = statement.params();
                             let (dummy_params, _) =
-                                crate::types_extractor::create_dummy_params(client, param_types)
+                                crate::types_extractor::create_dummy_params(param_types)
                                     .await?;
                             let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
                                 dummy_params.iter().map(|p| p.as_ref()).collect();
@@ -672,7 +671,7 @@ impl AutoModel {
                         Ok(statement) => {
                             let param_types = statement.params();
                             let (all_dummy_params, _) =
-                                crate::types_extractor::create_dummy_params(client, param_types)
+                                crate::types_extractor::create_dummy_params(param_types)
                                     .await?;
 
                             // Filter to only non-special params
@@ -757,12 +756,11 @@ impl AutoModel {
     /// Prepare EXPLAIN parameters for a single query variant (done once during Phase 1)
     /// Returns ExplainParams to be stored and reused
     async fn prepare_explain_params_for_variant(
-        client: &tokio_postgres::Client,
         converted_sql: &str,
         param_types: &[tokio_postgres::types::Type],
     ) -> Result<ExplainParams> {
         let (_dummy_params, special_params) =
-            crate::types_extractor::create_dummy_params(client, param_types).await?;
+            crate::types_extractor::create_dummy_params(param_types).await?;
 
         // Build the EXPLAIN query with special param replacements
         let explain_sql = if special_params.is_empty() {
@@ -902,7 +900,7 @@ impl AutoModel {
                         Ok(statement) => {
                             let param_types = statement.params();
                             let (dummy_params, _) =
-                                crate::types_extractor::create_dummy_params(client, param_types)
+                                crate::types_extractor::create_dummy_params(param_types)
                                     .await?;
                             let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
                                 dummy_params.iter().map(|p| p.as_ref()).collect();
@@ -921,7 +919,7 @@ impl AutoModel {
                         Ok(statement) => {
                             let param_types = statement.params();
                             let (all_dummy_params, _) =
-                                crate::types_extractor::create_dummy_params(client, param_types)
+                                crate::types_extractor::create_dummy_params(param_types)
                                     .await?;
 
                             // Filter to only non-special params
@@ -950,7 +948,7 @@ impl AutoModel {
                     Ok(statement) => {
                         let param_types = statement.params();
                         let (dummy_params, special_params) =
-                            crate::types_extractor::create_dummy_params(client, param_types)
+                            crate::types_extractor::create_dummy_params(param_types)
                                 .await?;
 
                         if special_params.is_empty() {

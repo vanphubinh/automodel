@@ -408,6 +408,7 @@ impl TryFrom<&PgType> for TypeInfo {
 type TypeRef = String;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum TypeKind {
     Simple,
     Array(TypeRef),
