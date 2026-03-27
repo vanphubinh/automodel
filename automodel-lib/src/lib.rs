@@ -411,10 +411,8 @@ impl AutoModel {
                             );
                         }
                     } else {
-                        merged_aliases.insert(
-                            key.clone(),
-                            (value.clone(), query.definition.name.clone()),
-                        );
+                        merged_aliases
+                            .insert(key.clone(), (value.clone(), query.definition.name.clone()));
                     }
                 } else if parts.len() == 3 {
                     // 3-segment: schema.type.field → composite field mapping
@@ -583,11 +581,8 @@ impl AutoModel {
                 match client.prepare(converted_sql).await {
                     Ok(statement) => {
                         let param_types = statement.params();
-                        match Self::prepare_explain_params_for_variant(
-                            converted_sql,
-                            param_types,
-                        )
-                        .await
+                        match Self::prepare_explain_params_for_variant(converted_sql, param_types)
+                            .await
                         {
                             Ok(params) => explain_params.push(Some(params)),
                             Err(_) => explain_params.push(None),
@@ -655,8 +650,7 @@ impl AutoModel {
                         Ok(statement) => {
                             let param_types = statement.params();
                             let (dummy_params, _) =
-                                crate::types_extractor::create_dummy_params(param_types)
-                                    .await?;
+                                crate::types_extractor::create_dummy_params(param_types).await?;
                             let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
                                 dummy_params.iter().map(|p| p.as_ref()).collect();
                             client.query(params.explain_sql.as_str(), &param_refs).await
@@ -671,8 +665,7 @@ impl AutoModel {
                         Ok(statement) => {
                             let param_types = statement.params();
                             let (all_dummy_params, _) =
-                                crate::types_extractor::create_dummy_params(param_types)
-                                    .await?;
+                                crate::types_extractor::create_dummy_params(param_types).await?;
 
                             // Filter to only non-special params
                             let mut non_special_dummy_params = Vec::new();
@@ -900,8 +893,7 @@ impl AutoModel {
                         Ok(statement) => {
                             let param_types = statement.params();
                             let (dummy_params, _) =
-                                crate::types_extractor::create_dummy_params(param_types)
-                                    .await?;
+                                crate::types_extractor::create_dummy_params(param_types).await?;
                             let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
                                 dummy_params.iter().map(|p| p.as_ref()).collect();
                             client.query(params.explain_sql.as_str(), &param_refs).await
@@ -919,8 +911,7 @@ impl AutoModel {
                         Ok(statement) => {
                             let param_types = statement.params();
                             let (all_dummy_params, _) =
-                                crate::types_extractor::create_dummy_params(param_types)
-                                    .await?;
+                                crate::types_extractor::create_dummy_params(param_types).await?;
 
                             // Filter to only non-special params
                             let mut non_special_dummy_params = Vec::new();
@@ -948,8 +939,7 @@ impl AutoModel {
                     Ok(statement) => {
                         let param_types = statement.params();
                         let (dummy_params, special_params) =
-                            crate::types_extractor::create_dummy_params(param_types)
-                                .await?;
+                            crate::types_extractor::create_dummy_params(param_types).await?;
 
                         if special_params.is_empty() {
                             // No special params, use dummy params directly

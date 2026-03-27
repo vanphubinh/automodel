@@ -591,16 +591,17 @@ async fn extract_output_types(
         let is_nullable = meta.map(|m| m.is_nullable).unwrap_or(true);
 
         // Use domain type name if available, otherwise fall back to the base type
-        let base_type_name = if let Some(domain_name) = meta.and_then(|m| m.domain_type_name.clone()) {
-            domain_name
-        } else {
-            qualify_type_for_query_module(
-                &column
-                    .type_()
-                    .rust_name()
-                    .map_err(|e| anyhow::anyhow!("{}", e))?,
-            )
-        };
+        let base_type_name =
+            if let Some(domain_name) = meta.and_then(|m| m.domain_type_name.clone()) {
+                domain_name
+            } else {
+                qualify_type_for_query_module(
+                    &column
+                        .type_()
+                        .rust_name()
+                        .map_err(|e| anyhow::anyhow!("{}", e))?,
+                )
+            };
 
         // Check if there's a custom type mapping for this field
         let (mapped_type_ref, final_nullable, needs_json_wrapper) = if let Some(mappings) =
