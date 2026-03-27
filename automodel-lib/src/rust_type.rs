@@ -256,12 +256,7 @@ impl TypeSystem {
     /// Apply a custom type alias override to a domain type.
     ///
     /// Changes the generated `pub type Alias = BaseType;` to use `mapped_type` instead.
-    pub fn apply_alias_mapping(
-        &mut self,
-        schema: &str,
-        type_name: &str,
-        mapped_type: &str,
-    ) {
+    pub fn apply_alias_mapping(&mut self, schema: &str, type_name: &str, mapped_type: &str) {
         let type_info = self
             .types
             .values_mut()
@@ -388,12 +383,10 @@ impl TryFrom<&PgType> for TypeInfo {
                 tokio_postgres::types::Kind::Range(elem_type) => {
                     TypeKind::Range(elem_type.rust_name()?)
                 }
-                tokio_postgres::types::Kind::Domain(base_type) => {
-                    TypeKind::Alias(AliasInfo {
-                        type_ref: base_type.rust_name()?,
-                        mapped_type_ref: None,
-                    })
-                }
+                tokio_postgres::types::Kind::Domain(base_type) => TypeKind::Alias(AliasInfo {
+                    type_ref: base_type.rust_name()?,
+                    mapped_type_ref: None,
+                }),
                 tokio_postgres::types::Kind::Composite(fields) => {
                     let mut struct_fields = Vec::with_capacity(fields.len());
                     for field in fields {

@@ -155,10 +155,14 @@ pub fn generate_multiunzip_input_struct(
         if let Some(rust_type) = input_types.get(i) {
             // Extract base type from Vec<T> for array parameters
             // But NOT for JSON-wrapped types where Vec<T> is the actual value type (e.g., JSONB arrays)
-            let base_type = if !rust_type.needs_json_wrapper && rust_type.is_pg_array() {
-                &rust_type.rust_type()[4..rust_type.rust_type().len() - 1]
+            let effective = rust_type.rust_type();
+            let base_type = if !rust_type.needs_json_wrapper
+                && effective.starts_with("Vec<")
+                && effective.ends_with('>')
+            {
+                &effective[4..effective.len() - 1]
             } else {
-                rust_type.rust_type()
+                effective
             };
 
             let field_type = if rust_type.is_nullable || rust_type.is_optional {

@@ -37,3 +37,17 @@ pub struct UserTag {
     pub label: String,
     pub value: String,
 }
+
+/// Article metadata stored as a single JSONB object
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ArticleMetadata {
+    pub category: String,
+    pub published: bool,
+}
+
+/// Article contributor stored in a JSONB array
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ArticleContributor {
+    pub name: String,
+    pub role: String,
+}
