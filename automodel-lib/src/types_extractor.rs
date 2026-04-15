@@ -3,6 +3,113 @@ use std::collections::{HashMap, HashSet};
 use tokio_postgres::types::{Kind as PgKind, Type as PgType};
 use tokio_postgres::Statement;
 
+/// Strip non-null column cast syntax from SQL and return cleaned SQL + set of forced-non-null column names.
+///
+/// Two syntaxes are supported:
+///
+/// 1. **Native syntax** — `AS {col_name!}`:
+///    Rewritten to `AS col_name` in both build-time and runtime SQL.
+///
+/// 2. **sqlx compatibility syntax** — `AS "col_name!"`:
+///    Rewritten to `AS col_name` in both build-time and runtime SQL.
+///    This provides easy migration from sqlx's non-null override convention.
+///
+/// In both cases the column name is collected into the returned set.
+pub fn strip_non_null_column_casts(sql: &str) -> (String, HashSet<String>) {
+    let mut result = String::with_capacity(sql.len());
+    let mut non_null_columns: HashSet<String> = HashSet::new();
+    let bytes = sql.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i < len {
+        // Syntax 1: {identifier!}  (but NOT #{...} which is for input parameters)
+        if bytes[i] == b'{' {
+            // Check this is not a #{...} parameter (preceded by #)
+            if i > 0 && bytes[i - 1] == b'#' {
+                result.push(bytes[i] as char);
+                i += 1;
+                continue;
+            }
+
+            // Try to parse {name!}
+            let start = i;
+            i += 1; // skip '{'
+            let mut name = String::new();
+            let mut found_bang = false;
+            let mut found_close = false;
+
+            while i < len {
+                if bytes[i] == b'!' {
+                    found_bang = true;
+                    i += 1;
+                } else if bytes[i] == b'}' {
+                    found_close = true;
+                    i += 1;
+                    break;
+                } else if found_bang {
+                    // Characters after ! but before } — not our syntax
+                    break;
+                } else if bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_' {
+                    name.push(bytes[i] as char);
+                    i += 1;
+                } else {
+                    break;
+                }
+            }
+
+            if found_bang && found_close && !name.is_empty() {
+                // Valid {name!} syntax — emit plain column name
+                non_null_columns.insert(name.clone());
+                result.push_str(&name);
+            } else {
+                // Not our syntax, emit the original characters
+                result.push_str(&sql[start..i]);
+            }
+            continue;
+        }
+
+        // Syntax 2: "identifier!" — sqlx compatibility
+        // Only match quoted identifiers where the last character before the closing quote is '!'
+        if bytes[i] == b'"' {
+            let start = i;
+            i += 1; // skip opening '"'
+            let mut name = String::new();
+            let mut found_close = false;
+
+            while i < len {
+                if bytes[i] == b'"' {
+                    found_close = true;
+                    i += 1;
+                    break;
+                } else {
+                    name.push(bytes[i] as char);
+                    i += 1;
+                }
+            }
+
+            if found_close && name.ends_with('!') {
+                // Valid "name!" syntax — strip the '!' and emit plain column name
+                let clean_name = &name[..name.len() - 1];
+                if !clean_name.is_empty() {
+                    non_null_columns.insert(clean_name.to_string());
+                    result.push_str(clean_name);
+                    continue;
+                }
+            }
+
+            // Not our syntax or empty — emit original characters
+            result.push_str(&sql[start..i]);
+            continue;
+        }
+
+        result.push(bytes[i] as char);
+        i += 1;
+    }
+
+    (result, non_null_columns)
+}
+
 use crate::rust_type::{InputParam, OutputColumn, RustName, StructField};
 use crate::utils::to_snake_case;
 
@@ -57,8 +164,12 @@ pub async fn extract_query_types(
     sql: &str,
     field_type_mappings: Option<&HashMap<String, String>>,
 ) -> Result<QueryTypeInfo> {
+    // Strip non-null column cast syntax: {col!} and "col!" → clean col names.
+    // The non_null_columns set is used later to override nullability on output columns.
+    let (clean_sql, non_null_columns) = strip_non_null_column_casts(sql);
+
     // Parse SQL to handle conditional blocks
-    let parsed_sql = parse_sql_with_conditionals(sql);
+    let parsed_sql = parse_sql_with_conditionals(&clean_sql);
 
     // For validation, create SQL with all conditional blocks included
     let full_sql = reconstruct_full_sql(&parsed_sql);
@@ -75,7 +186,8 @@ pub async fn extract_query_types(
 
     // Extract types
     let input_types = extract_input_types(&statement, &param_names, field_type_mappings)?;
-    let output_types = extract_output_types(&client, &statement, field_type_mappings).await?;
+    let output_types =
+        extract_output_types(&client, &statement, field_type_mappings, &non_null_columns).await?;
 
     let has_conditionals = !parsed_sql.conditional_blocks.is_empty();
 
@@ -578,6 +690,7 @@ async fn extract_output_types(
     client: &tokio_postgres::Client,
     statement: &Statement,
     field_type_mappings: Option<&HashMap<String, String>>,
+    non_null_columns: &HashSet<String>,
 ) -> Result<Vec<OutputColumn>> {
     let columns = statement.columns();
     let mut output_types = Vec::new();
@@ -647,11 +760,19 @@ async fn extract_output_types(
             (None, is_nullable, false)
         };
 
+        let force_non_null = non_null_columns.contains(column_name);
+        // Apply non-null override: force_non_null wins over schema-inferred nullability
+        let effective_nullable = if force_non_null {
+            false
+        } else {
+            final_nullable
+        };
+
         output_types.push(OutputColumn {
             field: StructField {
                 pg_name: column_name.to_string(),
                 rust_name: to_snake_case(column_name),
-                is_nullable: final_nullable,
+                is_nullable: effective_nullable,
                 type_ref: base_type_name,
                 mapped_type_ref,
                 needs_json_wrapper,

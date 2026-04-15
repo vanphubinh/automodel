@@ -318,19 +318,24 @@ async fn parse_sql_file(
     };
 
     // Combine SQL lines and trim
-    let sql = sql_lines.join("\n").trim().to_string();
+    let sql_raw = sql_lines.join("\n").trim().to_string();
+
+    // Keep raw SQL (with {col!} / "col!" syntax) — extract_query_types strips it at build time.
+    let sql = sql_raw;
 
     if sql.is_empty() {
         anyhow::bail!("SQL file contains no SQL query for '{}'", name);
     }
 
-    // Generate SQL variants and convert to positional parameters at parse time
+    // Generate SQL variants and convert to positional parameters at parse time.
+    // Also strip non-null column cast syntax so runtime SQL is clean.
     let sql_variants_raw = generate_query_variants(&sql);
     let sql_variants: Vec<(String, Vec<String>, String)> = sql_variants_raw
         .into_iter()
         .map(|(variant_sql, variant_label)| {
+            let (clean_sql, _) = crate::types_extractor::strip_non_null_column_casts(&variant_sql);
             let (converted_sql, param_names) =
-                crate::types_extractor::convert_named_params_to_positional(&variant_sql);
+                crate::types_extractor::convert_named_params_to_positional(&clean_sql);
             (converted_sql, param_names, variant_label)
         })
         .collect();

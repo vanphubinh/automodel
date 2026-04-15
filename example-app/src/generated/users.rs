@@ -331,7 +331,7 @@ pub struct FindUsersByNameAndAgeItem {
 ///         Index Cond: (age >= 0)
 /// 
 /// === find_users_by_name_and_age (variant 2) ===
-/// Index Scan using idx_users_age_updated_at on users
+/// Index Scan using idx_users_age on users
 ///   Index Cond: (age <= 0)
 ///   Filter: (((name)::text ~~* 'dummy'::text) AND ((name)::text = 'dummy'::text))
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, age \nFROM public.users \nWHERE name ILIKE #{name_pattern} \n#[AND age >= #{min_age?}] \nAND name = #{name_exact} \n#[AND age <= #{max_age?}] \nORDER BY name"))]
@@ -1249,9 +1249,9 @@ pub struct GetUserByIdAndEmailItem {
 /// Get a user by ID and email - generates GetUserByIdAndEmailParams struct and GetUserByIdAndEmailItem return struct
 ///
 /// Query Plan:
-/// Index Scan using users_email_key on users
-///   Index Cond: ((email)::text = 'dummy'::text)
-///   Filter: (id = 0)
+/// Index Scan using users_pkey on users
+///   Index Cond: (id = 0)
+///   Filter: ((email)::text = 'dummy'::text)
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email \nFROM public.users \nWHERE id = #{id} AND email = #{email}"))]
 pub async fn get_user_by_id_and_email(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, params: &GetUserByIdAndEmailParams) -> Result<Option<GetUserByIdAndEmailItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
@@ -1272,6 +1272,26 @@ pub async fn get_user_by_id_and_email(executor: impl sqlx::Executor<'_, Database
     })
             })();
             result.map(Some).map_err(Into::into)
+        },
+        None => Ok(None),
+    }
+}
+
+/// Test non-null override with native {col!} syntax on boolean literal in RETURNING
+#[tracing::instrument(level = "debug", skip_all, fields(sql = "UPDATE public.users\nSET name = #{name}\nWHERE id = #{id}\nRETURNING true AS {applied!}"))]
+pub async fn update_user_returning_applied(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, name: String, id: i32) -> Result<Option<bool>, super::ErrorReadOnly> {
+    let query = sqlx::query(
+        r"UPDATE public.users
+        SET name = $1
+        WHERE id = $2
+        RETURNING true AS applied"
+    );
+    let query = query.bind(&name);
+    let query = query.bind(id);
+    let row = query.fetch_optional(executor).await?;
+    match row {
+        Some(row) => {
+            Ok(Some(row.try_get::<bool, _>("applied")?))
         },
         None => Ok(None),
     }
@@ -1337,6 +1357,21 @@ pub async fn delete_user_by_id_and_email(executor: impl sqlx::Executor<'_, Datab
     })
     })();
     result.map_err(Into::into)
+}
+
+/// Test non-null override with sqlx-compatible "col!" syntax on comparison expression
+///
+/// Query Plan:
+/// Index Scan using users_pkey on users
+///   Index Cond: (id = 0)
+#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT created_at > now() - interval '1 year' AS \"is_recent!\" FROM public.users WHERE id = #{id}"))]
+pub async fn get_user_is_recent(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, id: i32) -> Result<bool, super::ErrorReadOnly> {
+    let query = sqlx::query(
+        r"SELECT created_at > now() - interval '1 year' AS is_recent FROM public.users WHERE id = $1"
+    );
+    let query = query.bind(id);
+    let row = query.fetch_one(executor).await?;
+    Ok(row.try_get::<bool, _>("is_recent")?)
 }
 
 /// Constraint violations specific to this query
@@ -1790,9 +1825,9 @@ pub async fn search_user_details(executor: impl sqlx::Executor<'_, Database = sq
 /// Find user by criteria - uses GetUserByIdAndEmailParams for params and UserSummary for return
 ///
 /// Query Plan:
-/// Index Scan using users_email_key on users
-///   Index Cond: ((email)::text = 'dummy'::text)
-///   Filter: (id = 0)
+/// Index Scan using users_pkey on users
+///   Index Cond: (id = 0)
+///   Filter: ((email)::text = 'dummy'::text)
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email \nFROM public.users \nWHERE id = #{id} AND email = #{email}"))]
 pub async fn find_user_by_criteria(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, params: &GetUserByIdAndEmailParams) -> Result<Option<UserSummary>, super::ErrorReadOnly> {
     let query = sqlx::query(

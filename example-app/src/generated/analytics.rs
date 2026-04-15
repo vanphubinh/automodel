@@ -21,16 +21,17 @@ pub struct GetUserActivitySummaryItem {
 /// Sort
 ///   Sort Key: (row_number OVER (?))
 ///   ->  Nested Loop
-///         ->  Aggregate
-///               ->  Seq Scan on users
 ///         ->  WindowAgg
 ///               Run Condition: (row_number OVER (?) <= 10)
 ///               ->  Sort
-///                     Sort Key: users_1.created_at DESC
-///                     ->  Seq Scan on users users_1
+///                     Sort Key: users.created_at DESC
+///                     ->  Seq Scan on users
 ///                           Filter: (created_at > (now - '30 days'::interval))
+///         ->  Materialize
+///               ->  Aggregate
+///                     ->  Seq Scan on users users_1
 /// JIT:
-///   Functions: 13
+///   Functions: 14
 ///   Options: Inlining true, Optimization true, Expressions true, Deforming true
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "WITH recent_users AS (\n  SELECT id, name, email, created_at,\n         ROW_NUMBER() OVER (ORDER BY created_at DESC) as rank\n  FROM public.users \n  WHERE created_at > NOW() - INTERVAL '30 days'\n),\nuser_stats AS (\n  SELECT \n    COUNT(*) as total_users,\n    COUNT(CASE WHEN created_at > NOW() - INTERVAL '7 days' THEN 1 END) as weekly_users,\n    AVG(age)::float8 as avg_age\n  FROM public.users\n)\nSELECT \n  ru.id,\n  ru.name, \n  ru.email,\n  ru.created_at,\n  ru.rank,\n  us.total_users,\n  us.weekly_users,\n  us.avg_age\nFROM recent_users ru\nCROSS JOIN user_stats us\nWHERE ru.rank <= 10\nORDER BY ru.rank"))]
 pub async fn get_user_activity_summary(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>) -> Result<Vec<GetUserActivitySummaryItem>, super::ErrorReadOnly> {
@@ -98,14 +99,11 @@ pub struct GetHierarchicalUserDataItem {
 ///     ->  Recursive Union
 ///           ->  Seq Scan on users
 ///                 Filter: (referrer_id IS NULL)
-///           ->  Merge Join
-///                 Merge Cond: (u.referrer_id = uh_1.id)
+///           ->  Hash Join
+///                 Hash Cond: (u.referrer_id = uh_1.id)
 ///                 Join Filter: (u.id <> ALL (uh_1.path))
-///                 ->  Sort
-///                       Sort Key: u.referrer_id
-///                       ->  Seq Scan on users u
-///                 ->  Sort
-///                       Sort Key: uh_1.id
+///                 ->  Seq Scan on users u
+///                 ->  Hash
 ///                       ->  WorkTable Scan on user_hierarchy uh_1
 ///                             Filter: (level < 5)
 ///   ->  Sort
@@ -119,7 +117,7 @@ pub struct GetHierarchicalUserDataItem {
 ///                     Sort Key: referrals.referrer_id
 ///                     ->  Seq Scan on users referrals
 /// JIT:
-///   Functions: 31
+///   Functions: 29
 ///   Options: Inlining true, Optimization true, Expressions true, Deforming true
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "WITH RECURSIVE user_hierarchy AS (\n  -- Base case: public.users without referrers (or top-level public.users)\n  SELECT \n    id, \n    name, \n    email, \n    NULL::integer as referrer_id,\n    1 as level,\n    ARRAY[id] as path\n  FROM public.users \n  WHERE referrer_id IS NULL\n  \n  UNION ALL\n  \n  -- Recursive case: public.users with referrers\n  SELECT \n    u.id,\n    u.name,\n    u.email,\n    u.referrer_id,\n    uh.level + 1,\n    uh.path || u.id\n  FROM public.users u\n  INNER JOIN user_hierarchy uh ON u.referrer_id = uh.id\n  WHERE u.id != ALL(uh.path) -- Prevent cycles\n  AND uh.level < 5 -- Limit depth\n)\nSELECT \n  uh.id,\n  uh.name,\n  uh.email,\n  uh.referrer_id,\n  uh.level,\n  uh.path,\n  COUNT(referrals.id) as direct_referrals_count\nFROM user_hierarchy uh\nLEFT JOIN public.users referrals ON referrals.referrer_id = uh.id\nGROUP BY uh.id, uh.name, uh.email, uh.referrer_id, uh.level, uh.path\nORDER BY uh.level, uh.name"))]
 pub async fn get_hierarchical_user_data(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>) -> Result<Vec<GetHierarchicalUserDataItem>, super::ErrorReadOnly> {
@@ -551,7 +549,8 @@ pub struct GetUserCountAndAvgAgeItem {
 ///
 /// Query Plan:
 /// Aggregate
-///   ->  Index Only Scan using idx_users_age on users
+///   ->  Bitmap Heap Scan on users
+///         ->  Bitmap Index Scan on idx_users_age
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT COUNT(*) as count, AVG(age) as avg_age FROM public.users"))]
 pub async fn get_user_count_and_avg_age(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>) -> Result<GetUserCountAndAvgAgeItem, super::ErrorReadOnly> {
     let query = sqlx::query(
@@ -564,6 +563,97 @@ pub async fn get_user_count_and_avg_age(executor: impl sqlx::Executor<'_, Databa
         avg_age: row.try_get::<Option<rust_decimal::Decimal>, _>("avg_age")?,
     })
     })();
+    result.map_err(Into::into)
+}
+
+/// Test non-null override with native {col!} syntax on count expression
+///
+/// Query Plan:
+/// Aggregate
+///   ->  Bitmap Heap Scan on users
+///         ->  Bitmap Index Scan on idx_users_age
+#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT count(*) + count(*) AS {total!} FROM public.users"))]
+pub async fn get_non_null_count_expression(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>) -> Result<i64, super::ErrorReadOnly> {
+    let query = sqlx::query(
+        r"SELECT count(*) + count(*) AS total FROM public.users"
+    );
+    let row = query.fetch_one(executor).await?;
+    Ok(row.try_get::<i64, _>("total")?)
+}
+
+#[derive(Debug, Clone)]
+pub struct GetNonNullMultiFieldsItem {
+    pub user_count: i64,
+    pub double_count: i64,
+    pub is_valid: bool,
+    pub current_time: chrono::DateTime<chrono::Utc>,
+    pub greeting: String,
+}
+
+/// Test non-null override on multiple expression columns in one query
+///
+/// Query Plan:
+/// Aggregate
+///   ->  Bitmap Heap Scan on users
+///         ->  Bitmap Index Scan on idx_users_age
+#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT\n    count(*) AS {user_count!},\n    count(*) + count(*) AS {double_count!},\n    true AS {is_valid!},\n    now() AS \"current_time!\",\n    'hello' AS {greeting!}\nFROM public.users"))]
+pub async fn get_non_null_multi_fields(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>) -> Result<GetNonNullMultiFieldsItem, super::ErrorReadOnly> {
+    let query = sqlx::query(
+        r"SELECT
+          count(*) AS user_count,
+          count(*) + count(*) AS double_count,
+          true AS is_valid,
+          now() AS current_time,
+          'hello' AS greeting
+        FROM public.users"
+    );
+    let row = query.fetch_one(executor).await?;
+    let result: Result<_, sqlx::Error> = (|| {
+        Ok(GetNonNullMultiFieldsItem {
+        user_count: row.try_get::<i64, _>("user_count")?,
+        double_count: row.try_get::<i64, _>("double_count")?,
+        is_valid: row.try_get::<bool, _>("is_valid")?,
+        current_time: row.try_get::<chrono::DateTime<chrono::Utc>, _>("current_time")?,
+        greeting: row.try_get::<String, _>("greeting")?,
+    })
+    })();
+    result.map_err(Into::into)
+}
+
+#[derive(Debug, Clone)]
+pub struct GetNonNullMultiRowsItem {
+    pub user_id: i32,
+    pub user_name: String,
+    pub is_recent: bool,
+    pub is_active: bool,
+}
+
+/// Test non-null override on multiple expression columns returning multiple rows
+///
+/// Query Plan:
+/// Seq Scan on users
+/// JIT:
+///   Functions: 2
+///   Options: Inlining true, Optimization true, Expressions true, Deforming true
+#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT\n    id AS {user_id!},\n    name AS {user_name!},\n    created_at > now() - interval '1 year' AS {is_recent!},\n    true AS \"is_active!\"\nFROM public.users"))]
+pub async fn get_non_null_multi_rows(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>) -> Result<Vec<GetNonNullMultiRowsItem>, super::ErrorReadOnly> {
+    let query = sqlx::query(
+        r"SELECT
+          id AS user_id,
+          name AS user_name,
+          created_at > now() - interval '1 year' AS is_recent,
+          true AS is_active
+        FROM public.users"
+    );
+    let rows = query.fetch_all(executor).await?;
+    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
+        Ok(GetNonNullMultiRowsItem {
+        user_id: row.try_get::<i32, _>("user_id")?,
+        user_name: row.try_get::<String, _>("user_name")?,
+        is_recent: row.try_get::<bool, _>("is_recent")?,
+        is_active: row.try_get::<bool, _>("is_active")?,
+    })
+    }).collect();
     result.map_err(Into::into)
 }
 
