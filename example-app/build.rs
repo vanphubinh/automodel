@@ -1,21 +1,7 @@
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let defaults = automodel::DefaultsConfig {
-        telemetry: automodel::DefaultsTelemetryConfig {
-            level: automodel::TelemetryLevel::Debug,
-            include_sql: true,
-        },
-        ensure_indexes: true,
-        derives: automodel::DefaultsDerivesConfig {
-            return_type: vec!["Clone".to_string()],
-            parameters_type: vec!["Clone".to_string()],
-            conditions_type: vec!["Clone".to_string()],
-            error_type: vec!["Clone".to_string()],
-        },
-        // Use itertools for multiunzip (default, supports up to 12 parameters)
-        // Change to ManyUnzip for queries with 13-196 parameters
-        multiunzip_crate: automodel::MultiunzipCrate::Itertools,
-    };
+    let config = automodel::AutoModelConfig::from_file("automodel.yml")?;
+
     automodel::AutoModel::generate(
         || {
             if std::env::var("CI").is_err() {
@@ -30,9 +16,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )
             }
         },
-        "queries",
-        "src/generated",
-        defaults,
+        &config.queries_dir,
+        &config.output_dir,
+        config.defaults(),
     )
     .await
 }

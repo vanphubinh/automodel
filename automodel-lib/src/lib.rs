@@ -17,9 +17,11 @@ use std::path::Path;
 pub use query_definition::TelemetryLevel;
 
 use crate::codegen::generate_root_module;
+use serde::{Deserialize, Serialize};
 
 /// Crate to use for multiunzip operations in batch inserts
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum MultiunzipCrate {
     /// Use itertools::multiunzip (supports up to 12 parameters)
     Itertools,
@@ -34,50 +36,133 @@ impl Default for MultiunzipCrate {
 }
 
 /// Default configuration for telemetry and analysis
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DefaultsConfig {
     /// Global telemetry defaults
+    #[serde(default)]
     pub telemetry: DefaultsTelemetryConfig,
     /// Whether to analyze query performance and warn about sequential scans
     /// Defaults to false
+    #[serde(default)]
     pub ensure_indexes: bool,
     /// Global default derive traits applied to all generated structs
     /// These traits are appended by per-query derives configurations
     /// e.g., vec!["Clone".to_string(), "PartialEq".to_string()]
     /// Defaults to empty vec
+    #[serde(default)]
     pub derives: DefaultsDerivesConfig,
     /// Crate to use for multiunzip operations in batch inserts
     /// - Itertools: supports up to 12 parameters (default)
     /// - ManyUnzip: no parameter limit, requires many-unzip dependency
     /// Defaults to Itertools
+    #[serde(default)]
     pub multiunzip_crate: MultiunzipCrate,
 }
 
 /// Default configuration for telemetry and analysis
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DefaultsTelemetryConfig {
     /// Global telemetry level
+    #[serde(default)]
     pub level: TelemetryLevel,
     /// Whether to include SQL queries as fields in spans by default
     /// Defaults to false
+    #[serde(default)]
     pub include_sql: bool,
 }
 
 /// Default derive traits configuration for all generated types
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct DefaultsDerivesConfig {
     /// Derive traits for return type structs
     /// Defaults to empty vec (Debug is always added)
+    #[serde(default)]
     pub return_type: Vec<String>,
     /// Derive traits for parameters structs
     /// Defaults to empty vec (Debug is always added)
+    #[serde(default)]
     pub parameters_type: Vec<String>,
     /// Derive traits for conditions structs
     /// Defaults to empty vec (Debug is always added)
+    #[serde(default)]
     pub conditions_type: Vec<String>,
     /// Derive traits for error constraint enums
     /// Defaults to empty vec (Debug is always added)
+    #[serde(default)]
     pub error_type: Vec<String>,
+}
+
+/// Top-level configuration file structure for AutoModel
+///
+/// Can be loaded from a YAML file and used by both build.rs and the CLI.
+///
+/// Example `automodel.yml`:
+/// ```yaml
+/// queries_dir: queries
+/// output_dir: src/generated
+///
+/// telemetry:
+///   level: debug
+///   include_sql: true
+///
+/// ensure_indexes: true
+///
+/// derives:
+///   return_type: [Clone]
+///   parameters_type: [Clone]
+///   conditions_type: [Clone]
+///   error_type: [Clone]
+///
+/// multiunzip_crate: itertools
+/// ```
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AutoModelConfig {
+    /// Directory containing SQL query files
+    #[serde(default = "default_queries_dir")]
+    pub queries_dir: String,
+    /// Output directory for generated Rust code
+    #[serde(default = "default_output_dir")]
+    pub output_dir: String,
+    /// Global telemetry defaults
+    #[serde(default)]
+    pub telemetry: DefaultsTelemetryConfig,
+    /// Whether to analyze query performance and warn about sequential scans
+    #[serde(default)]
+    pub ensure_indexes: bool,
+    /// Global default derive traits applied to all generated structs
+    #[serde(default)]
+    pub derives: DefaultsDerivesConfig,
+    /// Crate to use for multiunzip operations in batch inserts
+    #[serde(default)]
+    pub multiunzip_crate: MultiunzipCrate,
+}
+
+fn default_queries_dir() -> String {
+    "queries".to_string()
+}
+
+fn default_output_dir() -> String {
+    "src/generated".to_string()
+}
+
+impl AutoModelConfig {
+    /// Load configuration from a YAML file
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let content = std::fs::read_to_string(path.as_ref())?;
+        let config: Self = serde_yaml::from_str(&content)
+            .map_err(|e| anyhow::anyhow!("Failed to parse config: {}", e))?;
+        Ok(config)
+    }
+
+    /// Convert into a `DefaultsConfig` (extracts just the defaults portion)
+    pub fn defaults(&self) -> DefaultsConfig {
+        DefaultsConfig {
+            telemetry: self.telemetry.clone(),
+            ensure_indexes: self.ensure_indexes,
+            derives: self.derives.clone(),
+            multiunzip_crate: self.multiunzip_crate.clone(),
+        }
+    }
 }
 
 /// Main entry point for the automodel library

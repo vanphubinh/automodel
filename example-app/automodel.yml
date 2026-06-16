@@ -1,0 +1,16 @@
+queries_dir: queries
+output_dir: src/generated
+
+telemetry:
+  level: debug
+  include_sql: true
+
+ensure_indexes: true
+
+derives:
+  return_type: [Clone]
+  parameters_type: [Clone]
+  conditions_type: [Clone]
+  error_type: [Clone]
+
+multiunzip_crate: itertools
