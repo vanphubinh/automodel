@@ -320,14 +320,12 @@ pub struct FindUsersByNameAndAgeItem {
 ///   Filter: (((name)::text ~~* 'dummy'::text) AND ((name)::text = 'dummy'::text))
 /// 
 /// === find_users_by_name_and_age (variant 1) ===
-/// Bitmap Heap Scan on users
-///   Recheck Cond: (age >= 0)
+/// Index Scan using idx_users_age_updated_at on users
+///   Index Cond: (age >= 0)
 ///   Filter: (((name)::text ~~* 'dummy'::text) AND ((name)::text = 'dummy'::text))
-///   ->  Bitmap Index Scan on idx_users_age_updated_at
-///         Index Cond: (age >= 0)
 /// 
 /// === find_users_by_name_and_age (variant 2) ===
-/// Index Scan using idx_users_age on users
+/// Index Scan using idx_users_age_updated_at on users
 ///   Index Cond: (age <= 0)
 ///   Filter: (((name)::text ~~* 'dummy'::text) AND ((name)::text = 'dummy'::text))
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, age \nFROM public.users \nWHERE name ILIKE #{name_pattern} \n#[AND age >= #{min_age?}] \nAND name = #{name_exact} \n#[AND age <= #{max_age?}] \nORDER BY name"))]
@@ -556,10 +554,8 @@ pub struct SearchUsersAdvancedItem {
 /// === search_users_advanced (variant 2) ===
 /// Sort
 ///   Sort Key: created_at DESC
-///   ->  Bitmap Heap Scan on users
-///         Recheck Cond: (age >= 0)
-///         ->  Bitmap Index Scan on idx_users_age_updated_at
-///               Index Cond: (age >= 0)
+///   ->  Index Scan using idx_users_age_updated_at on users
+///         Index Cond: (age >= 0)
 /// 
 /// === search_users_advanced (variant 3) ===
 /// Sort
@@ -1076,10 +1072,9 @@ pub async fn insert_user_structured(executor: impl sqlx::Executor<'_, Database =
 /// Get all possible user statuses currently in use
 ///
 /// Query Plan:
-/// Sort
-///   Sort Key: status
-///   ->  HashAggregate
-///         Group Key: status
+/// Unique
+///   ->  Sort
+///         Sort Key: status
 ///         ->  Seq Scan on users
 ///               Disabled: true
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT DISTINCT status \nFROM public.users \nORDER BY status"))]

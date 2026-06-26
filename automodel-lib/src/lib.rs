@@ -488,7 +488,8 @@ impl AutoModel {
             .await
             .unwrap_or_else(|e| eprintln!("Warning: failed to resolve field nullability: {}", e));
 
-        type_system.apply_domain_enums(domain_enums);
+        let referenced_type_refs = Self::collect_referenced_type_refs(analyzed_queries);
+        type_system.register_referenced_domain_enums(&referenced_type_refs, domain_enums);
 
         // Apply custom type mappings from query-level `types:` configs.
         //
@@ -592,6 +593,36 @@ impl AutoModel {
         }
 
         Ok(type_system)
+    }
+
+    /// Collect custom type paths referenced by query input/output columns.
+    fn collect_type_ref(type_ref: &str, referenced: &mut std::collections::HashSet<String>) {
+        if type_ref.starts_with("super::types::") {
+            referenced.insert(type_ref.to_string());
+        }
+    }
+
+    fn collect_referenced_type_refs(
+        analyzed_queries: &[QueryDefinitionRuntime],
+    ) -> std::collections::HashSet<String> {
+        let mut referenced = std::collections::HashSet::new();
+
+        for query in analyzed_queries {
+            for column in &query.type_info.output_types {
+                Self::collect_type_ref(&column.type_ref, &mut referenced);
+                if let Some(mapped) = &column.mapped_type_ref {
+                    Self::collect_type_ref(mapped, &mut referenced);
+                }
+            }
+            for param in &query.type_info.input_types {
+                Self::collect_type_ref(&param.type_ref, &mut referenced);
+                if let Some(mapped) = &param.mapped_type_ref {
+                    Self::collect_type_ref(mapped, &mut referenced);
+                }
+            }
+        }
+
+        referenced
     }
 
     /// PHASE 1: Analyze all queries and extract complete information

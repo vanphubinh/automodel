@@ -260,38 +260,69 @@ impl TypeSystem {
         Ok(())
     }
 
-    /// Convert domain types with `CHECK (VALUE IN (...))` constraints into Rust enums.
-    pub fn apply_domain_enums(
+    /// Register domain types with `CHECK (VALUE IN (...))` constraints as Rust enums.
+    ///
+    /// Prepared statements often report domain columns as their base type on the wire,
+    /// so domain enums referenced only in SELECT output may never enter the type system
+    /// via [`Self::insert`]. This method ensures every referenced domain enum from
+    /// `domain_enums` is present and converted to [`TypeKind::Enum`].
+    pub fn register_referenced_domain_enums(
         &mut self,
+        referenced_type_refs: &std::collections::HashSet<String>,
         domain_enums: &std::collections::HashMap<String, crate::domain_enum::DomainEnumConstraint>,
     ) {
         for (qualified_name, constraint) in domain_enums {
-            let Some(type_info) = self
-                .types
-                .values_mut()
-                .find(|ti| format!("{}.{}", ti.pg_schema, ti.pg_name) == *qualified_name)
-            else {
+            let Some((schema, name)) = qualified_name.split_once('.') else {
                 continue;
             };
 
-            if !matches!(type_info.kind, TypeKind::Alias(_)) {
+            let query_module_type = format!(
+                "super::types::{}::{}",
+                schema_to_module_name(schema),
+                to_pascal_case(name),
+            );
+            if !referenced_type_refs.contains(&query_module_type) {
                 continue;
             }
 
-            let enum_variants = constraint
-                .variants
-                .iter()
-                .map(|variant| EnumVariant {
-                    pg_name: variant.clone(),
-                    rust_name: to_pascal_case(variant),
-                })
-                .collect();
-
-            type_info.kind = TypeKind::Enum(EnumInfo {
-                variants: enum_variants,
+            let enum_kind = TypeKind::Enum(EnumInfo {
+                variants: constraint
+                    .variants
+                    .iter()
+                    .map(|variant| EnumVariant {
+                        pg_name: variant.clone(),
+                        rust_name: to_pascal_case(variant),
+                    })
+                    .collect(),
                 // Domains are transmitted as their base type on the PostgreSQL wire protocol.
                 sqlx_type_name: Some(constraint.base_type.clone()),
             });
+
+            if let Some(type_info) = self
+                .types
+                .values_mut()
+                .find(|ti| format!("{}.{}", ti.pg_schema, ti.pg_name) == *qualified_name)
+            {
+                if matches!(type_info.kind, TypeKind::Alias(_)) {
+                    type_info.kind = enum_kind;
+                }
+                continue;
+            }
+
+            let rust_name = format!(
+                "super::{}::{}",
+                schema_to_module_name(schema),
+                to_pascal_case(name),
+            );
+            let type_info = TypeInfo {
+                id: 0,
+                pg_name: name.to_string(),
+                pg_schema: schema.to_string(),
+                rust_module: schema_to_module_name(schema),
+                rust_name: rust_name.clone(),
+                kind: enum_kind,
+            };
+            self.types.insert(rust_name, type_info);
         }
     }
 
@@ -954,5 +985,58 @@ impl TypeInfo {
         let mut seen = std::collections::HashSet::new();
         all_derives.retain(|d| seen.insert(d.clone()));
         format!("#[derive({})]", all_derives.join(", "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain_enum::DomainEnumConstraint;
+    use std::collections::{HashMap, HashSet};
+
+    #[test]
+    fn register_referenced_domain_enum_not_in_type_system() {
+        let mut type_system = TypeSystem::new(DateTimeCrate::Jiff);
+        let mut domain_enums = HashMap::new();
+        domain_enums.insert(
+            "public.party_type".to_string(),
+            DomainEnumConstraint {
+                variants: vec!["organization".to_string(), "individual".to_string()],
+                base_type: "text".to_string(),
+            },
+        );
+
+        let mut referenced = HashSet::new();
+        referenced.insert("super::types::public::PartyType".to_string());
+
+        type_system.register_referenced_domain_enums(&referenced, &domain_enums);
+
+        let party_type = type_system
+            .types
+            .get("super::public::PartyType")
+            .expect("party_type enum should be registered");
+        assert_eq!(party_type.pg_name, "party_type");
+        assert!(matches!(party_type.kind, TypeKind::Enum(_)));
+        assert!(party_type
+            .codegen(&[], DateTimeCrate::Jiff)
+            .expect("enum should codegen")
+            .contains("pub enum PartyType"));
+    }
+
+    #[test]
+    fn register_referenced_domain_enum_skips_unreferenced() {
+        let mut type_system = TypeSystem::new(DateTimeCrate::Jiff);
+        let mut domain_enums = HashMap::new();
+        domain_enums.insert(
+            "public.party_type".to_string(),
+            DomainEnumConstraint {
+                variants: vec!["organization".to_string(), "individual".to_string()],
+                base_type: "text".to_string(),
+            },
+        );
+
+        type_system.register_referenced_domain_enums(&HashSet::new(), &domain_enums);
+
+        assert!(!type_system.types.contains_key("super::public::PartyType"));
     }
 }
