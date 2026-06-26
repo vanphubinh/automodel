@@ -8,7 +8,7 @@ pub struct GetUserActivitySummaryItem {
     pub id: i32,
     pub name: String,
     pub email: String,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
     pub rank: Option<i64>,
     pub total_users: Option<i64>,
     pub weekly_users: Option<i64>,
@@ -69,7 +69,7 @@ pub async fn get_user_activity_summary(executor: impl sqlx::Executor<'_, Databas
         id: row.try_get::<i32, _>("id")?,
         name: row.try_get::<String, _>("name")?,
         email: row.try_get::<String, _>("email")?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
         rank: row.try_get::<Option<i64>, _>("rank")?,
         total_users: row.try_get::<Option<i64>, _>("total_users")?,
         weekly_users: row.try_get::<Option<i64>, _>("weekly_users")?,
@@ -182,16 +182,16 @@ pub struct GetUserActivityWithPostsItem {
     pub user_id: i32,
     pub name: String,
     pub email: String,
-    pub user_created_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub user_updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub user_created_at: Option<jiff_sqlx::Timestamp>,
+    pub user_updated_at: Option<jiff_sqlx::Timestamp>,
     pub post_id: i32,
     pub title: String,
     pub content: Option<String>,
-    pub post_created_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub published_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub post_created_at: Option<jiff_sqlx::Timestamp>,
+    pub published_at: Option<jiff_sqlx::Timestamp>,
     pub comment_count: Option<i64>,
     pub hours_since_post: Option<f64>,
-    pub post_date: Option<chrono::DateTime<chrono::Utc>>,
+    pub post_date: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Complex JOIN query with temporal filtering across multiple tables
@@ -216,7 +216,7 @@ pub struct GetUserActivityWithPostsItem {
 ///   Functions: 19
 ///   Options: Inlining true, Optimization true, Expressions true, Deforming true
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT \n  u.id as user_id,\n  u.name,\n  u.email,\n  u.created_at as user_created_at,\n  u.updated_at as user_updated_at,\n  p.id as post_id,\n  p.title,\n  p.content,\n  p.created_at as post_created_at,\n  p.published_at,\n  c.comment_count,\n  EXTRACT(EPOCH FROM (NOW() - p.created_at))::float8/3600 as hours_since_post,\n  DATE_TRUNC('day', p.created_at) as post_date\nFROM public.users u\nINNER JOIN public.posts p ON u.id = p.author_id\nLEFT JOIN (\n  SELECT post_id, COUNT(*) as comment_count\n  FROM public.comments \n  GROUP BY post_id\n) c ON p.id = c.post_id\nWHERE u.created_at > #{since}\n  AND p.published_at IS NOT NULL\n  AND p.created_at BETWEEN #{start_date} AND #{end_date}\nORDER BY p.created_at DESC, u.name"))]
-pub async fn get_user_activity_with_posts(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, since: chrono::DateTime<chrono::Utc>, start_date: chrono::DateTime<chrono::Utc>, end_date: chrono::DateTime<chrono::Utc>) -> Result<Vec<GetUserActivityWithPostsItem>, super::ErrorReadOnly> {
+pub async fn get_user_activity_with_posts(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, since: jiff_sqlx::Timestamp, start_date: jiff_sqlx::Timestamp, end_date: jiff_sqlx::Timestamp) -> Result<Vec<GetUserActivityWithPostsItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT 
          u.id as user_id,
@@ -253,16 +253,16 @@ pub async fn get_user_activity_with_posts(executor: impl sqlx::Executor<'_, Data
         user_id: row.try_get::<i32, _>("user_id")?,
         name: row.try_get::<String, _>("name")?,
         email: row.try_get::<String, _>("email")?,
-        user_created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("user_created_at")?,
-        user_updated_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("user_updated_at")?,
+        user_created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("user_created_at")?,
+        user_updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("user_updated_at")?,
         post_id: row.try_get::<i32, _>("post_id")?,
         title: row.try_get::<String, _>("title")?,
         content: row.try_get::<Option<String>, _>("content")?,
-        post_created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("post_created_at")?,
-        published_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("published_at")?,
+        post_created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("post_created_at")?,
+        published_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("published_at")?,
         comment_count: row.try_get::<Option<i64>, _>("comment_count")?,
         hours_since_post: row.try_get::<Option<f64>, _>("hours_since_post")?,
-        post_date: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("post_date")?,
+        post_date: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("post_date")?,
     })
     }).collect();
     result.map_err(Into::into)
@@ -273,11 +273,11 @@ pub struct GetUserEngagementMetricsItem {
     pub id: i32,
     pub name: String,
     pub email: String,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
     pub post_count: Option<i64>,
     pub comment_count: Option<i64>,
-    pub last_post_date: Option<chrono::DateTime<chrono::Utc>>,
-    pub last_comment_date: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_post_date: Option<jiff_sqlx::Timestamp>,
+    pub last_comment_date: Option<jiff_sqlx::Timestamp>,
     pub avg_publish_delay_hours: Option<f64>,
     pub engagement_score: Option<i64>,
     pub activity_status: Option<String>,
@@ -377,11 +377,11 @@ pub async fn get_user_engagement_metrics(executor: impl sqlx::Executor<'_, Datab
         id: row.try_get::<i32, _>("id")?,
         name: row.try_get::<String, _>("name")?,
         email: row.try_get::<String, _>("email")?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
         post_count: row.try_get::<Option<i64>, _>("post_count")?,
         comment_count: row.try_get::<Option<i64>, _>("comment_count")?,
-        last_post_date: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("last_post_date")?,
-        last_comment_date: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("last_comment_date")?,
+        last_post_date: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("last_post_date")?,
+        last_comment_date: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("last_comment_date")?,
         avg_publish_delay_hours: row.try_get::<Option<f64>, _>("avg_publish_delay_hours")?,
         engagement_score: row.try_get::<Option<i64>, _>("engagement_score")?,
         activity_status: row.try_get::<Option<String>, _>("activity_status")?,
@@ -395,14 +395,14 @@ pub async fn get_user_engagement_metrics(executor: impl sqlx::Executor<'_, Datab
 
 #[derive(Debug, Clone)]
 pub struct GetTimeSeriesUserRegistrationsItem {
-    pub period_start: Option<chrono::DateTime<chrono::Utc>>,
+    pub period_start: Option<jiff_sqlx::Timestamp>,
     pub registrations_count: Option<i64>,
     pub young_adult_count: Option<i64>,
     pub middle_aged_count: Option<i64>,
     pub senior_count: Option<i64>,
     pub avg_age: Option<rust_decimal::Decimal>,
-    pub first_registration: Option<chrono::DateTime<chrono::Utc>>,
-    pub last_registration: Option<chrono::DateTime<chrono::Utc>>,
+    pub first_registration: Option<jiff_sqlx::Timestamp>,
+    pub last_registration: Option<jiff_sqlx::Timestamp>,
     pub period_span_hours: Option<f64>,
 }
 
@@ -423,7 +423,7 @@ pub struct GetTimeSeriesUserRegistrationsItem {
 ///   Functions: 11
 ///   Options: Inlining true, Optimization true, Expressions true, Deforming true
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "WITH time_series AS (\n  SELECT \n    DATE_TRUNC('day', created_at) as period_start,\n    COUNT(*) as registrations_count,\n    COUNT(*) FILTER (WHERE age BETWEEN 18 AND 30) as young_adult_count,\n    COUNT(*) FILTER (WHERE age BETWEEN 31 AND 50) as middle_aged_count, \n    COUNT(*) FILTER (WHERE age > 50) as senior_count,\n    AVG(age) as avg_age,\n    MIN(created_at) as first_registration,\n    MAX(created_at) as last_registration\n  FROM public.users\n  WHERE created_at BETWEEN #{start_date} AND #{end_date}\n  GROUP BY DATE_TRUNC('day', created_at)\n  HAVING COUNT(*) >= #{min_registrations}\n)\nSELECT \n  *,\n  EXTRACT(EPOCH FROM (last_registration - first_registration))::float8/3600 as period_span_hours\nFROM time_series\nORDER BY period_start DESC"))]
-pub async fn get_time_series_user_registrations(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, start_date: chrono::DateTime<chrono::Utc>, end_date: chrono::DateTime<chrono::Utc>, min_registrations: i64) -> Result<Vec<GetTimeSeriesUserRegistrationsItem>, super::ErrorReadOnly> {
+pub async fn get_time_series_user_registrations(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, start_date: jiff_sqlx::Timestamp, end_date: jiff_sqlx::Timestamp, min_registrations: i64) -> Result<Vec<GetTimeSeriesUserRegistrationsItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"WITH time_series AS (
          SELECT 
@@ -452,14 +452,14 @@ pub async fn get_time_series_user_registrations(executor: impl sqlx::Executor<'_
     let rows = query.fetch_all(executor).await?;
     let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
         Ok(GetTimeSeriesUserRegistrationsItem {
-        period_start: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("period_start")?,
+        period_start: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("period_start")?,
         registrations_count: row.try_get::<Option<i64>, _>("registrations_count")?,
         young_adult_count: row.try_get::<Option<i64>, _>("young_adult_count")?,
         middle_aged_count: row.try_get::<Option<i64>, _>("middle_aged_count")?,
         senior_count: row.try_get::<Option<i64>, _>("senior_count")?,
         avg_age: row.try_get::<Option<rust_decimal::Decimal>, _>("avg_age")?,
-        first_registration: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("first_registration")?,
-        last_registration: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("last_registration")?,
+        first_registration: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("first_registration")?,
+        last_registration: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("last_registration")?,
         period_span_hours: row.try_get::<Option<f64>, _>("period_span_hours")?,
     })
     }).collect();
@@ -471,10 +471,10 @@ pub struct GetUsersWithTimezoneInfoItem {
     pub id: i32,
     pub name: String,
     pub email: String,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub created_at_user_tz: Option<chrono::DateTime<chrono::Utc>>,
-    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub updated_at_user_tz: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
+    pub created_at_user_tz: Option<jiff_sqlx::Timestamp>,
+    pub updated_at: Option<jiff_sqlx::Timestamp>,
+    pub updated_at_user_tz: Option<jiff_sqlx::Timestamp>,
     pub account_age: Option<sqlx::postgres::types::PgInterval>,
     pub account_age_days: Option<rust_decimal::Decimal>,
     pub created_day_of_week: Option<f64>,
@@ -493,7 +493,7 @@ pub struct GetUsersWithTimezoneInfoItem {
 ///   Functions: 4
 ///   Options: Inlining true, Optimization true, Expressions true, Deforming true
 #[tracing::instrument(level = "debug", skip(end_date, executor, max_age_days, min_age_days, start_date, user_timezone), fields(sql = "SELECT \n  id,\n  name,\n  email,\n  created_at,\n  created_at AT TIME ZONE 'UTC' AT TIME ZONE #{user_timezone} as created_at_user_tz,\n  updated_at,\n  updated_at AT TIME ZONE 'UTC' AT TIME ZONE #{user_timezone} as updated_at_user_tz,\n  AGE(NOW(), created_at) as account_age,\n  EXTRACT(EPOCH FROM AGE(NOW(), created_at))/86400 as account_age_days,\n  DATE_PART('dow', created_at) as created_day_of_week,\n  DATE_PART('hour', created_at) as created_hour,\n  TO_CHAR(created_at, 'Day, Month DD, YYYY at HH24:MI:SS TZ') as formatted_created_at\nFROM public.users \nWHERE created_at BETWEEN #{start_date} AND #{end_date}\n  AND EXTRACT(EPOCH FROM AGE(NOW(), created_at))/86400 BETWEEN #{min_age_days} AND #{max_age_days}\nORDER BY created_at DESC"))]
-pub async fn get_users_with_timezone_info(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, user_timezone: String, start_date: chrono::DateTime<chrono::Utc>, end_date: chrono::DateTime<chrono::Utc>, min_age_days: rust_decimal::Decimal, max_age_days: rust_decimal::Decimal) -> Result<Vec<GetUsersWithTimezoneInfoItem>, super::ErrorReadOnly> {
+pub async fn get_users_with_timezone_info(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, user_timezone: String, start_date: jiff_sqlx::Timestamp, end_date: jiff_sqlx::Timestamp, min_age_days: rust_decimal::Decimal, max_age_days: rust_decimal::Decimal) -> Result<Vec<GetUsersWithTimezoneInfoItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT 
          id,
@@ -525,10 +525,10 @@ pub async fn get_users_with_timezone_info(executor: impl sqlx::Executor<'_, Data
         id: row.try_get::<i32, _>("id")?,
         name: row.try_get::<String, _>("name")?,
         email: row.try_get::<String, _>("email")?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
-        created_at_user_tz: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at_user_tz")?,
-        updated_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("updated_at")?,
-        updated_at_user_tz: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("updated_at_user_tz")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+        created_at_user_tz: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at_user_tz")?,
+        updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
+        updated_at_user_tz: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at_user_tz")?,
         account_age: row.try_get::<Option<sqlx::postgres::types::PgInterval>, _>("account_age")?,
         account_age_days: row.try_get::<Option<rust_decimal::Decimal>, _>("account_age_days")?,
         created_day_of_week: row.try_get::<Option<f64>, _>("created_day_of_week")?,
@@ -584,7 +584,7 @@ pub struct GetNonNullMultiFieldsItem {
     pub user_count: i64,
     pub double_count: i64,
     pub is_valid: bool,
-    pub current_time: chrono::DateTime<chrono::Utc>,
+    pub current_time: jiff_sqlx::Timestamp,
     pub greeting: String,
 }
 
@@ -610,7 +610,7 @@ pub async fn get_non_null_multi_fields(executor: impl sqlx::Executor<'_, Databas
         user_count: row.try_get::<i64, _>("user_count")?,
         double_count: row.try_get::<i64, _>("double_count")?,
         is_valid: row.try_get::<bool, _>("is_valid")?,
-        current_time: row.try_get::<chrono::DateTime<chrono::Utc>, _>("current_time")?,
+        current_time: row.try_get::<jiff_sqlx::Timestamp, _>("current_time")?,
         greeting: row.try_get::<String, _>("greeting")?,
     })
     })();

@@ -1,6 +1,17 @@
 mod common;
 
 use example_app::generated;
+use jiff_sqlx::ToSqlx;
+
+fn days_ago(days: i64) -> jiff_sqlx::Timestamp {
+    (jiff::Timestamp::now() - jiff::Span::new().hours(days * 24))
+        .to_sqlx()
+}
+
+fn days_from_now(days: i64) -> jiff_sqlx::Timestamp {
+    (jiff::Timestamp::now() + jiff::Span::new().hours(days * 24))
+        .to_sqlx()
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_get_user_count_and_avg_age() {
@@ -39,9 +50,9 @@ async fn test_get_hierarchical_user_data() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_get_user_activity_with_posts() {
     let pool = common::get_pool().await;
-    let since = chrono::Utc::now() - chrono::Duration::days(365 * 10);
-    let start_date = chrono::Utc::now() - chrono::Duration::days(365 * 10);
-    let end_date = chrono::Utc::now() + chrono::Duration::days(1);
+    let since = days_ago(365 * 10);
+    let start_date = days_ago(365 * 10);
+    let end_date = days_from_now(1);
 
     let results =
         generated::analytics::get_user_activity_with_posts(pool, since, start_date, end_date)
@@ -67,8 +78,8 @@ async fn test_get_time_series_user_registrations() {
     let pool = common::get_pool().await;
     common::insert_test_user(pool, "analytics_ts").await;
 
-    let start_date = chrono::Utc::now() - chrono::Duration::days(365);
-    let end_date = chrono::Utc::now() + chrono::Duration::days(1);
+    let start_date = days_ago(365);
+    let end_date = days_from_now(1);
 
     let results =
         generated::analytics::get_time_series_user_registrations(pool, start_date, end_date, 0)
@@ -82,8 +93,8 @@ async fn test_get_users_with_timezone_info() {
     let pool = common::get_pool().await;
     common::insert_test_user(pool, "analytics_tz").await;
 
-    let start_date = chrono::Utc::now() - chrono::Duration::days(365);
-    let end_date = chrono::Utc::now() + chrono::Duration::days(1);
+    let start_date = days_ago(365);
+    let end_date = days_from_now(1);
 
     let results = generated::analytics::get_users_with_timezone_info(
         pool,

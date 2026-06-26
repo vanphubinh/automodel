@@ -39,7 +39,7 @@ pub struct InsertOrderItem {
     pub tenant_id: i32,
     pub product_name: String,
     pub amount: rust_decimal::Decimal,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Insert a new order
@@ -60,7 +60,7 @@ pub async fn insert_order(executor: impl sqlx::Executor<'_, Database = sqlx::Pos
         tenant_id: row.try_get::<i32, _>("tenant_id")?,
         product_name: row.try_get::<String, _>("product_name")?,
         amount: row.try_get::<rust_decimal::Decimal, _>("amount")?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
     })
     })();
     result.map_err(Into::into)
@@ -72,7 +72,7 @@ pub struct GetOrdersByTenantItem {
     pub tenant_id: i32,
     pub product_name: String,
     pub amount: rust_decimal::Decimal,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Get orders for a specific tenant (partition-pruned via equality on partition key)
@@ -100,7 +100,7 @@ pub async fn get_orders_by_tenant(executor: impl sqlx::Executor<'_, Database = s
         tenant_id: row.try_get::<i32, _>("tenant_id")?,
         product_name: row.try_get::<String, _>("product_name")?,
         amount: row.try_get::<rust_decimal::Decimal, _>("amount")?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
     })
     }).collect();
     result.map_err(Into::into)
@@ -112,7 +112,7 @@ pub struct GetOrdersByProductItem {
     pub tenant_id: i32,
     pub product_name: String,
     pub amount: rust_decimal::Decimal,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Get orders by product name (missing partition key filter — triggers partition pruning warning)
@@ -148,7 +148,7 @@ pub async fn get_orders_by_product(executor: impl sqlx::Executor<'_, Database = 
         tenant_id: row.try_get::<i32, _>("tenant_id")?,
         product_name: row.try_get::<String, _>("product_name")?,
         amount: row.try_get::<rust_decimal::Decimal, _>("amount")?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
     })
     }).collect();
     result.map_err(Into::into)
@@ -160,7 +160,7 @@ pub struct GetOrdersByTenantRangeItem {
     pub tenant_id: i32,
     pub product_name: String,
     pub amount: rust_decimal::Decimal,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Get orders for a tenant range (range filter on hash partition key — no pruning)
@@ -201,7 +201,7 @@ pub async fn get_orders_by_tenant_range(executor: impl sqlx::Executor<'_, Databa
         tenant_id: row.try_get::<i32, _>("tenant_id")?,
         product_name: row.try_get::<String, _>("product_name")?,
         amount: row.try_get::<rust_decimal::Decimal, _>("amount")?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
     })
     }).collect();
     result.map_err(Into::into)

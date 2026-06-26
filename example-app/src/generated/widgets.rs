@@ -117,7 +117,7 @@ pub struct GetAllWidgetsItem {
     pub name: String,
     pub weight: Option<f64>,
     pub metadata: Option<super::types::public::WidgetMetadata>,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Get all widgets
@@ -136,7 +136,7 @@ pub async fn get_all_widgets(executor: impl sqlx::Executor<'_, Database = sqlx::
         name: row.try_get::<String, _>("name")?,
         weight: row.try_get::<Option<f64>, _>("weight")?,
         metadata: row.try_get::<Option<super::types::public::WidgetMetadata>, _>("metadata")?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
     })
     }).collect();
     result.map_err(Into::into)

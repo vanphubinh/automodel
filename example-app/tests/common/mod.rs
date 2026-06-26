@@ -15,7 +15,7 @@ pub async fn get_pool() -> &'static PgPool {
 
 /// Helper to generate unique emails for test isolation
 pub fn unique_email(prefix: &str) -> String {
-    let ts = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+    let ts = jiff::Timestamp::now().as_nanosecond();
     format!("{}.{}@test.example.com", prefix, ts)
 }
 

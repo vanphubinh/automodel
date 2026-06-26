@@ -45,7 +45,7 @@ pub struct InsertUserItem {
     pub name: String,
     pub email: String,
     pub age: Option<i32>,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Insert a new user with all fields and return the created user
@@ -67,7 +67,7 @@ pub async fn insert_user(executor: impl sqlx::Executor<'_, Database = sqlx::Post
         name: row.try_get::<String, _>("name")?,
         email: row.try_get::<String, _>("email")?,
         age: row.try_get::<Option<i32>, _>("age")?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
     })
     })();
     result.map_err(Into::into)
@@ -148,8 +148,8 @@ pub struct GetAllUsersItem {
     pub email: String,
     pub age: Option<i32>,
     pub profile: Option<crate::models::UserProfile>,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
+    pub updated_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Get all public.users with all their fields
@@ -179,8 +179,8 @@ pub async fn get_all_users(executor: impl sqlx::Executor<'_, Database = sqlx::Po
             .map(|v| serde_json::from_value::<crate::models::UserProfile>(v)
             .map_err(|e| sqlx::Error::Decode(Box::new(e))))
             .transpose()?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
-        updated_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("updated_at")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+        updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
     })
     }).collect();
     result.map_err(Into::into)
@@ -193,8 +193,8 @@ pub struct FindUserByEmailItem {
     pub email: String,
     pub age: Option<i32>,
     pub profile: Option<serde_json::Value>,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
+    pub updated_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Find a user by their email address
@@ -216,8 +216,8 @@ pub async fn find_user_by_email(executor: impl sqlx::Executor<'_, Database = sql
         email: row.try_get::<String, _>("email")?,
         age: row.try_get::<Option<i32>, _>("age")?,
         profile: row.try_get::<Option<serde_json::Value>, _>("profile")?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
-        updated_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("updated_at")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+        updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
     })
             })();
             result.map(Some).map_err(Into::into)
@@ -269,7 +269,7 @@ pub struct UpdateUserProfileItem {
     pub email: String,
     pub age: Option<i32>,
     pub profile: Option<crate::models::UserProfile>,
-    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub updated_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Update a user's profile by their ID
@@ -299,7 +299,7 @@ pub async fn update_user_profile(executor: impl sqlx::Executor<'_, Database = sq
             .map(|v| serde_json::from_value::<crate::models::UserProfile>(v)
             .map_err(|e| sqlx::Error::Decode(Box::new(e))))
             .transpose()?,
-        updated_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("updated_at")?,
+        updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
     })
     })();
     result.map_err(Into::into)
@@ -375,7 +375,7 @@ ORDER BY name".to_string();
     }
     let _ = param_counter; // Suppress unused assignment warning
 
-    let mut query = sqlx::query(&final_sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
     query = query.bind(&name_pattern);
     query = query.bind(&name_exact);
@@ -406,8 +406,8 @@ pub struct GetRecentUsersItem {
     pub email: String,
     pub age: Option<i32>,
     pub profile: Option<crate::models::UserProfile>,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
+    pub updated_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Get public.users created after a specific timestamp - expects at least one user
@@ -421,7 +421,7 @@ pub struct GetRecentUsersItem {
 ///   Functions: 4
 ///   Options: Inlining true, Optimization true, Expressions true, Deforming true
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, age, profile, created_at, updated_at \nFROM public.users \nWHERE created_at > #{since} \nORDER BY created_at DESC"))]
-pub async fn get_recent_users(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, since: chrono::DateTime<chrono::Utc>) -> Result<Vec<GetRecentUsersItem>, super::ErrorReadOnly> {
+pub async fn get_recent_users(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, since: jiff_sqlx::Timestamp) -> Result<Vec<GetRecentUsersItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, name, email, age, profile, created_at, updated_at 
         FROM public.users 
@@ -443,8 +443,8 @@ pub async fn get_recent_users(executor: impl sqlx::Executor<'_, Database = sqlx:
             .map(|v| serde_json::from_value::<crate::models::UserProfile>(v)
             .map_err(|e| sqlx::Error::Decode(Box::new(e))))
             .transpose()?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
-        updated_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("updated_at")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+        updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
     })
     }).collect();
     result.map_err(Into::into)
@@ -457,7 +457,7 @@ pub struct GetActiveUsersByAgeRangeItem {
     pub email: String,
     pub age: Option<i32>,
     pub profile: Option<crate::models::UserProfile>,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Get active public.users within an age range - must return at least one user or fails
@@ -490,7 +490,7 @@ pub async fn get_active_users_by_age_range(executor: impl sqlx::Executor<'_, Dat
             .map(|v| serde_json::from_value::<crate::models::UserProfile>(v)
             .map_err(|e| sqlx::Error::Decode(Box::new(e))))
             .transpose()?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
     })
     }).collect();
     result.map_err(Into::into)
@@ -542,7 +542,7 @@ pub struct SearchUsersAdvancedItem {
     pub name: String,
     pub email: String,
     pub age: Option<i32>,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Advanced user search with multiple optional filters using conditional syntax
@@ -582,7 +582,7 @@ pub struct SearchUsersAdvancedItem {
 ///   Functions: 4
 ///   Options: Inlining true, Optimization true, Expressions true, Deforming true
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, age, created_at \nFROM public.users \nWHERE 1=1 \n#[AND name ILIKE #{name_pattern?}] \n#[AND age >= #{min_age?}] \n#[AND created_at >= #{since?}] \nORDER BY created_at DESC"))]
-pub async fn search_users_advanced(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, name_pattern: Option<String>, min_age: Option<i32>, since: Option<chrono::DateTime<chrono::Utc>>) -> Result<Vec<SearchUsersAdvancedItem>, super::ErrorReadOnly> {
+pub async fn search_users_advanced(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, name_pattern: Option<String>, min_age: Option<i32>, since: Option<jiff_sqlx::Timestamp>) -> Result<Vec<SearchUsersAdvancedItem>, super::ErrorReadOnly> {
     let mut final_sql = r"SELECT id, name, email, age, created_at 
 FROM public.users 
 WHERE 1=1 
@@ -629,7 +629,7 @@ ORDER BY created_at DESC".to_string();
     }
     let _ = param_counter; // Suppress unused assignment warning
 
-    let mut query = sqlx::query(&final_sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
     if included_params.contains(&r"name_pattern") {
         query = query.bind(name_pattern.as_ref().unwrap());
@@ -650,7 +650,7 @@ ORDER BY created_at DESC".to_string();
         name: row.try_get::<String, _>("name")?,
         email: row.try_get::<String, _>("email")?,
         age: row.try_get::<Option<i32>, _>("age")?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
     })
     }).collect();
     result.map_err(Into::into)
@@ -800,7 +800,7 @@ pub struct UpdateUserFieldsItem {
     pub name: String,
     pub email: String,
     pub age: Option<i32>,
-    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub updated_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Update user fields conditionally - only updates fields that are provided (not None)
@@ -854,7 +854,7 @@ RETURNING id, name, email, age, updated_at".to_string();
     }
     let _ = param_counter; // Suppress unused assignment warning
 
-    let mut query = sqlx::query(&final_sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
     query = query.bind(&user_id);
     if included_params.contains(&r"name") {
@@ -876,7 +876,7 @@ RETURNING id, name, email, age, updated_at".to_string();
         name: row.try_get::<String, _>("name")?,
         email: row.try_get::<String, _>("email")?,
         age: row.try_get::<Option<i32>, _>("age")?,
-        updated_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("updated_at")?,
+        updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
     })
     })();
     result.map_err(Into::into)
@@ -931,7 +931,7 @@ pub struct UpdateUserFieldsDiffItem {
     pub name: String,
     pub email: String,
     pub age: Option<i32>,
-    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub updated_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Update user fields using diff-based conditional updates - compares old and new structs
@@ -985,7 +985,7 @@ RETURNING id, name, email, age, updated_at".to_string();
     }
     let _ = param_counter; // Suppress unused assignment warning
 
-    let mut query = sqlx::query(&final_sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
     query = query.bind(&user_id);
     if included_params.contains(&r"name") {
@@ -1007,7 +1007,7 @@ RETURNING id, name, email, age, updated_at".to_string();
         name: row.try_get::<String, _>("name")?,
         email: row.try_get::<String, _>("email")?,
         age: row.try_get::<Option<i32>, _>("age")?,
-        updated_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("updated_at")?,
+        updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
     })
     })();
     result.map_err(Into::into)
@@ -1062,7 +1062,7 @@ pub struct InsertUserStructuredItem {
     pub name: String,
     pub email: String,
     pub age: Option<i32>,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Insert a new user using structured parameters - all params passed as a single struct
@@ -1083,7 +1083,7 @@ pub async fn insert_user_structured(executor: impl sqlx::Executor<'_, Database =
         name: row.try_get::<String, _>("name")?,
         email: row.try_get::<String, _>("email")?,
         age: row.try_get::<Option<i32>, _>("age")?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
     })
     })();
     result.map_err(Into::into)
@@ -1123,8 +1123,8 @@ pub struct GetAllUsersWithStarItem {
     pub settings: Option<serde_json::Value>,
     pub is_active: Option<bool>,
     pub age: Option<i32>,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
+    pub updated_at: Option<jiff_sqlx::Timestamp>,
     pub referrer_id: Option<i32>,
     pub social_links: Option<serde_json::Value>,
     pub tags: Option<Vec<serde_json::Value>>,
@@ -1161,8 +1161,8 @@ pub async fn get_all_users_with_star(executor: impl sqlx::Executor<'_, Database 
         settings: row.try_get::<Option<serde_json::Value>, _>("settings")?,
         is_active: row.try_get::<Option<bool>, _>("is_active")?,
         age: row.try_get::<Option<i32>, _>("age")?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
-        updated_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("updated_at")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+        updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
         referrer_id: row.try_get::<Option<i32>, _>("referrer_id")?,
         social_links: row.try_get::<Option<serde_json::Value>, _>("social_links")?,
         tags: row.try_get::<Option<Vec<serde_json::Value>>, _>("tags")?,
@@ -1182,8 +1182,8 @@ pub struct GetUserByIdWithStarItem {
     pub settings: Option<serde_json::Value>,
     pub is_active: Option<bool>,
     pub age: Option<i32>,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
-    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
+    pub updated_at: Option<jiff_sqlx::Timestamp>,
     pub referrer_id: Option<i32>,
     pub social_links: Option<serde_json::Value>,
     pub tags: Option<Vec<serde_json::Value>>,
@@ -1219,8 +1219,8 @@ pub async fn get_user_by_id_with_star(executor: impl sqlx::Executor<'_, Database
         settings: row.try_get::<Option<serde_json::Value>, _>("settings")?,
         is_active: row.try_get::<Option<bool>, _>("is_active")?,
         age: row.try_get::<Option<i32>, _>("age")?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
-        updated_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("updated_at")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+        updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
         referrer_id: row.try_get::<Option<i32>, _>("referrer_id")?,
         social_links: row.try_get::<Option<serde_json::Value>, _>("social_links")?,
         tags: row.try_get::<Option<Vec<serde_json::Value>>, _>("tags")?,
@@ -1488,7 +1488,7 @@ pub struct UpdateUserProfileDiffItem {
     pub name: String,
     pub email: String,
     pub profile: Option<crate::models::UserProfile>,
-    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub updated_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Update user profile with conditional name/email - generates UpdateUserProfileDiffParams
@@ -1532,7 +1532,7 @@ RETURNING id, name, email, profile, updated_at".to_string();
     }
     let _ = param_counter; // Suppress unused assignment warning
 
-    let mut query = sqlx::query(&final_sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
     let profile_json = serde_json::to_value(&profile).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
     query = query.bind(profile_json);
@@ -1555,7 +1555,7 @@ RETURNING id, name, email, profile, updated_at".to_string();
             .map(|v| serde_json::from_value::<crate::models::UserProfile>(v)
             .map_err(|e| sqlx::Error::Decode(Box::new(e))))
             .transpose()?,
-        updated_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("updated_at")?,
+        updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
     })
     })();
     result.map_err(Into::into)
@@ -1602,7 +1602,7 @@ pub struct UpdateUserMetadataDiffItem {
     pub id: i32,
     pub name: String,
     pub email: String,
-    pub updated_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub updated_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Update user metadata - reuses UpdateUserProfileDiffParams struct
@@ -1646,7 +1646,7 @@ RETURNING id, name, email, updated_at".to_string();
     }
     let _ = param_counter; // Suppress unused assignment warning
 
-    let mut query = sqlx::query(&final_sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
     let profile_json = serde_json::to_value(&profile).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
     query = query.bind(profile_json);
@@ -1665,7 +1665,7 @@ RETURNING id, name, email, updated_at".to_string();
         id: row.try_get::<i32, _>("id")?,
         name: row.try_get::<String, _>("name")?,
         email: row.try_get::<String, _>("email")?,
-        updated_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("updated_at")?,
+        updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
     })
     })();
     result.map_err(Into::into)
@@ -1764,7 +1764,7 @@ pub struct UserDetails {
     pub name: String,
     pub email: String,
     pub age: Option<i32>,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Get user details with age and created_at - generates UserDetails return struct
@@ -1787,7 +1787,7 @@ pub async fn get_user_details(executor: impl sqlx::Executor<'_, Database = sqlx:
         name: row.try_get::<String, _>("name")?,
         email: row.try_get::<String, _>("email")?,
         age: row.try_get::<Option<i32>, _>("age")?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
     })
     })();
     result.map_err(Into::into)
@@ -1816,7 +1816,7 @@ pub async fn search_user_details(executor: impl sqlx::Executor<'_, Database = sq
         name: row.try_get::<String, _>("name")?,
         email: row.try_get::<String, _>("email")?,
         age: row.try_get::<Option<i32>, _>("age")?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
     })
     }).collect();
     result.map_err(Into::into)
@@ -1858,7 +1858,7 @@ pub struct GetUserSimpleItem {
     pub id: i32,
     pub name: String,
     pub email: String,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Simple user lookup by ID with detailed info
@@ -1882,7 +1882,7 @@ pub async fn get_user_simple(executor: impl sqlx::Executor<'_, Database = sqlx::
         id: row.try_get::<i32, _>("id")?,
         name: row.try_get::<String, _>("name")?,
         email: row.try_get::<String, _>("email")?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
     })
             })();
             result.map(Some).map_err(Into::into)
@@ -2049,7 +2049,7 @@ pub struct GetUserSocialLinksItem {
     pub name: String,
     pub email: String,
     pub social_links: Option<Vec<crate::models::UserSocialLink>>,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Get user with their social links
@@ -2075,7 +2075,7 @@ pub async fn get_user_social_links(executor: impl sqlx::Executor<'_, Database = 
             .map(|v| serde_json::from_value::<Vec<crate::models::UserSocialLink>>(v)
             .map_err(|e| sqlx::Error::Decode(Box::new(e))))
             .transpose()?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
     })
     })();
     result.map_err(Into::into)
@@ -2380,7 +2380,7 @@ pub struct TestOptionalMultiunzipItem {
     pub name: String,
     pub email: String,
     pub age: Option<i32>,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Test batch insert with optional parameter (age is nullable)
@@ -2412,7 +2412,7 @@ pub async fn test_optional_multiunzip(executor: impl sqlx::Executor<'_, Database
         name: row.try_get::<String, _>("name")?,
         email: row.try_get::<String, _>("email")?,
         age: row.try_get::<Option<i32>, _>("age")?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
     })
     }).collect();
     result.map_err(Into::into)
@@ -2460,7 +2460,7 @@ pub struct TestOptionalWithoutMultiunzipItem {
     pub name: String,
     pub email: String,
     pub age: Option<i32>,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Test batch insert with nullable array elements (not entire array optional)
@@ -2486,7 +2486,7 @@ pub async fn test_optional_without_multiunzip(executor: impl sqlx::Executor<'_, 
         name: row.try_get::<String, _>("name")?,
         email: row.try_get::<String, _>("email")?,
         age: row.try_get::<Option<i32>, _>("age")?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
     })
     }).collect();
     result.map_err(Into::into)

@@ -8,12 +8,12 @@ use sqlx::Row;
 /// Query Plan:
 /// Result
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT NOW() as current_time"))]
-pub async fn get_current_time(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>) -> Result<Option<chrono::DateTime<chrono::Utc>>, super::ErrorReadOnly> {
+pub async fn get_current_time(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>) -> Result<Option<jiff_sqlx::Timestamp>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT NOW() as current_time"
     );
     let row = query.fetch_one(executor).await?;
-    Ok(row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("current_time")?)
+    Ok(row.try_get::<Option<jiff_sqlx::Timestamp>, _>("current_time")?)
 }
 
 /// Get PostgreSQL version
@@ -52,7 +52,7 @@ impl TryFrom<super::ErrorConstraintInfo> for InsertAllTypesTestConstraints {
 
 /// Insert a row with all PostgreSQL types
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.all_types_test (\n  bool_col, char_col, int2_col, int4_col, int8_col, float4_col, float8_col, numeric_col,\n  name_col, text_col, varchar_col, bpchar_col, bytea_col, bit_col, varbit_col,\n  date_col, time_col, timestamp_col, timestamptz_col, interval_col, timetz_col,\n  int4_range_col, int8_range_col, num_range_col, ts_range_col, tstz_range_col, date_range_col,\n  inet_col, cidr_col, macaddr_col, json_col, jsonb_col, uuid_col,\n  bool_array_col, int4_array_col, int8_array_col, text_array_col, float8_array_col,\n  int4_range_array_col, date_range_array_col\n) VALUES (\n  #{bool_col}, #{char_col}, #{int2_col}, #{int4_col}, #{int8_col}, #{float4_col}, #{float8_col}, #{numeric_col},\n  #{name_col}, #{text_col}, #{varchar_col}, #{bpchar_col}, #{bytea_col}, #{bit_col}, #{varbit_col},\n  #{date_col}, #{time_col}, #{timestamp_col}, #{timestamptz_col}, #{interval_col}, #{timetz_col},\n  #{int4_range_col}, #{int8_range_col}, #{num_range_col}, #{ts_range_col}, #{tstz_range_col}, #{date_range_col},\n  #{inet_col}, #{cidr_col}, #{macaddr_col}, #{json_col}, #{jsonb_col}, #{uuid_col},\n  #{bool_array_col}, #{int4_array_col}, #{int8_array_col}, #{text_array_col}, #{float8_array_col},\n  #{int4_range_array_col}, #{date_range_array_col}\n)\nRETURNING id"))]
-pub async fn insert_all_types_test(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, bool_col: bool, char_col: String, int2_col: i16, int4_col: i32, int8_col: i64, float4_col: f32, float8_col: f64, numeric_col: rust_decimal::Decimal, name_col: String, text_col: String, varchar_col: String, bpchar_col: String, bytea_col: Vec<u8>, bit_col: bit_vec::BitVec, varbit_col: bit_vec::BitVec, date_col: chrono::NaiveDate, time_col: chrono::NaiveTime, timestamp_col: chrono::NaiveDateTime, timestamptz_col: chrono::DateTime<chrono::Utc>, interval_col: sqlx::postgres::types::PgInterval, timetz_col: sqlx::postgres::types::PgTimeTz, int4_range_col: sqlx::postgres::types::PgRange<i32>, int8_range_col: sqlx::postgres::types::PgRange<i64>, num_range_col: sqlx::postgres::types::PgRange<rust_decimal::Decimal>, ts_range_col: sqlx::postgres::types::PgRange<chrono::NaiveDateTime>, tstz_range_col: sqlx::postgres::types::PgRange<chrono::DateTime<chrono::Utc>>, date_range_col: sqlx::postgres::types::PgRange<chrono::NaiveDate>, inet_col: std::net::IpAddr, cidr_col: std::net::IpAddr, macaddr_col: mac_address::MacAddress, json_col: serde_json::Value, jsonb_col: serde_json::Value, uuid_col: uuid::Uuid, bool_array_col: Vec<bool>, int4_array_col: Vec<i32>, int8_array_col: Vec<i64>, text_array_col: Vec<String>, float8_array_col: Vec<f64>, int4_range_array_col: Vec<sqlx::postgres::types::PgRange<i32>>, date_range_array_col: Vec<sqlx::postgres::types::PgRange<chrono::NaiveDate>>) -> Result<i32, super::Error<InsertAllTypesTestConstraints>> {
+pub async fn insert_all_types_test(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, bool_col: bool, char_col: String, int2_col: i16, int4_col: i32, int8_col: i64, float4_col: f32, float8_col: f64, numeric_col: rust_decimal::Decimal, name_col: String, text_col: String, varchar_col: String, bpchar_col: String, bytea_col: Vec<u8>, bit_col: bit_vec::BitVec, varbit_col: bit_vec::BitVec, date_col: jiff_sqlx::Date, time_col: jiff_sqlx::Time, timestamp_col: jiff_sqlx::DateTime, timestamptz_col: jiff_sqlx::Timestamp, interval_col: sqlx::postgres::types::PgInterval, timetz_col: sqlx::postgres::types::PgTimeTz, int4_range_col: sqlx::postgres::types::PgRange<i32>, int8_range_col: sqlx::postgres::types::PgRange<i64>, num_range_col: sqlx::postgres::types::PgRange<rust_decimal::Decimal>, ts_range_col: sqlx::postgres::types::PgRange<time::PrimitiveDateTime>, tstz_range_col: sqlx::postgres::types::PgRange<time::OffsetDateTime>, date_range_col: sqlx::postgres::types::PgRange<time::Date>, inet_col: std::net::IpAddr, cidr_col: std::net::IpAddr, macaddr_col: mac_address::MacAddress, json_col: serde_json::Value, jsonb_col: serde_json::Value, uuid_col: uuid::Uuid, bool_array_col: Vec<bool>, int4_array_col: Vec<i32>, int8_array_col: Vec<i64>, text_array_col: Vec<String>, float8_array_col: Vec<f64>, int4_range_array_col: Vec<sqlx::postgres::types::PgRange<i32>>, date_range_array_col: Vec<sqlx::postgres::types::PgRange<time::Date>>) -> Result<i32, super::Error<InsertAllTypesTestConstraints>> {
     let query = sqlx::query(
         r"INSERT INTO public.all_types_test (
          bool_col, char_col, int2_col, int4_col, int8_col, float4_col, float8_col, numeric_col,
@@ -135,18 +135,18 @@ pub struct GetAllTypesTestItem {
     pub bytea_col: Option<Vec<u8>>,
     pub bit_col: Option<bit_vec::BitVec>,
     pub varbit_col: Option<bit_vec::BitVec>,
-    pub date_col: Option<chrono::NaiveDate>,
-    pub time_col: Option<chrono::NaiveTime>,
-    pub timestamp_col: Option<chrono::NaiveDateTime>,
-    pub timestamptz_col: Option<chrono::DateTime<chrono::Utc>>,
+    pub date_col: Option<jiff_sqlx::Date>,
+    pub time_col: Option<jiff_sqlx::Time>,
+    pub timestamp_col: Option<jiff_sqlx::DateTime>,
+    pub timestamptz_col: Option<jiff_sqlx::Timestamp>,
     pub interval_col: Option<sqlx::postgres::types::PgInterval>,
     pub timetz_col: Option<sqlx::postgres::types::PgTimeTz>,
     pub int4_range_col: Option<sqlx::postgres::types::PgRange<i32>>,
     pub int8_range_col: Option<sqlx::postgres::types::PgRange<i64>>,
     pub num_range_col: Option<sqlx::postgres::types::PgRange<rust_decimal::Decimal>>,
-    pub ts_range_col: Option<sqlx::postgres::types::PgRange<chrono::NaiveDateTime>>,
-    pub tstz_range_col: Option<sqlx::postgres::types::PgRange<chrono::DateTime<chrono::Utc>>>,
-    pub date_range_col: Option<sqlx::postgres::types::PgRange<chrono::NaiveDate>>,
+    pub ts_range_col: Option<sqlx::postgres::types::PgRange<time::PrimitiveDateTime>>,
+    pub tstz_range_col: Option<sqlx::postgres::types::PgRange<time::OffsetDateTime>>,
+    pub date_range_col: Option<sqlx::postgres::types::PgRange<time::Date>>,
     pub inet_col: Option<std::net::IpAddr>,
     pub cidr_col: Option<std::net::IpAddr>,
     pub macaddr_col: Option<mac_address::MacAddress>,
@@ -159,8 +159,8 @@ pub struct GetAllTypesTestItem {
     pub text_array_col: Option<Vec<String>>,
     pub float8_array_col: Option<Vec<f64>>,
     pub int4_range_array_col: Option<Vec<sqlx::postgres::types::PgRange<i32>>>,
-    pub date_range_array_col: Option<Vec<sqlx::postgres::types::PgRange<chrono::NaiveDate>>>,
-    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub date_range_array_col: Option<Vec<sqlx::postgres::types::PgRange<time::Date>>>,
+    pub created_at: Option<jiff_sqlx::Timestamp>,
 }
 
 /// Get a row with all PostgreSQL types by ID
@@ -203,18 +203,18 @@ pub async fn get_all_types_test(executor: impl sqlx::Executor<'_, Database = sql
         bytea_col: row.try_get::<Option<Vec<u8>>, _>("bytea_col")?,
         bit_col: row.try_get::<Option<bit_vec::BitVec>, _>("bit_col")?,
         varbit_col: row.try_get::<Option<bit_vec::BitVec>, _>("varbit_col")?,
-        date_col: row.try_get::<Option<chrono::NaiveDate>, _>("date_col")?,
-        time_col: row.try_get::<Option<chrono::NaiveTime>, _>("time_col")?,
-        timestamp_col: row.try_get::<Option<chrono::NaiveDateTime>, _>("timestamp_col")?,
-        timestamptz_col: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("timestamptz_col")?,
+        date_col: row.try_get::<Option<jiff_sqlx::Date>, _>("date_col")?,
+        time_col: row.try_get::<Option<jiff_sqlx::Time>, _>("time_col")?,
+        timestamp_col: row.try_get::<Option<jiff_sqlx::DateTime>, _>("timestamp_col")?,
+        timestamptz_col: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("timestamptz_col")?,
         interval_col: row.try_get::<Option<sqlx::postgres::types::PgInterval>, _>("interval_col")?,
         timetz_col: row.try_get::<Option<sqlx::postgres::types::PgTimeTz>, _>("timetz_col")?,
         int4_range_col: row.try_get::<Option<sqlx::postgres::types::PgRange<i32>>, _>("int4_range_col")?,
         int8_range_col: row.try_get::<Option<sqlx::postgres::types::PgRange<i64>>, _>("int8_range_col")?,
         num_range_col: row.try_get::<Option<sqlx::postgres::types::PgRange<rust_decimal::Decimal>>, _>("num_range_col")?,
-        ts_range_col: row.try_get::<Option<sqlx::postgres::types::PgRange<chrono::NaiveDateTime>>, _>("ts_range_col")?,
-        tstz_range_col: row.try_get::<Option<sqlx::postgres::types::PgRange<chrono::DateTime<chrono::Utc>>>, _>("tstz_range_col")?,
-        date_range_col: row.try_get::<Option<sqlx::postgres::types::PgRange<chrono::NaiveDate>>, _>("date_range_col")?,
+        ts_range_col: row.try_get::<Option<sqlx::postgres::types::PgRange<time::PrimitiveDateTime>>, _>("ts_range_col")?,
+        tstz_range_col: row.try_get::<Option<sqlx::postgres::types::PgRange<time::OffsetDateTime>>, _>("tstz_range_col")?,
+        date_range_col: row.try_get::<Option<sqlx::postgres::types::PgRange<time::Date>>, _>("date_range_col")?,
         inet_col: row.try_get::<Option<std::net::IpAddr>, _>("inet_col")?,
         cidr_col: row.try_get::<Option<std::net::IpAddr>, _>("cidr_col")?,
         macaddr_col: row.try_get::<Option<mac_address::MacAddress>, _>("macaddr_col")?,
@@ -227,8 +227,8 @@ pub async fn get_all_types_test(executor: impl sqlx::Executor<'_, Database = sql
         text_array_col: row.try_get::<Option<Vec<String>>, _>("text_array_col")?,
         float8_array_col: row.try_get::<Option<Vec<f64>>, _>("float8_array_col")?,
         int4_range_array_col: row.try_get::<Option<Vec<sqlx::postgres::types::PgRange<i32>>>, _>("int4_range_array_col")?,
-        date_range_array_col: row.try_get::<Option<Vec<sqlx::postgres::types::PgRange<chrono::NaiveDate>>>, _>("date_range_array_col")?,
-        created_at: row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("created_at")?,
+        date_range_array_col: row.try_get::<Option<Vec<sqlx::postgres::types::PgRange<time::Date>>>, _>("date_range_array_col")?,
+        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
     })
     })();
     result.map_err(Into::into)

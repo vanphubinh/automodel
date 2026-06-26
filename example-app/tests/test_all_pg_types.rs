@@ -19,7 +19,8 @@ async fn test_get_version() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_insert_and_get_all_types() {
-    use chrono::{NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Utc};
+    use jiff::civil;
+    use jiff_sqlx::ToSqlx;
     use rust_decimal::Decimal;
     use sqlx::postgres::types::{PgInterval, PgRange, PgTimeTz};
     use std::str::FromStr;
@@ -57,19 +58,21 @@ async fn test_insert_and_get_all_types() {
     varbit_col.set(12, true);
     varbit_col.set(14, true);
 
-    let date_col = NaiveDate::from_ymd_opt(2025, 11, 20).unwrap();
-    let time_col = NaiveTime::from_hms_opt(14, 30, 0).unwrap();
-    let timestamp_col =
-        NaiveDateTime::parse_from_str("2025-11-20 14:30:00", "%Y-%m-%d %H:%M:%S").unwrap();
-    let timestamptz_col = Utc.with_ymd_and_hms(2025, 11, 20, 14, 30, 0).unwrap();
+    let date_col = civil::date(2025, 11, 20).to_sqlx();
+    let time_col = civil::time(14, 30, 0, 0).to_sqlx();
+    let timestamp_col = civil::date(2025, 11, 20).at(14, 30, 0, 0).to_sqlx();
+    let timestamptz_col = "2025-11-20T14:30:00Z"
+        .parse::<jiff::Timestamp>()
+        .unwrap()
+        .to_sqlx();
     let interval_col = PgInterval {
         months: 0,
         days: 1,
         microseconds: (2 * 3600 + 30 * 60) * 1_000_000,
     };
     let timetz_col = PgTimeTz {
-        time: NaiveTime::from_hms_opt(14, 30, 0).unwrap(),
-        offset: chrono::FixedOffset::east_opt(0).unwrap(),
+        time: time::Time::from_hms(14, 30, 0).unwrap(),
+        offset: time::UtcOffset::UTC,
     };
 
     let int4_range_col =
@@ -83,26 +86,38 @@ async fn test_insert_and_get_all_types() {
         std::ops::Bound::Included(Decimal::from_str("99.9").unwrap()),
     ));
     let ts_range_col = PgRange::from((
-        std::ops::Bound::Included(
-            NaiveDate::from_ymd_opt(2025, 1, 1)
-                .unwrap()
-                .and_hms_opt(0, 0, 0)
-                .unwrap(),
-        ),
-        std::ops::Bound::Included(
-            NaiveDate::from_ymd_opt(2025, 12, 31)
-                .unwrap()
-                .and_hms_opt(23, 59, 59)
-                .unwrap(),
-        ),
+        std::ops::Bound::Included(time::PrimitiveDateTime::new(
+            time::Date::from_calendar_date(2025, time::Month::January, 1).unwrap(),
+            time::Time::MIDNIGHT,
+        )),
+        std::ops::Bound::Included(time::PrimitiveDateTime::new(
+            time::Date::from_calendar_date(2025, time::Month::December, 31).unwrap(),
+            time::Time::from_hms(23, 59, 59).unwrap(),
+        )),
     ));
     let tstz_range_col = PgRange::from((
-        std::ops::Bound::Included(Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap()),
-        std::ops::Bound::Included(Utc.with_ymd_and_hms(2025, 12, 31, 23, 59, 59).unwrap()),
+        std::ops::Bound::Included(
+            time::PrimitiveDateTime::new(
+                time::Date::from_calendar_date(2025, time::Month::January, 1).unwrap(),
+                time::Time::MIDNIGHT,
+            )
+            .assume_offset(time::UtcOffset::UTC),
+        ),
+        std::ops::Bound::Included(
+            time::PrimitiveDateTime::new(
+                time::Date::from_calendar_date(2025, time::Month::December, 31).unwrap(),
+                time::Time::from_hms(23, 59, 59).unwrap(),
+            )
+            .assume_offset(time::UtcOffset::UTC),
+        ),
     ));
     let date_range_col = PgRange::from((
-        std::ops::Bound::Included(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
-        std::ops::Bound::Included(NaiveDate::from_ymd_opt(2025, 12, 31).unwrap()),
+        std::ops::Bound::Included(
+            time::Date::from_calendar_date(2025, time::Month::January, 1).unwrap(),
+        ),
+        std::ops::Bound::Included(
+            time::Date::from_calendar_date(2025, time::Month::December, 31).unwrap(),
+        ),
     ));
 
     let inet_col: std::net::IpAddr = "192.168.1.1".parse().unwrap();
@@ -125,12 +140,20 @@ async fn test_insert_and_get_all_types() {
     ];
     let date_range_array_col = vec![
         PgRange::from((
-            std::ops::Bound::Included(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
-            std::ops::Bound::Included(NaiveDate::from_ymd_opt(2025, 1, 31).unwrap()),
+            std::ops::Bound::Included(
+                time::Date::from_calendar_date(2025, time::Month::January, 1).unwrap(),
+            ),
+            std::ops::Bound::Included(
+                time::Date::from_calendar_date(2025, time::Month::January, 31).unwrap(),
+            ),
         )),
         PgRange::from((
-            std::ops::Bound::Included(NaiveDate::from_ymd_opt(2025, 6, 1).unwrap()),
-            std::ops::Bound::Included(NaiveDate::from_ymd_opt(2025, 6, 30).unwrap()),
+            std::ops::Bound::Included(
+                time::Date::from_calendar_date(2025, time::Month::June, 1).unwrap(),
+            ),
+            std::ops::Bound::Included(
+                time::Date::from_calendar_date(2025, time::Month::June, 30).unwrap(),
+            ),
         )),
     ];
 

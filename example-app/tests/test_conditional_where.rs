@@ -1,6 +1,7 @@
 mod common;
 
 use example_app::generated;
+use jiff_sqlx::ToSqlx;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_find_users_by_name_and_age() {
@@ -35,7 +36,7 @@ async fn test_get_recent_users() {
     // Insert a user so there's at least one recent user
     common::insert_test_user(pool, "recent").await;
 
-    let since = chrono::Utc::now() - chrono::Duration::days(1);
+    let since = (jiff::Timestamp::now() - jiff::Span::new().hours(24)).to_sqlx();
     let users = generated::users::get_recent_users(pool, since)
         .await
         .unwrap();

@@ -239,7 +239,7 @@ RETURNING id, name, email, social_links;".to_string();
     }
     let _ = param_counter; // Suppress unused assignment warning
 
-    let mut query = sqlx::query(&final_sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
     query = query.bind(&user_id);
     if included_params.contains(&r"name") {
@@ -349,7 +349,7 @@ RETURNING id, name, email, social_links;".to_string();
     }
     let _ = param_counter; // Suppress unused assignment warning
 
-    let mut query = sqlx::query(&final_sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
     query = query.bind(&user_id);
     if included_params.contains(&r"name") {
@@ -736,7 +736,7 @@ RETURNING id, name, email, tags;".to_string();
     }
     let _ = param_counter; // Suppress unused assignment warning
 
-    let mut query = sqlx::query(&final_sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
     query = query.bind(&user_id);
     if included_params.contains(&r"name") {
@@ -845,7 +845,7 @@ RETURNING id, name, email, tags;".to_string();
     }
     let _ = param_counter; // Suppress unused assignment warning
 
-    let mut query = sqlx::query(&final_sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
     query = query.bind(&user_id);
     if included_params.contains(&r"name") {
@@ -1229,7 +1229,7 @@ RETURNING id, name, email, labels;".to_string();
     }
     let _ = param_counter; // Suppress unused assignment warning
 
-    let mut query = sqlx::query(&final_sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
     query = query.bind(&user_id);
     if included_params.contains(&r"name") {
@@ -1337,7 +1337,7 @@ RETURNING id, name, email, labels;".to_string();
     }
     let _ = param_counter; // Suppress unused assignment warning
 
-    let mut query = sqlx::query(&final_sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
     query = query.bind(&user_id);
     if included_params.contains(&r"name") {

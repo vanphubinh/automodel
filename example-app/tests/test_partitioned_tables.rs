@@ -58,10 +58,7 @@ async fn test_get_orders_by_tenant() {
 async fn test_get_orders_by_product() {
     let pool = common::get_pool().await;
 
-    let product = format!(
-        "Gadget_{}",
-        chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
-    );
+    let product = format!("Gadget_{}", jiff::Timestamp::now().as_nanosecond());
 
     generated::orders::insert_order(pool, 7, product.clone(), Decimal::from_str("5.50").unwrap())
         .await
