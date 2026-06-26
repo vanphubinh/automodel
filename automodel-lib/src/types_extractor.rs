@@ -163,6 +163,7 @@ pub async fn extract_query_types(
     client: &tokio_postgres::Client,
     sql: &str,
     field_type_mappings: Option<&HashMap<String, String>>,
+    datetime_crate: crate::datetime_crate::DateTimeCrate,
 ) -> Result<QueryTypeInfo> {
     // Strip non-null column cast syntax: {col!} and "col!" → clean col names.
     // The non_null_columns set is used later to override nullability on output columns.
@@ -185,9 +186,16 @@ pub async fn extract_query_types(
     })?;
 
     // Extract types
-    let input_types = extract_input_types(&statement, &param_names, field_type_mappings)?;
-    let output_types =
-        extract_output_types(&client, &statement, field_type_mappings, &non_null_columns).await?;
+    let input_types =
+        extract_input_types(&statement, &param_names, field_type_mappings, datetime_crate)?;
+    let output_types = extract_output_types(
+        &client,
+        &statement,
+        field_type_mappings,
+        &non_null_columns,
+        datetime_crate,
+    )
+    .await?;
 
     let has_conditionals = !parsed_sql.conditional_blocks.is_empty();
 
@@ -492,6 +500,7 @@ fn extract_input_types(
     statement: &Statement,
     param_names: &[String],
     field_type_mappings: Option<&HashMap<String, String>>,
+    datetime_crate: crate::datetime_crate::DateTimeCrate,
 ) -> Result<Vec<InputParam>> {
     let params = statement.params();
     let mut input_types = Vec::new();
@@ -529,7 +538,7 @@ fn extract_input_types(
 
         let base_type_name = qualify_type_for_query_module(
             &param_type
-                .rust_name()
+                .rust_name(datetime_crate)
                 .map_err(|e| anyhow::anyhow!("{}", e))?,
         );
 
@@ -691,6 +700,7 @@ async fn extract_output_types(
     statement: &Statement,
     field_type_mappings: Option<&HashMap<String, String>>,
     non_null_columns: &HashSet<String>,
+    datetime_crate: crate::datetime_crate::DateTimeCrate,
 ) -> Result<Vec<OutputColumn>> {
     let columns = statement.columns();
     let mut output_types = Vec::new();
@@ -711,7 +721,7 @@ async fn extract_output_types(
                 qualify_type_for_query_module(
                     &column
                         .type_()
-                        .rust_name()
+                        .rust_name(datetime_crate)
                         .map_err(|e| anyhow::anyhow!("{}", e))?,
                 )
             };
@@ -960,6 +970,7 @@ pub fn convert_named_params_to_positional(sql: &str) -> (String, Vec<String>) {
 /// Returns (dummy_params, special_params) where special_params contains info about enums and numeric types
 pub async fn create_dummy_params(
     param_types: &[tokio_postgres::types::Type],
+    datetime_crate: crate::datetime_crate::DateTimeCrate,
 ) -> Result<(
     Vec<Box<dyn tokio_postgres::types::ToSql + Sync>>,
     Vec<(usize, String, String)>,
@@ -1070,12 +1081,39 @@ pub async fn create_dummy_params(
             &Type::JSON | &Type::JSONB => Box::new(serde_json::Value::Null),
 
             // Date & Time Types
-            &Type::TIMESTAMPTZ => Box::new(chrono::DateTime::from_timestamp(0, 0).unwrap()),
-            &Type::TIMESTAMP => {
-                Box::new(chrono::DateTime::from_timestamp(0, 0).unwrap().naive_utc())
-            }
-            &Type::DATE => Box::new(chrono::NaiveDate::from_ymd_opt(2000, 1, 1).unwrap()),
-            &Type::TIME => Box::new(chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap()),
+            &Type::TIMESTAMPTZ => match datetime_crate {
+                crate::datetime_crate::DateTimeCrate::Jiff => Box::new(
+                    "1970-01-01T00:00:00Z"
+                        .parse::<jiff::Timestamp>()
+                        .unwrap(),
+                ),
+                crate::datetime_crate::DateTimeCrate::Time => {
+                    Box::new(time::OffsetDateTime::UNIX_EPOCH)
+                }
+            },
+            &Type::TIMESTAMP => match datetime_crate {
+                crate::datetime_crate::DateTimeCrate::Jiff => {
+                    Box::new(jiff::civil::date(2000, 1, 1).at(0, 0, 0, 0))
+                }
+                crate::datetime_crate::DateTimeCrate::Time => Box::new(
+                    time::PrimitiveDateTime::new(
+                        time::Date::from_calendar_date(2000, time::Month::January, 1).unwrap(),
+                        time::Time::MIDNIGHT,
+                    ),
+                ),
+            },
+            &Type::DATE => match datetime_crate {
+                crate::datetime_crate::DateTimeCrate::Jiff => {
+                    Box::new(jiff::civil::date(2000, 1, 1))
+                }
+                crate::datetime_crate::DateTimeCrate::Time => Box::new(
+                    time::Date::from_calendar_date(2000, time::Month::January, 1).unwrap(),
+                ),
+            },
+            &Type::TIME => match datetime_crate {
+                crate::datetime_crate::DateTimeCrate::Jiff => Box::new(jiff::civil::time(0, 0, 0, 0)),
+                crate::datetime_crate::DateTimeCrate::Time => Box::new(time::Time::MIDNIGHT),
+            },
 
             // UUID
             &Type::UUID => Box::new(uuid::Uuid::nil()),
@@ -1095,10 +1133,38 @@ pub async fn create_dummy_params(
             | &Type::XML_ARRAY => Box::new(Vec::<String>::new()),
             &Type::BYTEA_ARRAY => Box::new(Vec::<Vec<u8>>::new()),
             &Type::JSON_ARRAY | &Type::JSONB_ARRAY => Box::new(Vec::<serde_json::Value>::new()),
-            &Type::DATE_ARRAY => Box::new(Vec::<chrono::NaiveDate>::new()),
-            &Type::TIME_ARRAY => Box::new(Vec::<chrono::NaiveTime>::new()),
-            &Type::TIMESTAMP_ARRAY => Box::new(Vec::<chrono::NaiveDateTime>::new()),
-            &Type::TIMESTAMPTZ_ARRAY => Box::new(Vec::<chrono::DateTime<chrono::Utc>>::new()),
+            &Type::DATE_ARRAY => match datetime_crate {
+                crate::datetime_crate::DateTimeCrate::Jiff => {
+                    Box::new(Vec::<jiff::civil::Date>::new())
+                }
+                crate::datetime_crate::DateTimeCrate::Time => {
+                    Box::new(Vec::<time::Date>::new())
+                }
+            },
+            &Type::TIME_ARRAY => match datetime_crate {
+                crate::datetime_crate::DateTimeCrate::Jiff => {
+                    Box::new(Vec::<jiff::civil::Time>::new())
+                }
+                crate::datetime_crate::DateTimeCrate::Time => {
+                    Box::new(Vec::<time::Time>::new())
+                }
+            },
+            &Type::TIMESTAMP_ARRAY => match datetime_crate {
+                crate::datetime_crate::DateTimeCrate::Jiff => {
+                    Box::new(Vec::<jiff::civil::DateTime>::new())
+                }
+                crate::datetime_crate::DateTimeCrate::Time => {
+                    Box::new(Vec::<time::PrimitiveDateTime>::new())
+                }
+            },
+            &Type::TIMESTAMPTZ_ARRAY => match datetime_crate {
+                crate::datetime_crate::DateTimeCrate::Jiff => {
+                    Box::new(Vec::<jiff::Timestamp>::new())
+                }
+                crate::datetime_crate::DateTimeCrate::Time => {
+                    Box::new(Vec::<time::OffsetDateTime>::new())
+                }
+            },
             &Type::UUID_ARRAY => Box::new(Vec::<uuid::Uuid>::new()),
 
             // Fallback for unknown types - use string

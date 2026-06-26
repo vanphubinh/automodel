@@ -1,4 +1,5 @@
 mod codegen;
+mod datetime_crate;
 mod query_definition;
 mod query_definition_rt;
 mod rust_type;
@@ -14,6 +15,7 @@ use types_extractor::*;
 use anyhow::Result;
 use std::path::Path;
 
+pub use datetime_crate::DateTimeCrate;
 pub use query_definition::TelemetryLevel;
 
 use crate::codegen::generate_root_module;
@@ -57,6 +59,11 @@ pub struct DefaultsConfig {
     /// Defaults to Itertools
     #[serde(default)]
     pub multiunzip_crate: MultiunzipCrate,
+    /// Crate to use for PostgreSQL date/time type mappings in generated code.
+    /// - Jiff: uses jiff types via jiff_sqlx for SQLx integration (default)
+    /// - Time: uses the time crate
+    #[serde(default)]
+    pub datetime_crate: DateTimeCrate,
 }
 
 /// Default configuration for telemetry and analysis
@@ -135,6 +142,9 @@ pub struct AutoModelConfig {
     /// Crate to use for multiunzip operations in batch inserts
     #[serde(default)]
     pub multiunzip_crate: MultiunzipCrate,
+    /// Crate to use for PostgreSQL date/time type mappings in generated code
+    #[serde(default)]
+    pub datetime_crate: DateTimeCrate,
 }
 
 fn default_queries_dir() -> String {
@@ -161,6 +171,7 @@ impl AutoModelConfig {
             ensure_indexes: self.ensure_indexes,
             derives: self.derives.clone(),
             multiunzip_crate: self.multiunzip_crate.clone(),
+            datetime_crate: self.datetime_crate,
         }
     }
 }
@@ -395,7 +406,9 @@ impl AutoModel {
         let analyzed_queries = self.analyze_all_queries(&client).await?;
 
         // Build TypeSystem from captured statements (no re-preparation needed)
-        let type_system = Self::build_type_system(&client, &analyzed_queries).await?;
+        let type_system =
+            Self::build_type_system(&client, &analyzed_queries, self.defaults.datetime_crate)
+                .await?;
         type_system.codegen(&output_path.join("types")).await?;
 
         // Collect all warnings
@@ -441,8 +454,9 @@ impl AutoModel {
     async fn build_type_system(
         client: &tokio_postgres::Client,
         analyzed_queries: &[QueryDefinitionRuntime],
+        datetime_crate: DateTimeCrate,
     ) -> Result<rust_type::TypeSystem> {
-        let mut type_system = rust_type::TypeSystem::new();
+        let mut type_system = rust_type::TypeSystem::new(datetime_crate);
 
         for query in analyzed_queries {
             let statement = &query.type_info.statement;
@@ -571,19 +585,27 @@ impl AutoModel {
     ) -> Result<Vec<QueryDefinitionRuntime>> {
         use futures::stream::{self, StreamExt};
 
+        let datetime_crate = self.defaults.datetime_crate;
+
         // Process queries in parallel batches of 40
         let analyzed_queries: Vec<QueryDefinitionRuntime> = stream::iter(&self.queries)
             .map(|query| async move {
                 println!("cargo:info=Analyzing query '{}'", query.name);
 
                 // Extract type information (captures Statement for later TypeSystem building)
-                let type_info =
-                    extract_query_types(client, &query.sql, query.types.as_ref()).await?;
+                let type_info = extract_query_types(
+                    client,
+                    &query.sql,
+                    query.types.as_ref(),
+                    datetime_crate,
+                )
+                .await?;
 
                 // Analyze query with EXPLAIN to detect mutation and optionally get performance data
                 // EXPLAIN fails on mutations (INSERT/UPDATE/DELETE), so we use that to detect them
                 // This also pre-computes EXPLAIN params during the analysis phase
-                let analysis_result = Self::analyze_query_with_explain(client, query).await?;
+                let analysis_result =
+                    Self::analyze_query_with_explain(client, query, datetime_crate).await?;
 
                 let analyzed_query = QueryDefinitionRuntime::new(
                     query.clone(),
@@ -612,6 +634,7 @@ impl AutoModel {
     async fn analyze_query_with_explain(
         client: &tokio_postgres::Client,
         query: &QueryDefinition,
+        datetime_crate: DateTimeCrate,
     ) -> Result<QueryAnalysisResult> {
         // Quick keyword-based detection first
         let sql_upper = query.sql.to_uppercase();
@@ -666,8 +689,12 @@ impl AutoModel {
                 match client.prepare(converted_sql).await {
                     Ok(statement) => {
                         let param_types = statement.params();
-                        match Self::prepare_explain_params_for_variant(converted_sql, param_types)
-                            .await
+                        match Self::prepare_explain_params_for_variant(
+                            converted_sql,
+                            param_types,
+                            datetime_crate,
+                        )
+                        .await
                         {
                             Ok(params) => explain_params.push(Some(params)),
                             Err(_) => explain_params.push(None),
@@ -681,10 +708,10 @@ impl AutoModel {
         // Looks like a SELECT or read-only query - verify with EXPLAIN
         let explain_result = if query.ensure_indexes {
             // Run full performance analysis (which includes EXPLAIN)
-            Self::analyze_query_performance(client, query, &explain_params).await
+            Self::analyze_query_performance(client, query, &explain_params, datetime_crate).await
         } else {
             // Just run a simple EXPLAIN to verify it's read-only
-            Self::detect_mutation_via_explain(client, query, &explain_params).await
+            Self::detect_mutation_via_explain(client, query, &explain_params, datetime_crate).await
         };
 
         match explain_result {
@@ -721,6 +748,7 @@ impl AutoModel {
         client: &tokio_postgres::Client,
         query: &QueryDefinition,
         explain_params: &[Option<ExplainParams>],
+        datetime_crate: DateTimeCrate,
     ) -> Result<PerformanceAnalysis> {
         // Use first variant (base query) for detection
         let (_converted_sql, param_names, _label) = &query.sql_variants[0];
@@ -734,8 +762,11 @@ impl AutoModel {
                     match client.prepare(converted_sql).await {
                         Ok(statement) => {
                             let param_types = statement.params();
-                            let (dummy_params, _) =
-                                crate::types_extractor::create_dummy_params(param_types).await?;
+                            let (dummy_params, _) = crate::types_extractor::create_dummy_params(
+                                param_types,
+                                datetime_crate,
+                            )
+                            .await?;
                             let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
                                 dummy_params.iter().map(|p| p.as_ref()).collect();
                             client.query(params.explain_sql.as_str(), &param_refs).await
@@ -749,8 +780,11 @@ impl AutoModel {
                     match client.prepare(converted_sql).await {
                         Ok(statement) => {
                             let param_types = statement.params();
-                            let (all_dummy_params, _) =
-                                crate::types_extractor::create_dummy_params(param_types).await?;
+                            let (all_dummy_params, _) = crate::types_extractor::create_dummy_params(
+                                param_types,
+                                datetime_crate,
+                            )
+                            .await?;
 
                             // Filter to only non-special params
                             let mut non_special_dummy_params = Vec::new();
@@ -836,9 +870,10 @@ impl AutoModel {
     async fn prepare_explain_params_for_variant(
         converted_sql: &str,
         param_types: &[tokio_postgres::types::Type],
+        datetime_crate: DateTimeCrate,
     ) -> Result<ExplainParams> {
         let (_dummy_params, special_params) =
-            crate::types_extractor::create_dummy_params(param_types).await?;
+            crate::types_extractor::create_dummy_params(param_types, datetime_crate).await?;
 
         // Build the EXPLAIN query with special param replacements
         let explain_sql = if special_params.is_empty() {
@@ -902,6 +937,7 @@ impl AutoModel {
         client: &tokio_postgres::Client,
         query: &QueryDefinition,
         explain_params: &[Option<ExplainParams>],
+        datetime_crate: DateTimeCrate,
     ) -> Result<PerformanceAnalysis> {
         let mut has_sequential_scan = false;
         let mut sequential_scan_tables = Vec::new();
@@ -921,6 +957,7 @@ impl AutoModel {
                     param_names,
                     &variant_name,
                     explain_params.get(i).and_then(|p| p.as_ref()),
+                    datetime_crate,
                 )
                 .await?;
 
@@ -963,6 +1000,7 @@ impl AutoModel {
         param_names: &[String],
         query_name: &str,
         explain_params: Option<&ExplainParams>,
+        datetime_crate: DateTimeCrate,
     ) -> Result<(bool, Vec<String>, Vec<String>, String)> {
         let mut has_sequential_scan = false;
         let mut sequential_scan_tables = Vec::new();
@@ -977,8 +1015,11 @@ impl AutoModel {
                     match client.prepare(sql).await {
                         Ok(statement) => {
                             let param_types = statement.params();
-                            let (dummy_params, _) =
-                                crate::types_extractor::create_dummy_params(param_types).await?;
+                            let (dummy_params, _) = crate::types_extractor::create_dummy_params(
+                                param_types,
+                                datetime_crate,
+                            )
+                            .await?;
                             let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
                                 dummy_params.iter().map(|p| p.as_ref()).collect();
                             client.query(params.explain_sql.as_str(), &param_refs).await
@@ -995,8 +1036,11 @@ impl AutoModel {
                     match client.prepare(sql).await {
                         Ok(statement) => {
                             let param_types = statement.params();
-                            let (all_dummy_params, _) =
-                                crate::types_extractor::create_dummy_params(param_types).await?;
+                            let (all_dummy_params, _) = crate::types_extractor::create_dummy_params(
+                                param_types,
+                                datetime_crate,
+                            )
+                            .await?;
 
                             // Filter to only non-special params
                             let mut non_special_dummy_params = Vec::new();
@@ -1024,7 +1068,11 @@ impl AutoModel {
                     Ok(statement) => {
                         let param_types = statement.params();
                         let (dummy_params, special_params) =
-                            crate::types_extractor::create_dummy_params(param_types).await?;
+                            crate::types_extractor::create_dummy_params(
+                                param_types,
+                                datetime_crate,
+                            )
+                            .await?;
 
                         if special_params.is_empty() {
                             // No special params, use dummy params directly

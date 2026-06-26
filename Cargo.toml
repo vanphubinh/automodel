@@ -6,14 +6,16 @@ resolver = "2"
 [workspace.dependencies]
 tokio = { version = "1.0", features = ["full"] }
 tokio-postgres = { version = "0.7.18", features = [
-    "with-chrono-0_4",
+    "with-jiff-0_2",
+    "with-time-0_3",
     "with-serde_json-1",
     "with-uuid-1",
 ] }
-sqlx = { version = "0.8", features = [
-    "runtime-tokio-rustls",
+sqlx = { version = "0.9", features = [
+    "runtime-tokio",
+    "tls-native-tls",
     "postgres",
-    "chrono",
+    "time",
     "uuid",
     "json",
     "rust_decimal",
@@ -24,14 +26,17 @@ sqlx = { version = "0.8", features = [
 ] }
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.9"
-sea-query = "0.30"
-sea-query-postgres = "0.4"
+sea-query = "1.0.1"
+sea-query-postgres = "0.6"
 anyhow = "1.0"
 async-trait = "0.1"
-chrono = { version = "0.4", features = ["serde"] }
+jiff = { version = "0.2", features = ["serde"] }
+jiff-sqlx = { version = "0.2", features = ["postgres"] }
+time = { version = "0.3", features = ["serde"] }
 uuid = { version = "1.0", features = ["serde"] }
 serde_json = "1.0"
 rust_decimal = "1.0"
+bit-vec = { version = "0.8", features = ["serde"] }
 clap = { version = "4.0", features = ["derive"] }
 regex = "1.0"
 indexmap = "2.0"

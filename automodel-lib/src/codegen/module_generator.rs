@@ -1130,7 +1130,7 @@ fn generate_conditional_function_body(
 
     // Ensure param_counter is marked as used to avoid unused assignment warnings
     body.push_str("    let _ = param_counter; // Suppress unused assignment warning\n");
-    body.push_str("\n    let mut query = sqlx::query(&final_sql);\n\n");
+    body.push_str("\n    let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));\n\n");
 
     // Bind parameters in the order they will appear in the final SQL
     // First, bind base (non-conditional) parameters
