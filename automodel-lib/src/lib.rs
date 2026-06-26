@@ -1,5 +1,6 @@
 mod codegen;
 mod datetime_crate;
+mod domain_enum;
 mod query_definition;
 mod query_definition_rt;
 mod rust_type;
@@ -402,13 +403,26 @@ impl AutoModel {
         // Enforce queries with full path, including schemas
         client.execute("SET search_path TO ''", &[]).await?;
 
+        let domain_enums = domain_enum::fetch_domain_enum_constraints(&client)
+            .await
+            .unwrap_or_else(|e| {
+                eprintln!("Warning: failed to fetch domain enum constraints: {}", e);
+                std::collections::HashMap::new()
+            });
+
         // PHASE 1: Analyze all queries and collect information
-        let analyzed_queries = self.analyze_all_queries(&client).await?;
+        let analyzed_queries = self
+            .analyze_all_queries(&client, &domain_enums)
+            .await?;
 
         // Build TypeSystem from captured statements (no re-preparation needed)
-        let type_system =
-            Self::build_type_system(&client, &analyzed_queries, self.defaults.datetime_crate)
-                .await?;
+        let type_system = Self::build_type_system(
+            &client,
+            &analyzed_queries,
+            self.defaults.datetime_crate,
+            &domain_enums,
+        )
+        .await?;
         type_system.codegen(&output_path.join("types")).await?;
 
         // Collect all warnings
@@ -455,6 +469,7 @@ impl AutoModel {
         client: &tokio_postgres::Client,
         analyzed_queries: &[QueryDefinitionRuntime],
         datetime_crate: DateTimeCrate,
+        domain_enums: &std::collections::HashMap<String, crate::domain_enum::DomainEnumConstraint>,
     ) -> Result<rust_type::TypeSystem> {
         let mut type_system = rust_type::TypeSystem::new(datetime_crate);
 
@@ -472,6 +487,8 @@ impl AutoModel {
             .resolve_nullability(client)
             .await
             .unwrap_or_else(|e| eprintln!("Warning: failed to resolve field nullability: {}", e));
+
+        type_system.apply_domain_enums(domain_enums);
 
         // Apply custom type mappings from query-level `types:` configs.
         //
@@ -582,6 +599,7 @@ impl AutoModel {
     async fn analyze_all_queries(
         &self,
         client: &tokio_postgres::Client,
+        domain_enums: &std::collections::HashMap<String, crate::domain_enum::DomainEnumConstraint>,
     ) -> Result<Vec<QueryDefinitionRuntime>> {
         use futures::stream::{self, StreamExt};
 
@@ -604,8 +622,13 @@ impl AutoModel {
                 // Analyze query with EXPLAIN to detect mutation and optionally get performance data
                 // EXPLAIN fails on mutations (INSERT/UPDATE/DELETE), so we use that to detect them
                 // This also pre-computes EXPLAIN params during the analysis phase
-                let analysis_result =
-                    Self::analyze_query_with_explain(client, query, datetime_crate).await?;
+                let analysis_result = Self::analyze_query_with_explain(
+                    client,
+                    query,
+                    datetime_crate,
+                    domain_enums,
+                )
+                .await?;
 
                 let analyzed_query = QueryDefinitionRuntime::new(
                     query.clone(),
@@ -635,6 +658,7 @@ impl AutoModel {
         client: &tokio_postgres::Client,
         query: &QueryDefinition,
         datetime_crate: DateTimeCrate,
+        domain_enums: &std::collections::HashMap<String, crate::domain_enum::DomainEnumConstraint>,
     ) -> Result<QueryAnalysisResult> {
         // Quick keyword-based detection first
         let sql_upper = query.sql.to_uppercase();
@@ -690,9 +714,12 @@ impl AutoModel {
                     Ok(statement) => {
                         let param_types = statement.params();
                         match Self::prepare_explain_params_for_variant(
+                            client,
                             converted_sql,
                             param_types,
+                            param_names,
                             datetime_crate,
+                            domain_enums,
                         )
                         .await
                         {
@@ -708,10 +735,24 @@ impl AutoModel {
         // Looks like a SELECT or read-only query - verify with EXPLAIN
         let explain_result = if query.ensure_indexes {
             // Run full performance analysis (which includes EXPLAIN)
-            Self::analyze_query_performance(client, query, &explain_params, datetime_crate).await
+            Self::analyze_query_performance(
+                client,
+                query,
+                &explain_params,
+                datetime_crate,
+                domain_enums,
+            )
+            .await
         } else {
             // Just run a simple EXPLAIN to verify it's read-only
-            Self::detect_mutation_via_explain(client, query, &explain_params, datetime_crate).await
+            Self::detect_mutation_via_explain(
+                client,
+                query,
+                &explain_params,
+                datetime_crate,
+                domain_enums,
+            )
+            .await
         };
 
         match explain_result {
@@ -749,6 +790,7 @@ impl AutoModel {
         query: &QueryDefinition,
         explain_params: &[Option<ExplainParams>],
         datetime_crate: DateTimeCrate,
+        domain_enums: &std::collections::HashMap<String, crate::domain_enum::DomainEnumConstraint>,
     ) -> Result<PerformanceAnalysis> {
         // Use first variant (base query) for detection
         let (_converted_sql, param_names, _label) = &query.sql_variants[0];
@@ -765,6 +807,12 @@ impl AutoModel {
                             let (dummy_params, _) = crate::types_extractor::create_dummy_params(
                                 param_types,
                                 datetime_crate,
+                                domain_enums,
+                                Some(&crate::types_extractor::DummyParamContext {
+                                    param_names,
+                                    sql: converted_sql,
+                                    client,
+                                }),
                             )
                             .await?;
                             let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
@@ -783,6 +831,12 @@ impl AutoModel {
                             let (all_dummy_params, _) = crate::types_extractor::create_dummy_params(
                                 param_types,
                                 datetime_crate,
+                                domain_enums,
+                                Some(&crate::types_extractor::DummyParamContext {
+                                    param_names,
+                                    sql: converted_sql,
+                                    client,
+                                }),
                             )
                             .await?;
 
@@ -868,12 +922,24 @@ impl AutoModel {
     /// Prepare EXPLAIN parameters for a single query variant (done once during Phase 1)
     /// Returns ExplainParams to be stored and reused
     async fn prepare_explain_params_for_variant(
+        client: &tokio_postgres::Client,
         converted_sql: &str,
         param_types: &[tokio_postgres::types::Type],
+        param_names: &[String],
         datetime_crate: DateTimeCrate,
+        domain_enums: &std::collections::HashMap<String, crate::domain_enum::DomainEnumConstraint>,
     ) -> Result<ExplainParams> {
-        let (_dummy_params, special_params) =
-            crate::types_extractor::create_dummy_params(param_types, datetime_crate).await?;
+        let (_dummy_params, special_params) = crate::types_extractor::create_dummy_params(
+            param_types,
+            datetime_crate,
+            domain_enums,
+            Some(&crate::types_extractor::DummyParamContext {
+                param_names,
+                sql: converted_sql,
+                client,
+            }),
+        )
+        .await?;
 
         // Build the EXPLAIN query with special param replacements
         let explain_sql = if special_params.is_empty() {
@@ -938,6 +1004,7 @@ impl AutoModel {
         query: &QueryDefinition,
         explain_params: &[Option<ExplainParams>],
         datetime_crate: DateTimeCrate,
+        domain_enums: &std::collections::HashMap<String, crate::domain_enum::DomainEnumConstraint>,
     ) -> Result<PerformanceAnalysis> {
         let mut has_sequential_scan = false;
         let mut sequential_scan_tables = Vec::new();
@@ -958,6 +1025,7 @@ impl AutoModel {
                     &variant_name,
                     explain_params.get(i).and_then(|p| p.as_ref()),
                     datetime_crate,
+                    domain_enums,
                 )
                 .await?;
 
@@ -1001,6 +1069,7 @@ impl AutoModel {
         query_name: &str,
         explain_params: Option<&ExplainParams>,
         datetime_crate: DateTimeCrate,
+        domain_enums: &std::collections::HashMap<String, crate::domain_enum::DomainEnumConstraint>,
     ) -> Result<(bool, Vec<String>, Vec<String>, String)> {
         let mut has_sequential_scan = false;
         let mut sequential_scan_tables = Vec::new();
@@ -1018,6 +1087,12 @@ impl AutoModel {
                             let (dummy_params, _) = crate::types_extractor::create_dummy_params(
                                 param_types,
                                 datetime_crate,
+                                domain_enums,
+                                Some(&crate::types_extractor::DummyParamContext {
+                                    param_names,
+                                    sql,
+                                    client,
+                                }),
                             )
                             .await?;
                             let param_refs: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> =
@@ -1039,6 +1114,12 @@ impl AutoModel {
                             let (all_dummy_params, _) = crate::types_extractor::create_dummy_params(
                                 param_types,
                                 datetime_crate,
+                                domain_enums,
+                                Some(&crate::types_extractor::DummyParamContext {
+                                    param_names,
+                                    sql,
+                                    client,
+                                }),
                             )
                             .await?;
 
@@ -1071,6 +1152,12 @@ impl AutoModel {
                             crate::types_extractor::create_dummy_params(
                                 param_types,
                                 datetime_crate,
+                                domain_enums,
+                                Some(&crate::types_extractor::DummyParamContext {
+                                    param_names,
+                                    sql,
+                                    client,
+                                }),
                             )
                             .await?;
 

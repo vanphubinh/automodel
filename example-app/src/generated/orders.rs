@@ -122,16 +122,17 @@ pub struct GetOrdersByProductItem {
 ///   Sort Key: orders.created_at DESC
 ///   ->  Append
 ///         ->  Seq Scan on orders_p0 orders_1
+///               Disabled: true
 ///               Filter: (product_name = 'dummy'::text)
 ///         ->  Seq Scan on orders_p1 orders_2
+///               Disabled: true
 ///               Filter: (product_name = 'dummy'::text)
 ///         ->  Seq Scan on orders_p2 orders_3
+///               Disabled: true
 ///               Filter: (product_name = 'dummy'::text)
 ///         ->  Seq Scan on orders_p3 orders_4
+///               Disabled: true
 ///               Filter: (product_name = 'dummy'::text)
-/// JIT:
-///   Functions: 8
-///   Options: Inlining true, Optimization true, Expressions true, Deforming true
 #[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, tenant_id, product_name, amount, created_at\nFROM public.orders\nWHERE product_name = #{product_name}\nORDER BY created_at DESC"))]
 pub async fn get_orders_by_product(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, product_name: String) -> Result<Vec<GetOrdersByProductItem>, super::ErrorReadOnly> {
     let query = sqlx::query(

@@ -186,8 +186,15 @@ pub async fn extract_query_types(
     })?;
 
     // Extract types
-    let input_types =
-        extract_input_types(&statement, &param_names, field_type_mappings, datetime_crate)?;
+    let input_types = extract_input_types(
+        client,
+        &statement,
+        &param_names,
+        &converted_sql,
+        field_type_mappings,
+        datetime_crate,
+    )
+    .await?;
     let output_types = extract_output_types(
         &client,
         &statement,
@@ -495,10 +502,80 @@ fn wrap_vec_elements_nullable(type_name: &str) -> String {
     }
 }
 
+/// PostgreSQL infers `text` for parameters compared to domain columns (e.g. `WHERE priority = $1`).
+/// Look up a matching domain column by parameter name.
+async fn resolve_domain_type_for_param(
+    client: &tokio_postgres::Client,
+    param_name: &str,
+    sql: &str,
+) -> Result<Option<(String, String)>> {
+    let rows = client
+        .query(
+            "SELECT tn.nspname AS table_schema, c.relname AS table_name, \
+                    n.nspname AS domain_schema, t.typname AS domain_name \
+             FROM pg_attribute a \
+             JOIN pg_class c ON a.attrelid = c.oid \
+             JOIN pg_namespace tn ON c.relnamespace = tn.oid \
+             JOIN pg_type t ON a.atttypid = t.oid \
+             JOIN pg_namespace n ON t.typnamespace = n.oid \
+             WHERE a.attname = $1 AND t.typtype = 'd' AND a.attnum > 0 AND NOT a.attisdropped",
+            &[&param_name],
+        )
+        .await?;
+
+    if rows.is_empty() {
+        return Ok(None);
+    }
+
+    let domain_info = |row: &tokio_postgres::Row| -> (String, String) {
+        let domain_schema: String = row.get(2);
+        let domain_name: String = row.get(3);
+        let rust_type = qualify_type_for_query_module(&format!(
+            "super::{}::{}",
+            crate::utils::schema_to_module_name(&domain_schema),
+            crate::utils::to_pascal_case(&domain_name),
+        ));
+        let pg_qualified = format!("{}.{}", domain_schema, domain_name);
+        (rust_type, pg_qualified)
+    };
+
+    if rows.len() == 1 {
+        return Ok(Some(domain_info(&rows[0])));
+    }
+
+    let sql_lower = sql.to_ascii_lowercase();
+    let matching: Vec<_> = rows
+        .iter()
+        .filter(|row| {
+            let table_schema: String = row.get(0);
+            let table_name: String = row.get(1);
+            sql_lower.contains(&format!("{}.{}", table_schema, table_name))
+                || sql_lower.contains(&format!(" {}.{}", table_schema, table_name))
+                || sql_lower.contains(&format!("from {}", table_name))
+                || sql_lower.contains(&format!("join {}", table_name))
+                || sql_lower.contains(&format!("into {}", table_name))
+                || sql_lower.contains(&format!("update {}", table_name))
+        })
+        .collect();
+
+    if matching.len() == 1 {
+        return Ok(Some(domain_info(matching[0])));
+    }
+
+    Ok(None)
+}
+
+fn is_text_like_param_type(param_type: &PgType) -> bool {
+    matches!(param_type.kind(), PgKind::Simple)
+        && matches!(param_type.name(), "text" | "varchar" | "bpchar" | "name")
+}
+
 /// Extract input parameter types from a prepared statement
-fn extract_input_types(
+async fn extract_input_types(
+    client: &tokio_postgres::Client,
     statement: &Statement,
     param_names: &[String],
+    sql: &str,
     field_type_mappings: Option<&HashMap<String, String>>,
     datetime_crate: crate::datetime_crate::DateTimeCrate,
 ) -> Result<Vec<InputParam>> {
@@ -536,11 +613,21 @@ fn extract_input_types(
             base_for_suffix
         };
 
-        let base_type_name = qualify_type_for_query_module(
-            &param_type
-                .rust_name(datetime_crate)
-                .map_err(|e| anyhow::anyhow!("{}", e))?,
-        );
+        let rust_name = param_type
+            .rust_name(datetime_crate)
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        let base_type_name = if is_text_like_param_type(param_type) && !clean_param_name.is_empty() {
+            if let Some((domain_type, _)) =
+                resolve_domain_type_for_param(client, clean_param_name, sql).await?
+            {
+                domain_type
+            } else {
+                qualify_type_for_query_module(&rust_name)
+            }
+        } else {
+            qualify_type_for_query_module(&rust_name)
+        };
 
         // For [?] suffix: wrap array element type in Option (Vec<T> -> Vec<Option<T>>)
         let type_ref = if has_element_nullable {
@@ -966,11 +1053,20 @@ pub fn convert_named_params_to_positional(sql: &str) -> (String, Vec<String>) {
     }
 }
 
+/// Context for resolving text-typed parameters that correspond to domain columns.
+pub struct DummyParamContext<'a> {
+    pub param_names: &'a [String],
+    pub sql: &'a str,
+    pub client: &'a tokio_postgres::Client,
+}
+
 /// Create dummy parameter values for EXPLAIN queries
 /// Returns (dummy_params, special_params) where special_params contains info about enums and numeric types
 pub async fn create_dummy_params(
     param_types: &[tokio_postgres::types::Type],
     datetime_crate: crate::datetime_crate::DateTimeCrate,
+    domain_enums: &std::collections::HashMap<String, crate::domain_enum::DomainEnumConstraint>,
+    context: Option<&DummyParamContext<'_>>,
 ) -> Result<(
     Vec<Box<dyn tokio_postgres::types::ToSql + Sync>>,
     Vec<(usize, String, String)>,
@@ -980,7 +1076,7 @@ pub async fn create_dummy_params(
     let mut dummy_params: Vec<Box<dyn tokio_postgres::types::ToSql + Sync>> = Vec::new();
     let mut special_params: Vec<(usize, String, String)> = Vec::new(); // (param_index, type_name, value)
 
-    for param_type in param_types {
+    for (i, param_type) in param_types.iter().enumerate() {
         // Check if this is an array of composite type (e.g., widgets[])
         if let PgKind::Array(element_type) = param_type.kind() {
             if let PgKind::Composite(_) = element_type.kind() {
@@ -1011,6 +1107,49 @@ pub async fn create_dummy_params(
             special_params.push((dummy_params.len(), type_name, variants[0].clone()));
             dummy_params.push(Box::new("ENUM_PLACEHOLDER".to_string()));
             continue;
+        }
+
+        // Check if this is a domain type with CHECK (VALUE IN (...)) constraint
+        if let PgKind::Domain(_) = param_type.kind() {
+            let type_name = format!("{}.{}", param_type.schema(), param_type.name());
+            if let Some(constraint) = domain_enums.get(&type_name) {
+                special_params.push((
+                    dummy_params.len(),
+                    type_name,
+                    constraint.variants[0].clone(),
+                ));
+                dummy_params.push(Box::new("ENUM_PLACEHOLDER".to_string()));
+                continue;
+            }
+        }
+
+        // Text-typed params compared to domain columns (e.g. WHERE priority = $1)
+        if is_text_like_param_type(param_type) {
+            if let Some(ctx) = context {
+                if let Some(param_name) = ctx.param_names.get(i) {
+                    let clean_name = param_name.trim_end_matches('?').trim_end_matches('?');
+                    let clean_name = if clean_name.ends_with("[?]") {
+                        &clean_name[..clean_name.len() - 3]
+                    } else {
+                        clean_name
+                    };
+                    if !clean_name.is_empty() {
+                        if let Some((_, pg_qualified)) =
+                            resolve_domain_type_for_param(ctx.client, clean_name, ctx.sql).await?
+                        {
+                            if let Some(constraint) = domain_enums.get(&pg_qualified) {
+                                special_params.push((
+                                    dummy_params.len(),
+                                    pg_qualified,
+                                    constraint.variants[0].clone(),
+                                ));
+                                dummy_params.push(Box::new("ENUM_PLACEHOLDER".to_string()));
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Handle numeric type specially - PostgreSQL is strict about numeric conversion

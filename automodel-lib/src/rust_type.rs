@@ -260,6 +260,41 @@ impl TypeSystem {
         Ok(())
     }
 
+    /// Convert domain types with `CHECK (VALUE IN (...))` constraints into Rust enums.
+    pub fn apply_domain_enums(
+        &mut self,
+        domain_enums: &std::collections::HashMap<String, crate::domain_enum::DomainEnumConstraint>,
+    ) {
+        for (qualified_name, constraint) in domain_enums {
+            let Some(type_info) = self
+                .types
+                .values_mut()
+                .find(|ti| format!("{}.{}", ti.pg_schema, ti.pg_name) == *qualified_name)
+            else {
+                continue;
+            };
+
+            if !matches!(type_info.kind, TypeKind::Alias(_)) {
+                continue;
+            }
+
+            let enum_variants = constraint
+                .variants
+                .iter()
+                .map(|variant| EnumVariant {
+                    pg_name: variant.clone(),
+                    rust_name: to_pascal_case(variant),
+                })
+                .collect();
+
+            type_info.kind = TypeKind::Enum(EnumInfo {
+                variants: enum_variants,
+                // Domains are transmitted as their base type on the PostgreSQL wire protocol.
+                sqlx_type_name: Some(constraint.base_type.clone()),
+            });
+        }
+    }
+
     /// Apply a custom type alias override to a domain type.
     ///
     /// Changes the generated `pub type Alias = BaseType;` to use `mapped_type` instead.
@@ -384,7 +419,10 @@ impl TypeInfo {
                     for variant in variants {
                         enum_variants.push(EnumVariant::try_from(variant)?);
                     }
-                    TypeKind::Enum(enum_variants)
+                    TypeKind::Enum(EnumInfo {
+                        variants: enum_variants,
+                        sqlx_type_name: None,
+                    })
                 }
                 tokio_postgres::types::Kind::Array(elem_type) => {
                     TypeKind::Array(elem_type.rust_name(datetime_crate)?)
@@ -423,8 +461,15 @@ pub enum TypeKind {
     Array(TypeRef),
     Range(TypeRef),
     Alias(AliasInfo),
-    Enum(Vec<EnumVariant>),
+    Enum(EnumInfo),
     Struct(Vec<StructField>),
+}
+
+#[derive(Debug, Clone)]
+pub struct EnumInfo {
+    pub variants: Vec<EnumVariant>,
+    /// SQLx wire type name. `None` uses the PostgreSQL type name (native enums).
+    pub sqlx_type_name: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -703,14 +748,15 @@ impl TypeInfo {
         datetime_crate: crate::datetime_crate::DateTimeCrate,
     ) -> Option<String> {
         match &self.kind {
-            TypeKind::Enum(variants) => Some(self.codegen_enum(variants, custom_derives)),
+            TypeKind::Enum(enum_info) => Some(self.codegen_enum(enum_info, custom_derives)),
             TypeKind::Struct(fields) => Some(self.codegen_struct(fields, custom_derives, datetime_crate)),
             TypeKind::Alias(alias) => Some(self.codegen_alias(alias)),
             _ => None,
         }
     }
 
-    fn codegen_enum(&self, variants: &[EnumVariant], custom_derives: &[String]) -> String {
+    fn codegen_enum(&self, enum_info: &EnumInfo, custom_derives: &[String]) -> String {
+        let variants = &enum_info.variants;
         let name = self
             .rust_name
             .strip_prefix(&format!("super::{}::", self.rust_module))
@@ -728,9 +774,14 @@ impl TypeInfo {
             custom_derives,
         );
 
+        let sqlx_type_name = enum_info
+            .sqlx_type_name
+            .as_deref()
+            .unwrap_or(&self.pg_name);
+
         let mut code = format!(
             "{}\n#[sqlx(type_name = \"{}\")]\npub enum {} {{\n",
-            derive_attr, self.pg_name, name
+            derive_attr, sqlx_type_name, name
         );
         for v in variants {
             code.push_str(&format!(
