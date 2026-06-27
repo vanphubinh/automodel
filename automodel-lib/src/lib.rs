@@ -711,7 +711,12 @@ impl AutoModel {
             // This is clearly a mutation - extract constraints
             // Use first variant (base query) for constraint extraction
             let (converted_sql, _param_names, _label) = &query.sql_variants[0];
-            let constraints = match client.prepare(converted_sql).await {
+            let constraints = match crate::types_extractor::prepare_analysis_statement(
+                client,
+                converted_sql,
+            )
+            .await
+            {
                 Ok(statement) => {
                     match extract_constraints_from_statement(client, &statement, &query.sql).await {
                         Ok(constraints) => constraints,
@@ -744,7 +749,9 @@ impl AutoModel {
             if param_names.is_empty() {
                 explain_params.push(None);
             } else {
-                match client.prepare(converted_sql).await {
+                match crate::types_extractor::prepare_analysis_statement(client, converted_sql)
+                    .await
+                {
                     Ok(statement) => {
                         let param_types = statement.params();
                         match Self::prepare_explain_params_for_variant(
@@ -835,7 +842,9 @@ impl AutoModel {
                 if params.special_params.is_empty() {
                     // No special params, use dummy params for all parameters
                     let (converted_sql, _param_names, _label) = &query.sql_variants[0];
-                    match client.prepare(converted_sql).await {
+                    match crate::types_extractor::prepare_analysis_statement(client, converted_sql)
+                    .await
+                {
                         Ok(statement) => {
                             let param_types = statement.params();
                             let (dummy_params, _) = crate::types_extractor::create_dummy_params(
@@ -859,7 +868,9 @@ impl AutoModel {
                     // Has special params - some are inlined, others need dummy values
                     // Prepare to get param types for non-special params
                     let (converted_sql, _param_names, _label) = &query.sql_variants[0];
-                    match client.prepare(converted_sql).await {
+                    match crate::types_extractor::prepare_analysis_statement(client, converted_sql)
+                    .await
+                {
                         Ok(statement) => {
                             let param_types = statement.params();
                             let (all_dummy_params, _) = crate::types_extractor::create_dummy_params(
@@ -963,6 +974,7 @@ impl AutoModel {
         datetime_crate: DateTimeCrate,
         domain_enums: &std::collections::HashMap<String, crate::domain_enum::DomainEnumConstraint>,
     ) -> Result<ExplainParams> {
+        let analysis_sql = crate::types_extractor::normalize_pgroonga_for_prepare(converted_sql);
         let (_dummy_params, special_params) = crate::types_extractor::create_dummy_params(
             param_types,
             datetime_crate,
@@ -977,10 +989,10 @@ impl AutoModel {
 
         // Build the EXPLAIN query with special param replacements
         let explain_sql = if special_params.is_empty() {
-            format!("EXPLAIN (FORMAT TEXT, ANALYZE false) {}", converted_sql)
+            format!("EXPLAIN (FORMAT TEXT, ANALYZE false) {}", analysis_sql)
         } else {
             // Replace special parameters with casted values and renumber remaining params
-            let mut modified_sql = converted_sql.to_string();
+            let mut modified_sql = analysis_sql;
 
             // Replace special parameters from highest index to lowest (to avoid renumbering issues)
             for (param_idx, type_name, value) in special_params.iter().rev() {
@@ -1115,7 +1127,7 @@ impl AutoModel {
             if let Some(params) = explain_params {
                 if params.special_params.is_empty() {
                     // No special params, use dummy params
-                    match client.prepare(sql).await {
+                    match crate::types_extractor::prepare_analysis_statement(client, sql).await {
                         Ok(statement) => {
                             let param_types = statement.params();
                             let (dummy_params, _) = crate::types_extractor::create_dummy_params(
@@ -1142,7 +1154,7 @@ impl AutoModel {
                     }
                 } else {
                     // Has special params - some are inlined, others need dummy values
-                    match client.prepare(sql).await {
+                    match crate::types_extractor::prepare_analysis_statement(client, sql).await {
                         Ok(statement) => {
                             let param_types = statement.params();
                             let (all_dummy_params, _) = crate::types_extractor::create_dummy_params(
@@ -1179,7 +1191,7 @@ impl AutoModel {
                 }
             } else {
                 // Pre-computation failed, try to prepare on-the-fly
-                match client.prepare(sql).await {
+                match crate::types_extractor::prepare_analysis_statement(client, sql).await {
                     Ok(statement) => {
                         let param_types = statement.params();
                         let (dummy_params, special_params) =

@@ -1,7 +1,124 @@
 use anyhow::{Context, Result};
+use regex::Regex;
 use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 use tokio_postgres::types::{Kind as PgKind, Type as PgType};
 use tokio_postgres::Statement;
+
+static PGROONGA_QUERY_ESCAPE_PUBLIC: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)&@~\s*public\.pgroonga_query_escape\s*\(\s*(\$\d+)(\s*::text)?\s*\)")
+        .expect("valid pgroonga regex")
+});
+
+static PGROONGA_QUERY_ESCAPE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)&@~\s*pgroonga_query_escape\s*\(\s*(\$\d+)(\s*::text)?\s*\)")
+        .expect("valid pgroonga regex")
+});
+
+static PGROONGA_QUERY_PARAM: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)&@~\s*(\$\d+)(\s*::text)?")
+        .expect("valid pgroonga regex")
+});
+
+static PGROONGA_TERM_ESCAPE_PUBLIC: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)&@\s+public\.pgroonga_query_escape\s*\(\s*(\$\d+)(\s*::text)?\s*\)")
+        .expect("valid pgroonga regex")
+});
+
+static PGROONGA_TERM_ESCAPE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)&@\s+pgroonga_query_escape\s*\(\s*(\$\d+)(\s*::text)?\s*\)")
+        .expect("valid pgroonga regex")
+});
+
+static PGROONGA_TERM_PARAM: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)&@\s+(\$\d+)(\s*::text)?")
+        .expect("valid pgroonga regex")
+});
+
+fn pgroonga_param_cast(caps: &regex::Captures<'_>) -> String {
+    let param = caps.get(1).expect("param").as_str();
+    match caps.get(2) {
+        Some(cast) => format!("{param}{}", cast.as_str()),
+        None => format!("{param}::text"),
+    }
+}
+
+/// Rewrite PGroonga full-text patterns so PREPARE/EXPLAIN work during analysis.
+///
+/// AutoModel clears `search_path` to enforce schema-qualified table names. PGroonga
+/// operators (`&@~`, `&@`) and helpers (`pgroonga_query_escape`) live in `public` and
+/// must be schema-qualified in that mode. Bound parameters also need an explicit
+/// `::text` cast because PostgreSQL cannot infer their type for PGroonga operators
+/// (unlike `ILIKE`, which infers text from the left-hand side).
+pub fn normalize_pgroonga_for_prepare(sql: &str) -> String {
+    let mut normalized = sql.to_string();
+
+    normalized = PGROONGA_QUERY_ESCAPE_PUBLIC
+        .replace_all(&normalized, |caps: &regex::Captures<'_>| {
+            format!(
+                "OPERATOR(public.&@~) public.pgroonga_query_escape({})",
+                pgroonga_param_cast(caps)
+            )
+        })
+        .into_owned();
+
+    normalized = PGROONGA_QUERY_ESCAPE
+        .replace_all(&normalized, |caps: &regex::Captures<'_>| {
+            format!(
+                "OPERATOR(public.&@~) public.pgroonga_query_escape({})",
+                pgroonga_param_cast(caps)
+            )
+        })
+        .into_owned();
+
+    normalized = PGROONGA_QUERY_PARAM
+        .replace_all(&normalized, |caps: &regex::Captures<'_>| {
+            format!(
+                "OPERATOR(public.&@~) public.pgroonga_query_escape({})",
+                pgroonga_param_cast(caps)
+            )
+        })
+        .into_owned();
+
+    normalized = PGROONGA_TERM_ESCAPE_PUBLIC
+        .replace_all(&normalized, |caps: &regex::Captures<'_>| {
+            format!(
+                "OPERATOR(public.&@) public.pgroonga_query_escape({})",
+                pgroonga_param_cast(caps)
+            )
+        })
+        .into_owned();
+
+    normalized = PGROONGA_TERM_ESCAPE
+        .replace_all(&normalized, |caps: &regex::Captures<'_>| {
+            format!(
+                "OPERATOR(public.&@) public.pgroonga_query_escape({})",
+                pgroonga_param_cast(caps)
+            )
+        })
+        .into_owned();
+
+    normalized = PGROONGA_TERM_PARAM
+        .replace_all(&normalized, |caps: &regex::Captures<'_>| {
+            format!(
+                "OPERATOR(public.&@) public.pgroonga_query_escape({})",
+                pgroonga_param_cast(caps)
+            )
+        })
+        .into_owned();
+
+    normalized
+}
+
+/// Prepare a query statement for build-time analysis (type extraction, EXPLAIN, etc.).
+pub async fn prepare_analysis_statement(
+    client: &tokio_postgres::Client,
+    sql: &str,
+) -> Result<Statement, tokio_postgres::Error> {
+    client
+        .prepare(&normalize_pgroonga_for_prepare(sql))
+        .await
+}
 
 /// Strip non-null column cast syntax from SQL and return cleaned SQL + set of forced-non-null column names.
 ///
@@ -178,12 +295,14 @@ pub async fn extract_query_types(
     // Convert named parameters to positional parameters for PostgreSQL
     let (converted_sql, param_names) = convert_named_params_to_positional(&full_sql);
 
-    let statement = client.prepare(&converted_sql).await.with_context(|| {
-        format!(
-            "Failed to prepare statement for type extraction: {}",
-            converted_sql
-        )
-    })?;
+    let statement = prepare_analysis_statement(client, &converted_sql)
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to prepare statement for type extraction: {}",
+                converted_sql
+            )
+        })?;
 
     // Extract types
     let input_types = extract_input_types(
@@ -1313,4 +1432,36 @@ pub async fn create_dummy_params(
     }
 
     Ok((dummy_params, special_params))
+}
+
+#[cfg(test)]
+mod pgroonga_tests {
+    use super::*;
+
+    #[test]
+    fn normalize_pgroonga_query_operator_with_bare_param() {
+        let sql = "SELECT 1 FROM public.parties WHERE display_name &@~ $3";
+        let normalized = normalize_pgroonga_for_prepare(sql);
+        assert_eq!(
+            normalized,
+            "SELECT 1 FROM public.parties WHERE display_name OPERATOR(public.&@~) public.pgroonga_query_escape($3::text)"
+        );
+    }
+
+    #[test]
+    fn normalize_pgroonga_query_operator_with_escape_helper() {
+        let sql =
+            "SELECT 1 FROM public.parties WHERE display_name &@~ pgroonga_query_escape($3)";
+        let normalized = normalize_pgroonga_for_prepare(sql);
+        assert_eq!(
+            normalized,
+            "SELECT 1 FROM public.parties WHERE display_name OPERATOR(public.&@~) public.pgroonga_query_escape($3::text)"
+        );
+    }
+
+    #[test]
+    fn normalize_pgroonga_does_not_change_ilike() {
+        let sql = "SELECT 1 FROM public.parties WHERE display_name ILIKE ('%' || $3 || '%')";
+        assert_eq!(normalize_pgroonga_for_prepare(sql), sql);
+    }
 }
