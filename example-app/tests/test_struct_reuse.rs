@@ -1,7 +1,6 @@
 mod common;
 
 use example_app::generated;
-use example_app::models;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_get_user_by_id_and_email() {

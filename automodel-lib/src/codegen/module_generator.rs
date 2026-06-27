@@ -435,38 +435,38 @@ fn generate_tracing_attribute(query: &QueryDefinition, param_names: &[String]) -
     format!("#[tracing::instrument({})]\n", attributes.join(", "))
 }
 
-/// Generate an indented raw string literal with proper formatting
-fn generate_indented_raw_string_literal(sql: &str) -> String {
-    // Find a delimiter that doesn't appear in the SQL
+/// Format SQL for embedding in generated Rust raw string literals.
+fn format_sql_literal_content(sql: &str) -> String {
+    crate::codegen::sql_formatter::format_sql_embedded(sql)
+}
+
+/// Find a raw string delimiter that does not appear in the content.
+fn raw_string_delimiter(content: &str) -> String {
     let mut delimiter_count = 0;
-    let delimiter = loop {
+    loop {
         let delimiter = "#".repeat(delimiter_count);
         let pattern = format!("\"{}\"", delimiter);
-        if !sql.contains(&pattern) {
-            break delimiter;
+        if !content.contains(&pattern) {
+            return delimiter;
         }
         delimiter_count += 1;
-    };
+    }
+}
 
-    // Add proper indentation to each line of SQL
-    let indented_sql = sql
-        .lines()
-        .enumerate()
-        .map(|(i, line)| {
-            if i == 0 {
-                line.to_string() // First line doesn't need extra indentation
-            } else {
-                format!("        {}", line) // Subsequent lines get 8 spaces of indentation
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
+fn generate_inline_raw_string_literal(content: &str) -> String {
+    let delimiter = raw_string_delimiter(content);
     format!(
-        "        r{delimiter}\"{indented_sql}\"{delimiter}",
+        "r{delimiter}\"{content}\"{delimiter}",
         delimiter = delimiter,
-        indented_sql = indented_sql
+        content = content,
     )
+}
+
+/// Generate a multiline raw string assignment body for embedded SQL.
+fn generate_embedded_raw_string(sql: &str) -> String {
+    let content = format_sql_literal_content(sql);
+    let delimiter = raw_string_delimiter(&content);
+    format!("r{delimiter}\"{content}{delimiter}", delimiter = delimiter, content = content)
 }
 
 /// Generate Rust function code for a SQL query without enum definitions
@@ -788,10 +788,10 @@ fn generate_static_function_body(
     let (converted_sql, param_names, _variant_label) = &query.sql_variants[0];
 
     // Build the SQLx query with parameter bindings
-    let raw_string = generate_indented_raw_string_literal(converted_sql);
+    let raw_string = generate_embedded_raw_string(converted_sql);
     body.push_str(&format!(
-        "    let query = sqlx::query(\n{}\n    );\n",
-        raw_string
+        "    let query = sqlx::query(\n        {raw_string}\n    );\n",
+        raw_string = raw_string,
     ));
 
     // Add parameter bindings using method chaining
@@ -1054,9 +1054,11 @@ fn generate_conditional_function_body(
     }
 
     // Generate the SQL building code with complete parameter renumbering
-    body.push_str("    let mut final_sql = r\"");
-    body.push_str(&sql_template);
-    body.push_str("\".to_string();\n");
+    let raw_string = generate_embedded_raw_string(&sql_template);
+    body.push_str(&format!(
+        "    let mut final_sql = {raw_string}\n    .to_string();\n",
+        raw_string = raw_string,
+    ));
     body.push_str("    let mut included_params = Vec::new();\n\n");
 
     // Replace each conditional block based on parameter presence or diff
@@ -1085,9 +1087,9 @@ fn generate_conditional_function_body(
         }
 
         body.push_str(&format!(
-            "        final_sql = final_sql.replace(r\"{}\", r\"{}\");\n",
-            conditional_block,
-            &conditional_block[2..conditional_block.len() - 1]
+            "        final_sql = final_sql.replace(\n            {},\n            {},\n        );\n",
+            generate_inline_raw_string_literal(&conditional_block),
+            generate_inline_raw_string_literal(&conditional_block[2..conditional_block.len() - 1]),
         ));
         body.push_str(&format!(
             "        included_params.push(\"{}\");\n",
@@ -1095,8 +1097,8 @@ fn generate_conditional_function_body(
         ));
         body.push_str("    } else {\n");
         body.push_str(&format!(
-            "        final_sql = final_sql.replace(r\"{}\", \"\");\n",
-            conditional_block
+            "        final_sql = final_sql.replace({}, \"\");\n",
+            generate_inline_raw_string_literal(&conditional_block),
         ));
         body.push_str("    }\n\n");
     }
@@ -1842,4 +1844,18 @@ pub fn generate_code_for_module(
     }
 
     Ok((generated_code, warnings))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_sql_literal_content_applies_embedded_layout() {
+        let sql = "SELECT id, name FROM users WHERE active = true";
+        assert_eq!(
+            format_sql_literal_content(sql),
+            "\n    SELECT\n        id,\n        name\n    FROM\n        users\n    WHERE\n        active = true"
+        );
+    }
 }
