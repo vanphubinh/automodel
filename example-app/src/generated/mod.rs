@@ -71,17 +71,24 @@ impl<C: TryFrom<ErrorConstraintInfo>> From<sqlx::Error> for Error<C> {
                 Self::InternalError(format!("Column not found: {}", col), error)
             }
             sqlx::Error::Database(db_err) => {
-                // Extract constraint name and table from error
-                let constraint_name = db_err.constraint().unwrap_or("").to_string();
-                let table_name = db_err.table().unwrap_or("").to_string();
                 let kind = db_err.kind();
-
-                let violation = ErrorConstraintInfo {
-                    constraint_name,
-                    table_name,
-                    kind: kind.into(),
-                };
-                Self::ConstraintViolation(violation.clone().try_into().ok(), violation)
+                match kind {
+                    sqlx::error::ErrorKind::UniqueViolation
+                    | sqlx::error::ErrorKind::ForeignKeyViolation
+                    | sqlx::error::ErrorKind::NotNullViolation
+                    | sqlx::error::ErrorKind::CheckViolation => {
+                        let violation = ErrorConstraintInfo {
+                            constraint_name: db_err.constraint().unwrap_or("").to_string(),
+                            table_name: db_err.table().unwrap_or("").to_string(),
+                            kind: kind.into(),
+                        };
+                        Self::ConstraintViolation(violation.clone().try_into().ok(), violation)
+                    }
+                    _ => Self::InternalError(
+                        format!("Database error: {}", db_err.message()),
+                        error,
+                    ),
+                }
             }
             sqlx::Error::Configuration(_) => {
                 Self::InternalError("Configuration error".to_string(), error)
