@@ -19,6 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &config.queries_dir,
         &config.output_dir,
         config.defaults(),
+        false,
     )
     .await
 }

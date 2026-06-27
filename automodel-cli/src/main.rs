@@ -43,6 +43,13 @@ fn build_cli() -> Command {
                         .long("database-url")
                         .value_name("URL")
                         .help("PostgreSQL database connection URL (overrides AUTOMODEL_DATABASE_URL env var)"),
+                )
+                .arg(
+                    Arg::new("force")
+                        .short('f')
+                        .long("force")
+                        .action(clap::ArgAction::SetTrue)
+                        .help("Regenerate even when AUTOMODEL_HASH indicates output is up to date"),
                 ),
         )
 }
@@ -64,11 +71,14 @@ async fn generate_command(matches: &ArgMatches) -> Result<()> {
     println!("Queries: {}", config.queries_dir);
     println!("Output: {}", config.output_dir);
 
+    let force = matches.get_flag("force");
+
     AutoModel::generate(
         || Ok(database_url.clone()),
         &config.queries_dir,
         &config.output_dir,
         config.defaults(),
+        force,
     )
     .await
     .map_err(|e| anyhow::anyhow!("Code generation failed: {}", e))?;

@@ -224,7 +224,7 @@ impl AutoModel {
     ///             Err("Detecting not up to date AutoModel generated code in CI environment"
     ///                 .to_string())
     ///         }
-    ///     }, "queries", "src/generated", Default::default()).await?;
+    ///     }, "queries", "src/generated", Default::default(), false).await?;
     ///     Ok(())
     /// }
     /// ```
@@ -233,6 +233,7 @@ impl AutoModel {
         queries_dir: &str,
         output_dir: &str,
         defaults: crate::DefaultsConfig,
+        force: bool,
     ) -> Result<(), Box<dyn std::error::Error>>
     where
         F: FnOnce() -> Result<String, String>,
@@ -291,8 +292,10 @@ impl AutoModel {
             hash_u64 |= (byte as u64) << (i * 8);
         }
         let source_hash = hash_u64;
-        // Check if generated code is up to date
-        if Self::is_generated_mod_rs_code_up_to_date(source_hash, &mod_file).unwrap_or(false) {
+        // Check if generated code is up to date (unless forced via CLI --force)
+        if !force
+            && Self::is_generated_mod_rs_code_up_to_date(source_hash, &mod_file).unwrap_or(false)
+        {
             println!("cargo:info=Skipping code generation as everything is up to date");
 
             // Output warnings from file even when skipping build
