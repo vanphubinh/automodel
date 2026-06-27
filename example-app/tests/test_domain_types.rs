@@ -16,7 +16,10 @@ async fn test_insert_product() {
     .await
     .unwrap();
     assert_eq!(result.name, "Test Product");
-    assert_eq!(result.priority, generated::types::public::ProductPriority::High);
+    assert_eq!(
+        result.priority,
+        generated::types::public::ProductPriority::High
+    );
     assert!(result.id > 0);
 }
 

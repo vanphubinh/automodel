@@ -418,18 +418,20 @@ fn generate_tracing_attribute(query: &QueryDefinition, param_names: &[String]) -
         attributes.push("skip_all".to_string());
     }
 
-    // Determine whether to include SQL based on configuration (default false)
+    // Reserve a span field for SQL; recorded at runtime once the query text is known.
     let should_include_sql = query.telemetry.include_sql;
     if should_include_sql {
-        let escaped_sql = query
-            .sql
-            .replace('\\', "\\\\")
-            .replace('"', "\\\"")
-            .replace('\n', "\\n");
-        attributes.push(format!("fields(sql = \"{}\")", escaped_sql));
+        attributes.push("fields(sql = tracing::field::Empty)".to_string());
     }
 
     format!("#[tracing::instrument({})]\n", attributes.join(", "))
+}
+
+fn generate_record_sql_span(body: &mut String, sql_expr: &str) {
+    body.push_str(&format!(
+        "    tracing::Span::current().record(\"sql\", tracing::field::display(&automodel::format_sql_for_trace({sql_expr})));\n",
+        sql_expr = sql_expr,
+    ));
 }
 
 /// Format SQL for embedding in generated Rust raw string literals.
@@ -793,10 +795,16 @@ fn generate_static_function_body(
 
     // Build the SQLx query with parameter bindings
     let raw_string = generate_embedded_raw_string(converted_sql);
-    body.push_str(&format!(
-        "    let query = sqlx::query(\n        {raw_string}\n    );\n",
-        raw_string = raw_string,
-    ));
+    if query.telemetry.include_sql {
+        body.push_str(&format!("    let sql = {raw_string};\n", raw_string = raw_string));
+        generate_record_sql_span(body, "&sql");
+        body.push_str("    let query = sqlx::query(sqlx::AssertSqlSafe(sql));\n");
+    } else {
+        body.push_str(&format!(
+            "    let query = sqlx::query(\n        {raw_string}\n    );\n",
+            raw_string = raw_string,
+        ));
+    }
 
     // Add parameter bindings using method chaining
     if !type_info.input_types.is_empty() {
@@ -1146,7 +1154,12 @@ fn generate_conditional_function_body(
 
     // Ensure param_counter is marked as used to avoid unused assignment warnings
     body.push_str("    let _ = param_counter; // Suppress unused assignment warning\n");
-    body.push_str("\n    let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));\n\n");
+    if query.telemetry.include_sql {
+        generate_record_sql_span(body, "&final_sql");
+    }
+    body.push_str(
+        "\n    let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));\n\n",
+    );
 
     // Bind parameters in the order they will appear in the final SQL
     // First, bind base (non-conditional) parameters

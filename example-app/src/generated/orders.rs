@@ -43,12 +43,23 @@ pub struct InsertOrderItem {
 }
 
 /// Insert a new order
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.orders (tenant_id, product_name, amount)\nVALUES (#{tenant_id}, #{product_name}, #{amount})\nRETURNING id, tenant_id, product_name, amount, created_at"))]
-pub async fn insert_order(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, tenant_id: i32, product_name: String, amount: rust_decimal::Decimal) -> Result<InsertOrderItem, super::Error<InsertOrderConstraints>> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "INSERT INTO public.orders (tenant_id, product_name, amount)\nVALUES (#{tenant_id}, #{product_name}, #{amount})\nRETURNING id, tenant_id, product_name, amount, created_at"
+    )
+)]
+pub async fn insert_order(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    tenant_id: i32,
+    product_name: String,
+    amount: rust_decimal::Decimal,
+) -> Result<InsertOrderItem, super::Error<InsertOrderConstraints>> {
     let query = sqlx::query(
         r"INSERT INTO public.orders (tenant_id, product_name, amount)
         VALUES ($1, $2, $3)
-        RETURNING id, tenant_id, product_name, amount, created_at"
+        RETURNING id, tenant_id, product_name, amount, created_at",
     );
     let query = query.bind(tenant_id);
     let query = query.bind(&product_name);
@@ -56,12 +67,12 @@ pub async fn insert_order(executor: impl sqlx::Executor<'_, Database = sqlx::Pos
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(InsertOrderItem {
-        id: row.try_get::<i32, _>("id")?,
-        tenant_id: row.try_get::<i32, _>("tenant_id")?,
-        product_name: row.try_get::<String, _>("product_name")?,
-        amount: row.try_get::<rust_decimal::Decimal, _>("amount")?,
-        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            tenant_id: row.try_get::<i32, _>("tenant_id")?,
+            product_name: row.try_get::<String, _>("product_name")?,
+            amount: row.try_get::<rust_decimal::Decimal, _>("amount")?,
+            created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -84,25 +95,37 @@ pub struct GetOrdersByTenantItem {
 ///         Recheck Cond: (tenant_id = 0)
 ///         ->  Bitmap Index Scan on orders_p0_pkey
 ///               Index Cond: (tenant_id = 0)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, tenant_id, product_name, amount, created_at\nFROM public.orders\nWHERE tenant_id = #{tenant_id}\nORDER BY created_at DESC"))]
-pub async fn get_orders_by_tenant(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, tenant_id: i32) -> Result<Vec<GetOrdersByTenantItem>, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "SELECT id, tenant_id, product_name, amount, created_at\nFROM public.orders\nWHERE tenant_id = #{tenant_id}\nORDER BY created_at DESC"
+    )
+)]
+pub async fn get_orders_by_tenant(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    tenant_id: i32,
+) -> Result<Vec<GetOrdersByTenantItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, tenant_id, product_name, amount, created_at
         FROM public.orders
         WHERE tenant_id = $1
-        ORDER BY created_at DESC"
+        ORDER BY created_at DESC",
     );
     let query = query.bind(tenant_id);
     let rows = query.fetch_all(executor).await?;
-    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
-        Ok(GetOrdersByTenantItem {
-        id: row.try_get::<i32, _>("id")?,
-        tenant_id: row.try_get::<i32, _>("tenant_id")?,
-        product_name: row.try_get::<String, _>("product_name")?,
-        amount: row.try_get::<rust_decimal::Decimal, _>("amount")?,
-        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
-    })
-    }).collect();
+    let result: Result<Vec<_>, sqlx::Error> = rows
+        .iter()
+        .map(|row| {
+            Ok(GetOrdersByTenantItem {
+                id: row.try_get::<i32, _>("id")?,
+                tenant_id: row.try_get::<i32, _>("tenant_id")?,
+                product_name: row.try_get::<String, _>("product_name")?,
+                amount: row.try_get::<rust_decimal::Decimal, _>("amount")?,
+                created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+            })
+        })
+        .collect();
     result.map_err(Into::into)
 }
 
@@ -133,25 +156,37 @@ pub struct GetOrdersByProductItem {
 ///         ->  Seq Scan on orders_p3 orders_4
 ///               Disabled: true
 ///               Filter: (product_name = 'dummy'::text)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, tenant_id, product_name, amount, created_at\nFROM public.orders\nWHERE product_name = #{product_name}\nORDER BY created_at DESC"))]
-pub async fn get_orders_by_product(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, product_name: String) -> Result<Vec<GetOrdersByProductItem>, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "SELECT id, tenant_id, product_name, amount, created_at\nFROM public.orders\nWHERE product_name = #{product_name}\nORDER BY created_at DESC"
+    )
+)]
+pub async fn get_orders_by_product(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    product_name: String,
+) -> Result<Vec<GetOrdersByProductItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, tenant_id, product_name, amount, created_at
         FROM public.orders
         WHERE product_name = $1
-        ORDER BY created_at DESC"
+        ORDER BY created_at DESC",
     );
     let query = query.bind(&product_name);
     let rows = query.fetch_all(executor).await?;
-    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
-        Ok(GetOrdersByProductItem {
-        id: row.try_get::<i32, _>("id")?,
-        tenant_id: row.try_get::<i32, _>("tenant_id")?,
-        product_name: row.try_get::<String, _>("product_name")?,
-        amount: row.try_get::<rust_decimal::Decimal, _>("amount")?,
-        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
-    })
-    }).collect();
+    let result: Result<Vec<_>, sqlx::Error> = rows
+        .iter()
+        .map(|row| {
+            Ok(GetOrdersByProductItem {
+                id: row.try_get::<i32, _>("id")?,
+                tenant_id: row.try_get::<i32, _>("tenant_id")?,
+                product_name: row.try_get::<String, _>("product_name")?,
+                amount: row.try_get::<rust_decimal::Decimal, _>("amount")?,
+                created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+            })
+        })
+        .collect();
     result.map_err(Into::into)
 }
 
@@ -186,25 +221,36 @@ pub struct GetOrdersByTenantRangeItem {
 ///               Recheck Cond: (tenant_id > 0)
 ///               ->  Bitmap Index Scan on orders_p3_pkey
 ///                     Index Cond: (tenant_id > 0)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, tenant_id, product_name, amount, created_at\nFROM public.orders\nWHERE tenant_id > #{min_tenant_id}\nORDER BY created_at DESC"))]
-pub async fn get_orders_by_tenant_range(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, min_tenant_id: i32) -> Result<Vec<GetOrdersByTenantRangeItem>, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "SELECT id, tenant_id, product_name, amount, created_at\nFROM public.orders\nWHERE tenant_id > #{min_tenant_id}\nORDER BY created_at DESC"
+    )
+)]
+pub async fn get_orders_by_tenant_range(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    min_tenant_id: i32,
+) -> Result<Vec<GetOrdersByTenantRangeItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, tenant_id, product_name, amount, created_at
         FROM public.orders
         WHERE tenant_id > $1
-        ORDER BY created_at DESC"
+        ORDER BY created_at DESC",
     );
     let query = query.bind(min_tenant_id);
     let rows = query.fetch_all(executor).await?;
-    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
-        Ok(GetOrdersByTenantRangeItem {
-        id: row.try_get::<i32, _>("id")?,
-        tenant_id: row.try_get::<i32, _>("tenant_id")?,
-        product_name: row.try_get::<String, _>("product_name")?,
-        amount: row.try_get::<rust_decimal::Decimal, _>("amount")?,
-        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
-    })
-    }).collect();
+    let result: Result<Vec<_>, sqlx::Error> = rows
+        .iter()
+        .map(|row| {
+            Ok(GetOrdersByTenantRangeItem {
+                id: row.try_get::<i32, _>("id")?,
+                tenant_id: row.try_get::<i32, _>("tenant_id")?,
+                product_name: row.try_get::<String, _>("product_name")?,
+                amount: row.try_get::<rust_decimal::Decimal, _>("amount")?,
+                created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+            })
+        })
+        .collect();
     result.map_err(Into::into)
 }
-

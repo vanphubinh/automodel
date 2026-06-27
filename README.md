@@ -2194,15 +2194,13 @@ All types support PostgreSQL arrays with automatic mapping to `Vec<T>`:
 
 PostgreSQL custom enums are automatically detected and mapped to generated Rust enums with proper encoding/decoding support. See the Configuration Options section for details on enum handling.
 
-## Disabling Formatting of Generated Code
+## Formatting Generated Code
 
-AutoModel emits a `// @generated` marker in the first few lines of every generated file. To prevent `rustfmt` from reformatting generated code, add this to your workspace `rustfmt.toml`:
+AutoModel runs `rustfmt` on all generated `.rs` files after codegen, so output matches what `cargo fmt` produces on stable Rust. You do not need `format_generated_files` in `rustfmt.toml` (that option requires nightly).
 
-```toml
-format_generated_files = false
-```
+If `rustfmt` is not installed, code generation fails with a clear error — install it via `rustup component add rustfmt`.
 
-When this option is set, `rustfmt` skips any file that contains `@generated` in its first five lines. See the [rustfmt documentation](https://rust-lang.github.io/rustfmt/?version=v1.6.0&search=#format_generated_files) for details.
+When `telemetry.include_sql` is enabled, SQL is recorded on the tracing span at runtime (after the final query text is built) instead of embedding escaped SQL in the `#[tracing::instrument]` attribute.
 
 ## Advanced Guides
 

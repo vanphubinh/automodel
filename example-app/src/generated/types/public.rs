@@ -133,8 +133,18 @@ impl sqlx::Encode<'_, sqlx::Postgres> for Users {
         encoder.encode(&self.updated_at.as_ref().map(|v| v.to_sqlx()))?;
         encoder.encode(&self.referrer_id)?;
         encoder.encode(&self.social_links.as_ref().map(sqlx::types::Json))?;
-        encoder.encode(&self.tags.as_ref().map(|v| v.iter().map(|e| e.as_ref().map(sqlx::types::Json)).collect::<Vec<_>>()))?;
-        encoder.encode(&self.labels.iter().map(|e| e.as_ref().map(sqlx::types::Json)).collect::<Vec<_>>())?;
+        encoder.encode(&self.tags.as_ref().map(|v| {
+            v.iter()
+                .map(|e| e.as_ref().map(sqlx::types::Json))
+                .collect::<Vec<_>>()
+        }))?;
+        encoder.encode(
+            &self
+                .labels
+                .iter()
+                .map(|e| e.as_ref().map(sqlx::types::Json))
+                .collect::<Vec<_>>(),
+        )?;
         encoder.finish();
         Ok(sqlx::encode::IsNull::No)
     }
@@ -150,16 +160,30 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Users {
             name: decoder.try_decode()?,
             email: decoder.try_decode()?,
             status: decoder.try_decode()?,
-            profile: decoder.try_decode::<Option<sqlx::types::Json<crate::models::UserProfile>>>()?.map(|v| v.0),
+            profile: decoder
+                .try_decode::<Option<sqlx::types::Json<crate::models::UserProfile>>>()?
+                .map(|v| v.0),
             settings: decoder.try_decode()?,
             is_active: decoder.try_decode()?,
             age: decoder.try_decode()?,
-            created_at: decoder.try_decode::<Option<jiff_sqlx::Timestamp>>()?.map(|v| v.to_jiff()),
-            updated_at: decoder.try_decode::<Option<jiff_sqlx::Timestamp>>()?.map(|v| v.to_jiff()),
+            created_at: decoder
+                .try_decode::<Option<jiff_sqlx::Timestamp>>()?
+                .map(|v| v.to_jiff()),
+            updated_at: decoder
+                .try_decode::<Option<jiff_sqlx::Timestamp>>()?
+                .map(|v| v.to_jiff()),
             referrer_id: decoder.try_decode()?,
-            social_links: decoder.try_decode::<Option<sqlx::types::Json<Vec<crate::models::UserSocialLink>>>>()?.map(|v| v.0),
-            tags: decoder.try_decode::<Option<Vec<Option<sqlx::types::Json<crate::models::UserTag>>>>>()?.map(|v| v.into_iter().map(|e| e.map(|j| j.0)).collect()),
-            labels: decoder.try_decode::<Vec<Option<sqlx::types::Json<crate::models::UserTag>>>>()?.into_iter().map(|e| e.map(|j| j.0)).collect::<Vec<_>>(),
+            social_links: decoder
+                .try_decode::<Option<sqlx::types::Json<Vec<crate::models::UserSocialLink>>>>()?
+                .map(|v| v.0),
+            tags: decoder
+                .try_decode::<Option<Vec<Option<sqlx::types::Json<crate::models::UserTag>>>>>()?
+                .map(|v| v.into_iter().map(|e| e.map(|j| j.0)).collect()),
+            labels: decoder
+                .try_decode::<Vec<Option<sqlx::types::Json<crate::models::UserTag>>>>()?
+                .into_iter()
+                .map(|e| e.map(|j| j.0))
+                .collect::<Vec<_>>(),
         })
     }
 }
@@ -205,7 +229,9 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for UserWithLinksInput {
         Ok(Self {
             name: decoder.try_decode()?,
             email: decoder.try_decode()?,
-            social_links: decoder.try_decode::<Option<sqlx::types::Json<Vec<crate::models::UserSocialLink>>>>()?.map(|v| v.0),
+            social_links: decoder
+                .try_decode::<Option<sqlx::types::Json<Vec<crate::models::UserSocialLink>>>>()?
+                .map(|v| v.0),
         })
     }
 }
@@ -257,7 +283,9 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Widgets {
             name: decoder.try_decode()?,
             weight: decoder.try_decode()?,
             metadata: decoder.try_decode()?,
-            created_at: decoder.try_decode::<Option<jiff_sqlx::Timestamp>>()?.map(|v| v.to_jiff()),
+            created_at: decoder
+                .try_decode::<Option<jiff_sqlx::Timestamp>>()?
+                .map(|v| v.to_jiff()),
         })
     }
 }
@@ -276,4 +304,3 @@ pub struct WidgetInput {
     pub weight: Option<f64>,
     pub metadata: Option<super::public::WidgetMetadata>,
 }
-

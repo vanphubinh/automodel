@@ -7,11 +7,15 @@ use sqlx::Row;
 ///
 /// Query Plan:
 /// Result
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT NOW() as current_time"))]
-pub async fn get_current_time(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>) -> Result<Option<jiff_sqlx::Timestamp>, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT NOW() as current_time"
-    );
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(sql = "SELECT NOW() as current_time")
+)]
+pub async fn get_current_time(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+) -> Result<Option<jiff_sqlx::Timestamp>, super::ErrorReadOnly> {
+    let query = sqlx::query(r"SELECT NOW() as current_time");
     let row = query.fetch_one(executor).await?;
     Ok(row.try_get::<Option<jiff_sqlx::Timestamp>, _>("current_time")?)
 }
@@ -20,11 +24,15 @@ pub async fn get_current_time(executor: impl sqlx::Executor<'_, Database = sqlx:
 ///
 /// Query Plan:
 /// Result
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT version() as pg_version"))]
-pub async fn get_version(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>) -> Result<Option<String>, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT version() as pg_version"
-    );
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(sql = "SELECT version() as pg_version")
+)]
+pub async fn get_version(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+) -> Result<Option<String>, super::ErrorReadOnly> {
+    let query = sqlx::query(r"SELECT version() as pg_version");
     let row = query.fetch_one(executor).await?;
     Ok(row.try_get::<Option<String>, _>("pg_version")?)
 }
@@ -51,8 +59,56 @@ impl TryFrom<super::ErrorConstraintInfo> for InsertAllTypesTestConstraints {
 }
 
 /// Insert a row with all PostgreSQL types
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.all_types_test (\n  bool_col, char_col, int2_col, int4_col, int8_col, float4_col, float8_col, numeric_col,\n  name_col, text_col, varchar_col, bpchar_col, bytea_col, bit_col, varbit_col,\n  date_col, time_col, timestamp_col, timestamptz_col, interval_col, timetz_col,\n  int4_range_col, int8_range_col, num_range_col, ts_range_col, tstz_range_col, date_range_col,\n  inet_col, cidr_col, macaddr_col, json_col, jsonb_col, uuid_col,\n  bool_array_col, int4_array_col, int8_array_col, text_array_col, float8_array_col,\n  int4_range_array_col, date_range_array_col\n) VALUES (\n  #{bool_col}, #{char_col}, #{int2_col}, #{int4_col}, #{int8_col}, #{float4_col}, #{float8_col}, #{numeric_col},\n  #{name_col}, #{text_col}, #{varchar_col}, #{bpchar_col}, #{bytea_col}, #{bit_col}, #{varbit_col},\n  #{date_col}, #{time_col}, #{timestamp_col}, #{timestamptz_col}, #{interval_col}, #{timetz_col},\n  #{int4_range_col}, #{int8_range_col}, #{num_range_col}, #{ts_range_col}, #{tstz_range_col}, #{date_range_col},\n  #{inet_col}, #{cidr_col}, #{macaddr_col}, #{json_col}, #{jsonb_col}, #{uuid_col},\n  #{bool_array_col}, #{int4_array_col}, #{int8_array_col}, #{text_array_col}, #{float8_array_col},\n  #{int4_range_array_col}, #{date_range_array_col}\n)\nRETURNING id"))]
-pub async fn insert_all_types_test(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, bool_col: bool, char_col: String, int2_col: i16, int4_col: i32, int8_col: i64, float4_col: f32, float8_col: f64, numeric_col: rust_decimal::Decimal, name_col: String, text_col: String, varchar_col: String, bpchar_col: String, bytea_col: Vec<u8>, bit_col: bit_vec::BitVec, varbit_col: bit_vec::BitVec, date_col: jiff_sqlx::Date, time_col: jiff_sqlx::Time, timestamp_col: jiff_sqlx::DateTime, timestamptz_col: jiff_sqlx::Timestamp, interval_col: sqlx::postgres::types::PgInterval, timetz_col: sqlx::postgres::types::PgTimeTz, int4_range_col: sqlx::postgres::types::PgRange<i32>, int8_range_col: sqlx::postgres::types::PgRange<i64>, num_range_col: sqlx::postgres::types::PgRange<rust_decimal::Decimal>, ts_range_col: sqlx::postgres::types::PgRange<time::PrimitiveDateTime>, tstz_range_col: sqlx::postgres::types::PgRange<time::OffsetDateTime>, date_range_col: sqlx::postgres::types::PgRange<time::Date>, inet_col: std::net::IpAddr, cidr_col: std::net::IpAddr, macaddr_col: mac_address::MacAddress, json_col: serde_json::Value, jsonb_col: serde_json::Value, uuid_col: uuid::Uuid, bool_array_col: Vec<bool>, int4_array_col: Vec<i32>, int8_array_col: Vec<i64>, text_array_col: Vec<String>, float8_array_col: Vec<f64>, int4_range_array_col: Vec<sqlx::postgres::types::PgRange<i32>>, date_range_array_col: Vec<sqlx::postgres::types::PgRange<time::Date>>) -> Result<i32, super::Error<InsertAllTypesTestConstraints>> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "INSERT INTO public.all_types_test (\n  bool_col, char_col, int2_col, int4_col, int8_col, float4_col, float8_col, numeric_col,\n  name_col, text_col, varchar_col, bpchar_col, bytea_col, bit_col, varbit_col,\n  date_col, time_col, timestamp_col, timestamptz_col, interval_col, timetz_col,\n  int4_range_col, int8_range_col, num_range_col, ts_range_col, tstz_range_col, date_range_col,\n  inet_col, cidr_col, macaddr_col, json_col, jsonb_col, uuid_col,\n  bool_array_col, int4_array_col, int8_array_col, text_array_col, float8_array_col,\n  int4_range_array_col, date_range_array_col\n) VALUES (\n  #{bool_col}, #{char_col}, #{int2_col}, #{int4_col}, #{int8_col}, #{float4_col}, #{float8_col}, #{numeric_col},\n  #{name_col}, #{text_col}, #{varchar_col}, #{bpchar_col}, #{bytea_col}, #{bit_col}, #{varbit_col},\n  #{date_col}, #{time_col}, #{timestamp_col}, #{timestamptz_col}, #{interval_col}, #{timetz_col},\n  #{int4_range_col}, #{int8_range_col}, #{num_range_col}, #{ts_range_col}, #{tstz_range_col}, #{date_range_col},\n  #{inet_col}, #{cidr_col}, #{macaddr_col}, #{json_col}, #{jsonb_col}, #{uuid_col},\n  #{bool_array_col}, #{int4_array_col}, #{int8_array_col}, #{text_array_col}, #{float8_array_col},\n  #{int4_range_array_col}, #{date_range_array_col}\n)\nRETURNING id"
+    )
+)]
+pub async fn insert_all_types_test(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    bool_col: bool,
+    char_col: String,
+    int2_col: i16,
+    int4_col: i32,
+    int8_col: i64,
+    float4_col: f32,
+    float8_col: f64,
+    numeric_col: rust_decimal::Decimal,
+    name_col: String,
+    text_col: String,
+    varchar_col: String,
+    bpchar_col: String,
+    bytea_col: Vec<u8>,
+    bit_col: bit_vec::BitVec,
+    varbit_col: bit_vec::BitVec,
+    date_col: jiff_sqlx::Date,
+    time_col: jiff_sqlx::Time,
+    timestamp_col: jiff_sqlx::DateTime,
+    timestamptz_col: jiff_sqlx::Timestamp,
+    interval_col: sqlx::postgres::types::PgInterval,
+    timetz_col: sqlx::postgres::types::PgTimeTz,
+    int4_range_col: sqlx::postgres::types::PgRange<i32>,
+    int8_range_col: sqlx::postgres::types::PgRange<i64>,
+    num_range_col: sqlx::postgres::types::PgRange<rust_decimal::Decimal>,
+    ts_range_col: sqlx::postgres::types::PgRange<time::PrimitiveDateTime>,
+    tstz_range_col: sqlx::postgres::types::PgRange<time::OffsetDateTime>,
+    date_range_col: sqlx::postgres::types::PgRange<time::Date>,
+    inet_col: std::net::IpAddr,
+    cidr_col: std::net::IpAddr,
+    macaddr_col: mac_address::MacAddress,
+    json_col: serde_json::Value,
+    jsonb_col: serde_json::Value,
+    uuid_col: uuid::Uuid,
+    bool_array_col: Vec<bool>,
+    int4_array_col: Vec<i32>,
+    int8_array_col: Vec<i64>,
+    text_array_col: Vec<String>,
+    float8_array_col: Vec<f64>,
+    int4_range_array_col: Vec<sqlx::postgres::types::PgRange<i32>>,
+    date_range_array_col: Vec<sqlx::postgres::types::PgRange<time::Date>>,
+) -> Result<i32, super::Error<InsertAllTypesTestConstraints>> {
     let query = sqlx::query(
         r"INSERT INTO public.all_types_test (
          bool_col, char_col, int2_col, int4_col, int8_col, float4_col, float8_col, numeric_col,
@@ -71,7 +127,7 @@ pub async fn insert_all_types_test(executor: impl sqlx::Executor<'_, Database = 
          $34, $35, $36, $37, $38,
          $39, $40
         )
-        RETURNING id"
+        RETURNING id",
     );
     let query = query.bind(bool_col);
     let query = query.bind(&char_col);
@@ -168,8 +224,17 @@ pub struct GetAllTypesTestItem {
 /// Query Plan:
 /// Index Scan using all_types_test_pkey on all_types_test
 ///   Index Cond: (id = 0)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT\n  id, bool_col, char_col, int2_col, int4_col, int8_col, float4_col, float8_col, numeric_col,\n  name_col, text_col, varchar_col, bpchar_col, bytea_col, bit_col, varbit_col,\n  date_col, time_col, timestamp_col, timestamptz_col, interval_col, timetz_col,\n  int4_range_col, int8_range_col, num_range_col, ts_range_col, tstz_range_col, date_range_col,\n  inet_col, cidr_col, macaddr_col, json_col, jsonb_col, uuid_col,\n  bool_array_col, int4_array_col, int8_array_col, text_array_col, float8_array_col,\n  int4_range_array_col, date_range_array_col,\n  created_at\nFROM public.all_types_test\nWHERE id = #{id}"))]
-pub async fn get_all_types_test(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, id: i32) -> Result<GetAllTypesTestItem, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "SELECT\n  id, bool_col, char_col, int2_col, int4_col, int8_col, float4_col, float8_col, numeric_col,\n  name_col, text_col, varchar_col, bpchar_col, bytea_col, bit_col, varbit_col,\n  date_col, time_col, timestamp_col, timestamptz_col, interval_col, timetz_col,\n  int4_range_col, int8_range_col, num_range_col, ts_range_col, tstz_range_col, date_range_col,\n  inet_col, cidr_col, macaddr_col, json_col, jsonb_col, uuid_col,\n  bool_array_col, int4_array_col, int8_array_col, text_array_col, float8_array_col,\n  int4_range_array_col, date_range_array_col,\n  created_at\nFROM public.all_types_test\nWHERE id = #{id}"
+    )
+)]
+pub async fn get_all_types_test(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    id: i32,
+) -> Result<GetAllTypesTestItem, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT
          id, bool_col, char_col, int2_col, int4_col, int8_col, float4_col, float8_col, numeric_col,
@@ -181,56 +246,75 @@ pub async fn get_all_types_test(executor: impl sqlx::Executor<'_, Database = sql
          int4_range_array_col, date_range_array_col,
          created_at
         FROM public.all_types_test
-        WHERE id = $1"
+        WHERE id = $1",
     );
     let query = query.bind(id);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(GetAllTypesTestItem {
-        id: row.try_get::<i32, _>("id")?,
-        bool_col: row.try_get::<Option<bool>, _>("bool_col")?,
-        char_col: row.try_get::<Option<String>, _>("char_col")?,
-        int2_col: row.try_get::<Option<i16>, _>("int2_col")?,
-        int4_col: row.try_get::<Option<i32>, _>("int4_col")?,
-        int8_col: row.try_get::<Option<i64>, _>("int8_col")?,
-        float4_col: row.try_get::<Option<f32>, _>("float4_col")?,
-        float8_col: row.try_get::<Option<f64>, _>("float8_col")?,
-        numeric_col: row.try_get::<Option<rust_decimal::Decimal>, _>("numeric_col")?,
-        name_col: row.try_get::<Option<String>, _>("name_col")?,
-        text_col: row.try_get::<Option<String>, _>("text_col")?,
-        varchar_col: row.try_get::<Option<String>, _>("varchar_col")?,
-        bpchar_col: row.try_get::<Option<String>, _>("bpchar_col")?,
-        bytea_col: row.try_get::<Option<Vec<u8>>, _>("bytea_col")?,
-        bit_col: row.try_get::<Option<bit_vec::BitVec>, _>("bit_col")?,
-        varbit_col: row.try_get::<Option<bit_vec::BitVec>, _>("varbit_col")?,
-        date_col: row.try_get::<Option<jiff_sqlx::Date>, _>("date_col")?,
-        time_col: row.try_get::<Option<jiff_sqlx::Time>, _>("time_col")?,
-        timestamp_col: row.try_get::<Option<jiff_sqlx::DateTime>, _>("timestamp_col")?,
-        timestamptz_col: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("timestamptz_col")?,
-        interval_col: row.try_get::<Option<sqlx::postgres::types::PgInterval>, _>("interval_col")?,
-        timetz_col: row.try_get::<Option<sqlx::postgres::types::PgTimeTz>, _>("timetz_col")?,
-        int4_range_col: row.try_get::<Option<sqlx::postgres::types::PgRange<i32>>, _>("int4_range_col")?,
-        int8_range_col: row.try_get::<Option<sqlx::postgres::types::PgRange<i64>>, _>("int8_range_col")?,
-        num_range_col: row.try_get::<Option<sqlx::postgres::types::PgRange<rust_decimal::Decimal>>, _>("num_range_col")?,
-        ts_range_col: row.try_get::<Option<sqlx::postgres::types::PgRange<time::PrimitiveDateTime>>, _>("ts_range_col")?,
-        tstz_range_col: row.try_get::<Option<sqlx::postgres::types::PgRange<time::OffsetDateTime>>, _>("tstz_range_col")?,
-        date_range_col: row.try_get::<Option<sqlx::postgres::types::PgRange<time::Date>>, _>("date_range_col")?,
-        inet_col: row.try_get::<Option<std::net::IpAddr>, _>("inet_col")?,
-        cidr_col: row.try_get::<Option<std::net::IpAddr>, _>("cidr_col")?,
-        macaddr_col: row.try_get::<Option<mac_address::MacAddress>, _>("macaddr_col")?,
-        json_col: row.try_get::<Option<serde_json::Value>, _>("json_col")?,
-        jsonb_col: row.try_get::<Option<serde_json::Value>, _>("jsonb_col")?,
-        uuid_col: row.try_get::<Option<uuid::Uuid>, _>("uuid_col")?,
-        bool_array_col: row.try_get::<Option<Vec<bool>>, _>("bool_array_col")?,
-        int4_array_col: row.try_get::<Option<Vec<i32>>, _>("int4_array_col")?,
-        int8_array_col: row.try_get::<Option<Vec<i64>>, _>("int8_array_col")?,
-        text_array_col: row.try_get::<Option<Vec<String>>, _>("text_array_col")?,
-        float8_array_col: row.try_get::<Option<Vec<f64>>, _>("float8_array_col")?,
-        int4_range_array_col: row.try_get::<Option<Vec<sqlx::postgres::types::PgRange<i32>>>, _>("int4_range_array_col")?,
-        date_range_array_col: row.try_get::<Option<Vec<sqlx::postgres::types::PgRange<time::Date>>>, _>("date_range_array_col")?,
-        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            bool_col: row.try_get::<Option<bool>, _>("bool_col")?,
+            char_col: row.try_get::<Option<String>, _>("char_col")?,
+            int2_col: row.try_get::<Option<i16>, _>("int2_col")?,
+            int4_col: row.try_get::<Option<i32>, _>("int4_col")?,
+            int8_col: row.try_get::<Option<i64>, _>("int8_col")?,
+            float4_col: row.try_get::<Option<f32>, _>("float4_col")?,
+            float8_col: row.try_get::<Option<f64>, _>("float8_col")?,
+            numeric_col: row.try_get::<Option<rust_decimal::Decimal>, _>("numeric_col")?,
+            name_col: row.try_get::<Option<String>, _>("name_col")?,
+            text_col: row.try_get::<Option<String>, _>("text_col")?,
+            varchar_col: row.try_get::<Option<String>, _>("varchar_col")?,
+            bpchar_col: row.try_get::<Option<String>, _>("bpchar_col")?,
+            bytea_col: row.try_get::<Option<Vec<u8>>, _>("bytea_col")?,
+            bit_col: row.try_get::<Option<bit_vec::BitVec>, _>("bit_col")?,
+            varbit_col: row.try_get::<Option<bit_vec::BitVec>, _>("varbit_col")?,
+            date_col: row.try_get::<Option<jiff_sqlx::Date>, _>("date_col")?,
+            time_col: row.try_get::<Option<jiff_sqlx::Time>, _>("time_col")?,
+            timestamp_col: row.try_get::<Option<jiff_sqlx::DateTime>, _>("timestamp_col")?,
+            timestamptz_col: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("timestamptz_col")?,
+            interval_col: row
+                .try_get::<Option<sqlx::postgres::types::PgInterval>, _>("interval_col")?,
+            timetz_col: row.try_get::<Option<sqlx::postgres::types::PgTimeTz>, _>("timetz_col")?,
+            int4_range_col: row
+                .try_get::<Option<sqlx::postgres::types::PgRange<i32>>, _>("int4_range_col")?,
+            int8_range_col: row
+                .try_get::<Option<sqlx::postgres::types::PgRange<i64>>, _>("int8_range_col")?,
+            num_range_col: row
+                .try_get::<Option<sqlx::postgres::types::PgRange<rust_decimal::Decimal>>, _>(
+                    "num_range_col",
+                )?,
+            ts_range_col: row
+                .try_get::<Option<sqlx::postgres::types::PgRange<time::PrimitiveDateTime>>, _>(
+                    "ts_range_col",
+                )?,
+            tstz_range_col: row
+                .try_get::<Option<sqlx::postgres::types::PgRange<time::OffsetDateTime>>, _>(
+                    "tstz_range_col",
+                )?,
+            date_range_col: row.try_get::<Option<sqlx::postgres::types::PgRange<time::Date>>, _>(
+                "date_range_col",
+            )?,
+            inet_col: row.try_get::<Option<std::net::IpAddr>, _>("inet_col")?,
+            cidr_col: row.try_get::<Option<std::net::IpAddr>, _>("cidr_col")?,
+            macaddr_col: row.try_get::<Option<mac_address::MacAddress>, _>("macaddr_col")?,
+            json_col: row.try_get::<Option<serde_json::Value>, _>("json_col")?,
+            jsonb_col: row.try_get::<Option<serde_json::Value>, _>("jsonb_col")?,
+            uuid_col: row.try_get::<Option<uuid::Uuid>, _>("uuid_col")?,
+            bool_array_col: row.try_get::<Option<Vec<bool>>, _>("bool_array_col")?,
+            int4_array_col: row.try_get::<Option<Vec<i32>>, _>("int4_array_col")?,
+            int8_array_col: row.try_get::<Option<Vec<i64>>, _>("int8_array_col")?,
+            text_array_col: row.try_get::<Option<Vec<String>>, _>("text_array_col")?,
+            float8_array_col: row.try_get::<Option<Vec<f64>>, _>("float8_array_col")?,
+            int4_range_array_col: row
+                .try_get::<Option<Vec<sqlx::postgres::types::PgRange<i32>>>, _>(
+                    "int4_range_array_col",
+                )?,
+            date_range_array_col: row
+                .try_get::<Option<Vec<sqlx::postgres::types::PgRange<time::Date>>>, _>(
+                    "date_range_array_col",
+                )?,
+            created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+        })
     })();
     result.map_err(Into::into)
 }
-

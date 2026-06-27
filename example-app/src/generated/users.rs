@@ -49,26 +49,39 @@ pub struct InsertUserItem {
 }
 
 /// Insert a new user with all fields and return the created user
-#[tracing::instrument(level = "trace", skip(executor, profile), fields(sql = "INSERT INTO public.users (name, email, age, profile)\nVALUES (#{name}, #{email}, #{age}, #{profile})\nRETURNING id, name, email, age, created_at"))]
-pub async fn insert_user(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, name: String, email: String, age: i32, profile: crate::models::UserProfile) -> Result<InsertUserItem, super::Error<InsertUserConstraints>> {
+#[tracing::instrument(
+    level = "trace",
+    skip(executor, profile),
+    fields(
+        sql = "INSERT INTO public.users (name, email, age, profile)\nVALUES (#{name}, #{email}, #{age}, #{profile})\nRETURNING id, name, email, age, created_at"
+    )
+)]
+pub async fn insert_user(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    name: String,
+    email: String,
+    age: i32,
+    profile: crate::models::UserProfile,
+) -> Result<InsertUserItem, super::Error<InsertUserConstraints>> {
     let query = sqlx::query(
         r"INSERT INTO public.users (name, email, age, profile)
         VALUES ($1, $2, $3, $4)
-        RETURNING id, name, email, age, created_at"
+        RETURNING id, name, email, age, created_at",
     );
     let query = query.bind(&name);
     let query = query.bind(&email);
     let query = query.bind(age);
-    let query = query.bind(serde_json::to_value(&profile).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
+    let query =
+        query.bind(serde_json::to_value(&profile).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(InsertUserItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        age: row.try_get::<Option<i32>, _>("age")?,
-        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            name: row.try_get::<String, _>("name")?,
+            email: row.try_get::<String, _>("email")?,
+            age: row.try_get::<Option<i32>, _>("age")?,
+            created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -117,8 +130,17 @@ pub struct InsertUsersBatchRecord {
 }
 
 /// Insert multiple public.users using UNNEST pattern with multiunzip
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.users (name, email, age)\nSELECT *\nFROM UNNEST(\n        #{name}::text [],\n        #{email}::text [],\n        #{age}::int4 []\n    )"))]
-pub async fn insert_users_batch(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, items: Vec<InsertUsersBatchRecord>) -> Result<(), super::Error<InsertUsersBatchConstraints>> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "INSERT INTO public.users (name, email, age)\nSELECT *\nFROM UNNEST(\n        #{name}::text [],\n        #{email}::text [],\n        #{age}::int4 []\n    )"
+    )
+)]
+pub async fn insert_users_batch(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    items: Vec<InsertUsersBatchRecord>,
+) -> Result<(), super::Error<InsertUsersBatchConstraints>> {
     use itertools::Itertools;
     let query = sqlx::query(
         r"INSERT INTO public.users (name, email, age)
@@ -127,13 +149,12 @@ pub async fn insert_users_batch(executor: impl sqlx::Executor<'_, Database = sql
             $1::text [],
             $2::text [],
             $3::int4 []
-          )"
+          )",
     );
-    let (name, email, age): (Vec<_>, Vec<_>, Vec<_>) =
-        items
-            .into_iter()
-            .map(|item| (item.name, item.email, item.age))
-            .multiunzip();
+    let (name, email, age): (Vec<_>, Vec<_>, Vec<_>) = items
+        .into_iter()
+        .map(|item| (item.name, item.email, item.age))
+        .multiunzip();
     let query = query.bind(name);
     let query = query.bind(email);
     let query = query.bind(age);
@@ -159,28 +180,42 @@ pub struct GetAllUsersItem {
 ///   Sort Key: created_at DESC
 ///   ->  Seq Scan on users
 ///         Disabled: true
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, age, profile, created_at, updated_at \nFROM public.users \nORDER BY created_at DESC"))]
-pub async fn get_all_users(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>) -> Result<Vec<GetAllUsersItem>, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "SELECT id, name, email, age, profile, created_at, updated_at \nFROM public.users \nORDER BY created_at DESC"
+    )
+)]
+pub async fn get_all_users(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+) -> Result<Vec<GetAllUsersItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, name, email, age, profile, created_at, updated_at 
         FROM public.users 
-        ORDER BY created_at DESC"
+        ORDER BY created_at DESC",
     );
     let rows = query.fetch_all(executor).await?;
-    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
-        Ok(GetAllUsersItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        age: row.try_get::<Option<i32>, _>("age")?,
-        profile: row.try_get::<Option<serde_json::Value>, _>("profile")?
-            .map(|v| serde_json::from_value::<crate::models::UserProfile>(v)
-            .map_err(|e| sqlx::Error::Decode(Box::new(e))))
-            .transpose()?,
-        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
-        updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
-    })
-    }).collect();
+    let result: Result<Vec<_>, sqlx::Error> = rows
+        .iter()
+        .map(|row| {
+            Ok(GetAllUsersItem {
+                id: row.try_get::<i32, _>("id")?,
+                name: row.try_get::<String, _>("name")?,
+                email: row.try_get::<String, _>("email")?,
+                age: row.try_get::<Option<i32>, _>("age")?,
+                profile: row
+                    .try_get::<Option<serde_json::Value>, _>("profile")?
+                    .map(|v| {
+                        serde_json::from_value::<crate::models::UserProfile>(v)
+                            .map_err(|e| sqlx::Error::Decode(Box::new(e)))
+                    })
+                    .transpose()?,
+                created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+                updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
+            })
+        })
+        .collect();
     result.map_err(Into::into)
 }
 
@@ -197,11 +232,14 @@ pub struct FindUserByEmailItem {
 
 /// Find a user by their email address
 #[tracing::instrument(level = "debug", skip_all)]
-pub async fn find_user_by_email(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, email: String) -> Result<Option<FindUserByEmailItem>, super::ErrorReadOnly> {
+pub async fn find_user_by_email(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    email: String,
+) -> Result<Option<FindUserByEmailItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, name, email, age, profile, created_at, updated_at 
         FROM public.users 
-        WHERE email = $1"
+        WHERE email = $1",
     );
     let query = query.bind(&email);
     let row = query.fetch_optional(executor).await?;
@@ -209,17 +247,17 @@ pub async fn find_user_by_email(executor: impl sqlx::Executor<'_, Database = sql
         Some(row) => {
             let result: Result<_, sqlx::Error> = (|| {
                 Ok(FindUserByEmailItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        age: row.try_get::<Option<i32>, _>("age")?,
-        profile: row.try_get::<Option<serde_json::Value>, _>("profile")?,
-        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
-        updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
-    })
+                    id: row.try_get::<i32, _>("id")?,
+                    name: row.try_get::<String, _>("name")?,
+                    email: row.try_get::<String, _>("email")?,
+                    age: row.try_get::<Option<i32>, _>("age")?,
+                    profile: row.try_get::<Option<serde_json::Value>, _>("profile")?,
+                    created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+                    updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
+                })
             })();
             result.map(Some).map_err(Into::into)
-        },
+        }
         None => Ok(None),
     }
 }
@@ -271,8 +309,18 @@ pub struct UpdateUserProfileItem {
 }
 
 /// Update a user's profile by their ID
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "UPDATE public.users\nSET profile = #{profile}, updated_at = NOW() \nWHERE id = #{user_id} \nRETURNING id,\n    name,\n    email,\n    age,\n    profile,\n    updated_at"))]
-pub async fn update_user_profile(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, profile: crate::models::UserProfile, user_id: i32) -> Result<UpdateUserProfileItem, super::Error<UpdateUserProfileConstraints>> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "UPDATE public.users\nSET profile = #{profile}, updated_at = NOW() \nWHERE id = #{user_id} \nRETURNING id,\n    name,\n    email,\n    age,\n    profile,\n    updated_at"
+    )
+)]
+pub async fn update_user_profile(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    profile: crate::models::UserProfile,
+    user_id: i32,
+) -> Result<UpdateUserProfileItem, super::Error<UpdateUserProfileConstraints>> {
     let query = sqlx::query(
         r"UPDATE public.users
         SET profile = $1, updated_at = NOW() 
@@ -282,23 +330,27 @@ pub async fn update_user_profile(executor: impl sqlx::Executor<'_, Database = sq
           email,
           age,
           profile,
-          updated_at"
+          updated_at",
     );
-    let query = query.bind(serde_json::to_value(&profile).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
+    let query =
+        query.bind(serde_json::to_value(&profile).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
     let query = query.bind(user_id);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(UpdateUserProfileItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        age: row.try_get::<Option<i32>, _>("age")?,
-        profile: row.try_get::<Option<serde_json::Value>, _>("profile")?
-            .map(|v| serde_json::from_value::<crate::models::UserProfile>(v)
-            .map_err(|e| sqlx::Error::Decode(Box::new(e))))
-            .transpose()?,
-        updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            name: row.try_get::<String, _>("name")?,
+            email: row.try_get::<String, _>("email")?,
+            age: row.try_get::<Option<i32>, _>("age")?,
+            profile: row
+                .try_get::<Option<serde_json::Value>, _>("profile")?
+                .map(|v| {
+                    serde_json::from_value::<crate::models::UserProfile>(v)
+                        .map_err(|e| sqlx::Error::Decode(Box::new(e)))
+                })
+                .transpose()?,
+            updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -318,25 +370,38 @@ pub struct FindUsersByNameAndAgeItem {
 /// Seq Scan on users
 ///   Disabled: true
 ///   Filter: (((name)::text ~~* 'dummy'::text) AND ((name)::text = 'dummy'::text))
-/// 
+///
 /// === find_users_by_name_and_age (variant 1) ===
 /// Index Scan using idx_users_age_updated_at on users
 ///   Index Cond: (age >= 0)
 ///   Filter: (((name)::text ~~* 'dummy'::text) AND ((name)::text = 'dummy'::text))
-/// 
+///
 /// === find_users_by_name_and_age (variant 2) ===
 /// Index Scan using idx_users_age_updated_at on users
 ///   Index Cond: (age <= 0)
 ///   Filter: (((name)::text ~~* 'dummy'::text) AND ((name)::text = 'dummy'::text))
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, age \nFROM public.users \nWHERE name ILIKE #{name_pattern} \n#[AND age >= #{min_age?}] \nAND name = #{name_exact} \n#[AND age <= #{max_age?}] \nORDER BY name"))]
-pub async fn find_users_by_name_and_age(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, name_pattern: String, min_age: Option<i32>, name_exact: String, max_age: Option<i32>) -> Result<Vec<FindUsersByNameAndAgeItem>, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "SELECT id, name, email, age \nFROM public.users \nWHERE name ILIKE #{name_pattern} \n#[AND age >= #{min_age?}] \nAND name = #{name_exact} \n#[AND age <= #{max_age?}] \nORDER BY name"
+    )
+)]
+pub async fn find_users_by_name_and_age(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    name_pattern: String,
+    min_age: Option<i32>,
+    name_exact: String,
+    max_age: Option<i32>,
+) -> Result<Vec<FindUsersByNameAndAgeItem>, super::ErrorReadOnly> {
     let mut final_sql = r"SELECT id, name, email, age 
 FROM public.users 
 WHERE name ILIKE $1 
 #[AND age >= #{min_age?}] 
 AND name = $2 
 #[AND age <= #{max_age?}] 
-ORDER BY name".to_string();
+ORDER BY name"
+        .to_string();
     let mut included_params = Vec::new();
 
     if min_age.is_some() {
@@ -382,14 +447,17 @@ ORDER BY name".to_string();
     }
 
     let rows = query.fetch_all(executor).await?;
-    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
-        Ok(FindUsersByNameAndAgeItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        age: row.try_get::<Option<i32>, _>("age")?,
-    })
-    }).collect();
+    let result: Result<Vec<_>, sqlx::Error> = rows
+        .iter()
+        .map(|row| {
+            Ok(FindUsersByNameAndAgeItem {
+                id: row.try_get::<i32, _>("id")?,
+                name: row.try_get::<String, _>("name")?,
+                email: row.try_get::<String, _>("email")?,
+                age: row.try_get::<Option<i32>, _>("age")?,
+            })
+        })
+        .collect();
     result.map_err(Into::into)
 }
 
@@ -412,33 +480,48 @@ pub struct GetRecentUsersItem {
 ///   ->  Seq Scan on users
 ///         Disabled: true
 ///         Filter: (created_at > '1970-01-01 08:00:00+08'::timestamp with time zone)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, age, profile, created_at, updated_at \nFROM public.users \nWHERE created_at > #{since} \nORDER BY created_at DESC"))]
-pub async fn get_recent_users(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, since: jiff_sqlx::Timestamp) -> Result<Vec<GetRecentUsersItem>, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "SELECT id, name, email, age, profile, created_at, updated_at \nFROM public.users \nWHERE created_at > #{since} \nORDER BY created_at DESC"
+    )
+)]
+pub async fn get_recent_users(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    since: jiff_sqlx::Timestamp,
+) -> Result<Vec<GetRecentUsersItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, name, email, age, profile, created_at, updated_at 
         FROM public.users 
         WHERE created_at > $1 
-        ORDER BY created_at DESC"
+        ORDER BY created_at DESC",
     );
     let query = query.bind(since);
     let rows = query.fetch_all(executor).await?;
     if rows.is_empty() {
         return Err(sqlx::Error::RowNotFound.into());
     }
-    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
-        Ok(GetRecentUsersItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        age: row.try_get::<Option<i32>, _>("age")?,
-        profile: row.try_get::<Option<serde_json::Value>, _>("profile")?
-            .map(|v| serde_json::from_value::<crate::models::UserProfile>(v)
-            .map_err(|e| sqlx::Error::Decode(Box::new(e))))
-            .transpose()?,
-        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
-        updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
-    })
-    }).collect();
+    let result: Result<Vec<_>, sqlx::Error> = rows
+        .iter()
+        .map(|row| {
+            Ok(GetRecentUsersItem {
+                id: row.try_get::<i32, _>("id")?,
+                name: row.try_get::<String, _>("name")?,
+                email: row.try_get::<String, _>("email")?,
+                age: row.try_get::<Option<i32>, _>("age")?,
+                profile: row
+                    .try_get::<Option<serde_json::Value>, _>("profile")?
+                    .map(|v| {
+                        serde_json::from_value::<crate::models::UserProfile>(v)
+                            .map_err(|e| sqlx::Error::Decode(Box::new(e)))
+                    })
+                    .transpose()?,
+                created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+                updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
+            })
+        })
+        .collect();
     result.map_err(Into::into)
 }
 
@@ -458,13 +541,23 @@ pub struct GetActiveUsersByAgeRangeItem {
 /// Index Scan using idx_users_age on users
 ///   Index Cond: ((age >= 0) AND (age <= 0))
 ///   Filter: (updated_at > (now - '30 days'::interval))
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, age, profile, created_at \nFROM public.users \nWHERE age BETWEEN #{min_age} AND #{max_age} \nAND updated_at > NOW() - INTERVAL '30 days'"))]
-pub async fn get_active_users_by_age_range(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, min_age: i32, max_age: i32) -> Result<Vec<GetActiveUsersByAgeRangeItem>, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "SELECT id, name, email, age, profile, created_at \nFROM public.users \nWHERE age BETWEEN #{min_age} AND #{max_age} \nAND updated_at > NOW() - INTERVAL '30 days'"
+    )
+)]
+pub async fn get_active_users_by_age_range(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    min_age: i32,
+    max_age: i32,
+) -> Result<Vec<GetActiveUsersByAgeRangeItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, name, email, age, profile, created_at 
         FROM public.users 
         WHERE age BETWEEN $1 AND $2 
-        AND updated_at > NOW() - INTERVAL '30 days'"
+        AND updated_at > NOW() - INTERVAL '30 days'",
     );
     let query = query.bind(min_age);
     let query = query.bind(max_age);
@@ -472,19 +565,25 @@ pub async fn get_active_users_by_age_range(executor: impl sqlx::Executor<'_, Dat
     if rows.is_empty() {
         return Err(sqlx::Error::RowNotFound.into());
     }
-    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
-        Ok(GetActiveUsersByAgeRangeItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        age: row.try_get::<Option<i32>, _>("age")?,
-        profile: row.try_get::<Option<serde_json::Value>, _>("profile")?
-            .map(|v| serde_json::from_value::<crate::models::UserProfile>(v)
-            .map_err(|e| sqlx::Error::Decode(Box::new(e))))
-            .transpose()?,
-        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
-    })
-    }).collect();
+    let result: Result<Vec<_>, sqlx::Error> = rows
+        .iter()
+        .map(|row| {
+            Ok(GetActiveUsersByAgeRangeItem {
+                id: row.try_get::<i32, _>("id")?,
+                name: row.try_get::<String, _>("name")?,
+                email: row.try_get::<String, _>("email")?,
+                age: row.try_get::<Option<i32>, _>("age")?,
+                profile: row
+                    .try_get::<Option<serde_json::Value>, _>("profile")?
+                    .map(|v| {
+                        serde_json::from_value::<crate::models::UserProfile>(v)
+                            .map_err(|e| sqlx::Error::Decode(Box::new(e)))
+                    })
+                    .transpose()?,
+                created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+            })
+        })
+        .collect();
     result.map_err(Into::into)
 }
 
@@ -503,26 +602,38 @@ pub struct SearchUsersByNamePatternItem {
 ///   ->  Seq Scan on users
 ///         Disabled: true
 ///         Filter: ((name)::text ~~* 'dummy'::text)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email \nFROM public.users \nWHERE name ILIKE #{pattern} \nORDER BY name"))]
-pub async fn search_users_by_name_pattern(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, pattern: String) -> Result<Vec<SearchUsersByNamePatternItem>, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "SELECT id, name, email \nFROM public.users \nWHERE name ILIKE #{pattern} \nORDER BY name"
+    )
+)]
+pub async fn search_users_by_name_pattern(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    pattern: String,
+) -> Result<Vec<SearchUsersByNamePatternItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, name, email 
         FROM public.users 
         WHERE name ILIKE $1 
-        ORDER BY name"
+        ORDER BY name",
     );
     let query = query.bind(&pattern);
     let rows = query.fetch_all(executor).await?;
     if rows.is_empty() {
         return Err(sqlx::Error::RowNotFound.into());
     }
-    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
-        Ok(SearchUsersByNamePatternItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-    })
-    }).collect();
+    let result: Result<Vec<_>, sqlx::Error> = rows
+        .iter()
+        .map(|row| {
+            Ok(SearchUsersByNamePatternItem {
+                id: row.try_get::<i32, _>("id")?,
+                name: row.try_get::<String, _>("name")?,
+                email: row.try_get::<String, _>("email")?,
+            })
+        })
+        .collect();
     result.map_err(Into::into)
 }
 
@@ -543,39 +654,54 @@ pub struct SearchUsersAdvancedItem {
 ///   Sort Key: created_at DESC
 ///   ->  Seq Scan on users
 ///         Disabled: true
-/// 
+///
 /// === search_users_advanced (variant 1) ===
 /// Sort
 ///   Sort Key: created_at DESC
 ///   ->  Seq Scan on users
 ///         Disabled: true
 ///         Filter: ((name)::text ~~* 'dummy'::text)
-/// 
+///
 /// === search_users_advanced (variant 2) ===
 /// Sort
 ///   Sort Key: created_at DESC
 ///   ->  Index Scan using idx_users_age_updated_at on users
 ///         Index Cond: (age >= 0)
-/// 
+///
 /// === search_users_advanced (variant 3) ===
 /// Sort
 ///   Sort Key: created_at DESC
 ///   ->  Seq Scan on users
 ///         Disabled: true
 ///         Filter: (created_at >= '1970-01-01 08:00:00+08'::timestamp with time zone)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, age, created_at \nFROM public.users \nWHERE 1=1 \n#[AND name ILIKE #{name_pattern?}] \n#[AND age >= #{min_age?}] \n#[AND created_at >= #{since?}] \nORDER BY created_at DESC"))]
-pub async fn search_users_advanced(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, name_pattern: Option<String>, min_age: Option<i32>, since: Option<jiff_sqlx::Timestamp>) -> Result<Vec<SearchUsersAdvancedItem>, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "SELECT id, name, email, age, created_at \nFROM public.users \nWHERE 1=1 \n#[AND name ILIKE #{name_pattern?}] \n#[AND age >= #{min_age?}] \n#[AND created_at >= #{since?}] \nORDER BY created_at DESC"
+    )
+)]
+pub async fn search_users_advanced(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    name_pattern: Option<String>,
+    min_age: Option<i32>,
+    since: Option<jiff_sqlx::Timestamp>,
+) -> Result<Vec<SearchUsersAdvancedItem>, super::ErrorReadOnly> {
     let mut final_sql = r"SELECT id, name, email, age, created_at 
 FROM public.users 
 WHERE 1=1 
 #[AND name ILIKE #{name_pattern?}] 
 #[AND age >= #{min_age?}] 
 #[AND created_at >= #{since?}] 
-ORDER BY created_at DESC".to_string();
+ORDER BY created_at DESC"
+        .to_string();
     let mut included_params = Vec::new();
 
     if name_pattern.is_some() {
-        final_sql = final_sql.replace(r"#[AND name ILIKE #{name_pattern?}]", r"AND name ILIKE #{name_pattern?}");
+        final_sql = final_sql.replace(
+            r"#[AND name ILIKE #{name_pattern?}]",
+            r"AND name ILIKE #{name_pattern?}",
+        );
         included_params.push("name_pattern");
     } else {
         final_sql = final_sql.replace(r"#[AND name ILIKE #{name_pattern?}]", "");
@@ -589,7 +715,10 @@ ORDER BY created_at DESC".to_string();
     }
 
     if since.is_some() {
-        final_sql = final_sql.replace(r"#[AND created_at >= #{since?}]", r"AND created_at >= #{since?}");
+        final_sql = final_sql.replace(
+            r"#[AND created_at >= #{since?}]",
+            r"AND created_at >= #{since?}",
+        );
         included_params.push("since");
     } else {
         final_sql = final_sql.replace(r"#[AND created_at >= #{since?}]", "");
@@ -626,15 +755,18 @@ ORDER BY created_at DESC".to_string();
     }
 
     let rows = query.fetch_all(executor).await?;
-    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
-        Ok(SearchUsersAdvancedItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        age: row.try_get::<Option<i32>, _>("age")?,
-        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
-    })
-    }).collect();
+    let result: Result<Vec<_>, sqlx::Error> = rows
+        .iter()
+        .map(|row| {
+            Ok(SearchUsersAdvancedItem {
+                id: row.try_get::<i32, _>("id")?,
+                name: row.try_get::<String, _>("name")?,
+                email: row.try_get::<String, _>("email")?,
+                age: row.try_get::<Option<i32>, _>("age")?,
+                created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+            })
+        })
+        .collect();
     result.map_err(Into::into)
 }
 
@@ -654,24 +786,36 @@ pub struct GetUsersByStatusItem {
 ///   ->  Seq Scan on users
 ///         Disabled: true
 ///         Filter: (status = 'active'::public.user_status)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, status \nFROM public.users \nWHERE status = #{user_status} \nORDER BY name"))]
-pub async fn get_users_by_status(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, user_status: super::types::public::UserStatus) -> Result<Vec<GetUsersByStatusItem>, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "SELECT id, name, email, status \nFROM public.users \nWHERE status = #{user_status} \nORDER BY name"
+    )
+)]
+pub async fn get_users_by_status(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    user_status: super::types::public::UserStatus,
+) -> Result<Vec<GetUsersByStatusItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, name, email, status 
         FROM public.users 
         WHERE status = $1 
-        ORDER BY name"
+        ORDER BY name",
     );
     let query = query.bind(user_status);
     let rows = query.fetch_all(executor).await?;
-    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
-        Ok(GetUsersByStatusItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        status: row.try_get::<Option<super::types::public::UserStatus>, _>("status")?,
-    })
-    }).collect();
+    let result: Result<Vec<_>, sqlx::Error> = rows
+        .iter()
+        .map(|row| {
+            Ok(GetUsersByStatusItem {
+                id: row.try_get::<i32, _>("id")?,
+                name: row.try_get::<String, _>("name")?,
+                email: row.try_get::<String, _>("email")?,
+                status: row.try_get::<Option<super::types::public::UserStatus>, _>("status")?,
+            })
+        })
+        .collect();
     result.map_err(Into::into)
 }
 
@@ -718,22 +862,32 @@ pub struct UpdateUserStatusItem {
 }
 
 /// Update user status and return the new status
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "UPDATE public.users \nSET status = #{new_status} \nWHERE id = #{user_id} \nRETURNING id, status"))]
-pub async fn update_user_status(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, new_status: super::types::public::UserStatus, user_id: i32) -> Result<UpdateUserStatusItem, super::Error<UpdateUserStatusConstraints>> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "UPDATE public.users \nSET status = #{new_status} \nWHERE id = #{user_id} \nRETURNING id, status"
+    )
+)]
+pub async fn update_user_status(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    new_status: super::types::public::UserStatus,
+    user_id: i32,
+) -> Result<UpdateUserStatusItem, super::Error<UpdateUserStatusConstraints>> {
     let query = sqlx::query(
         r"UPDATE public.users 
         SET status = $1 
         WHERE id = $2 
-        RETURNING id, status"
+        RETURNING id, status",
     );
     let query = query.bind(new_status);
     let query = query.bind(user_id);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(UpdateUserStatusItem {
-        id: row.try_get::<i32, _>("id")?,
-        status: row.try_get::<Option<super::types::public::UserStatus>, _>("status")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            status: row.try_get::<Option<super::types::public::UserStatus>, _>("status")?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -784,15 +938,28 @@ pub struct UpdateUserFieldsItem {
 }
 
 /// Update user fields conditionally - only updates fields that are provided (not None)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "UPDATE public.users \nSET updated_at = NOW() \n#[, name = #{name?}] \n#[, email = #{email?}] \n#[, age = #{age?}] \nWHERE id = #{user_id} \nRETURNING id, name, email, age, updated_at"))]
-pub async fn update_user_fields(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, name: Option<String>, email: Option<String>, age: Option<i32>, user_id: i32) -> Result<UpdateUserFieldsItem, super::Error<UpdateUserFieldsConstraints>> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "UPDATE public.users \nSET updated_at = NOW() \n#[, name = #{name?}] \n#[, email = #{email?}] \n#[, age = #{age?}] \nWHERE id = #{user_id} \nRETURNING id, name, email, age, updated_at"
+    )
+)]
+pub async fn update_user_fields(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    name: Option<String>,
+    email: Option<String>,
+    age: Option<i32>,
+    user_id: i32,
+) -> Result<UpdateUserFieldsItem, super::Error<UpdateUserFieldsConstraints>> {
     let mut final_sql = r"UPDATE public.users 
 SET updated_at = NOW() 
 #[, name = #{name?}] 
 #[, email = #{email?}] 
 #[, age = #{age?}] 
 WHERE id = $1 
-RETURNING id, name, email, age, updated_at".to_string();
+RETURNING id, name, email, age, updated_at"
+        .to_string();
     let mut included_params = Vec::new();
 
     if name.is_some() {
@@ -852,12 +1019,12 @@ RETURNING id, name, email, age, updated_at".to_string();
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(UpdateUserFieldsItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        age: row.try_get::<Option<i32>, _>("age")?,
-        updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            name: row.try_get::<String, _>("name")?,
+            email: row.try_get::<String, _>("email")?,
+            age: row.try_get::<Option<i32>, _>("age")?,
+            updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -915,15 +1082,27 @@ pub struct UpdateUserFieldsDiffItem {
 }
 
 /// Update user fields using diff-based conditional updates - compares old and new structs
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "UPDATE public.users \nSET updated_at = NOW() \n#[, name = #{name?}] \n#[, email = #{email?}] \n#[, age = #{age?}] \nWHERE id = #{user_id} \nRETURNING id, name, email, age, updated_at"))]
-pub async fn update_user_fields_diff(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, old: &UpdateUserFieldsDiffParams, new: &UpdateUserFieldsDiffParams, user_id: i32) -> Result<UpdateUserFieldsDiffItem, super::Error<UpdateUserFieldsDiffConstraints>> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "UPDATE public.users \nSET updated_at = NOW() \n#[, name = #{name?}] \n#[, email = #{email?}] \n#[, age = #{age?}] \nWHERE id = #{user_id} \nRETURNING id, name, email, age, updated_at"
+    )
+)]
+pub async fn update_user_fields_diff(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    old: &UpdateUserFieldsDiffParams,
+    new: &UpdateUserFieldsDiffParams,
+    user_id: i32,
+) -> Result<UpdateUserFieldsDiffItem, super::Error<UpdateUserFieldsDiffConstraints>> {
     let mut final_sql = r"UPDATE public.users 
 SET updated_at = NOW() 
 #[, name = #{name?}] 
 #[, email = #{email?}] 
 #[, age = #{age?}] 
 WHERE id = $1 
-RETURNING id, name, email, age, updated_at".to_string();
+RETURNING id, name, email, age, updated_at"
+        .to_string();
     let mut included_params = Vec::new();
 
     if old.name != new.name {
@@ -983,12 +1162,12 @@ RETURNING id, name, email, age, updated_at".to_string();
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(UpdateUserFieldsDiffItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        age: row.try_get::<Option<i32>, _>("age")?,
-        updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            name: row.try_get::<String, _>("name")?,
+            email: row.try_get::<String, _>("email")?,
+            age: row.try_get::<Option<i32>, _>("age")?,
+            updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -1046,12 +1225,21 @@ pub struct InsertUserStructuredItem {
 }
 
 /// Insert a new user using structured parameters - all params passed as a single struct
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.users (name, email, age) \nVALUES (#{name}, #{email}, #{age}) \nRETURNING id, name, email, age, created_at"))]
-pub async fn insert_user_structured(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, params: &InsertUserStructuredParams) -> Result<InsertUserStructuredItem, super::Error<InsertUserStructuredConstraints>> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "INSERT INTO public.users (name, email, age) \nVALUES (#{name}, #{email}, #{age}) \nRETURNING id, name, email, age, created_at"
+    )
+)]
+pub async fn insert_user_structured(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    params: &InsertUserStructuredParams,
+) -> Result<InsertUserStructuredItem, super::Error<InsertUserStructuredConstraints>> {
     let query = sqlx::query(
         r"INSERT INTO public.users (name, email, age) 
         VALUES ($1, $2, $3) 
-        RETURNING id, name, email, age, created_at"
+        RETURNING id, name, email, age, created_at",
     );
     let query = query.bind(&params.name);
     let query = query.bind(&params.email);
@@ -1059,12 +1247,12 @@ pub async fn insert_user_structured(executor: impl sqlx::Executor<'_, Database =
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(InsertUserStructuredItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        age: row.try_get::<Option<i32>, _>("age")?,
-        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            name: row.try_get::<String, _>("name")?,
+            email: row.try_get::<String, _>("email")?,
+            age: row.try_get::<Option<i32>, _>("age")?,
+            created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -1077,17 +1265,24 @@ pub async fn insert_user_structured(executor: impl sqlx::Executor<'_, Database =
 ///         Sort Key: status
 ///         ->  Seq Scan on users
 ///               Disabled: true
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT DISTINCT status \nFROM public.users \nORDER BY status"))]
-pub async fn get_all_user_statuses(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>) -> Result<Vec<Option<super::types::public::UserStatus>>, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(sql = "SELECT DISTINCT status \nFROM public.users \nORDER BY status")
+)]
+pub async fn get_all_user_statuses(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+) -> Result<Vec<Option<super::types::public::UserStatus>>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT DISTINCT status 
         FROM public.users 
-        ORDER BY status"
+        ORDER BY status",
     );
     let rows = query.fetch_all(executor).await?;
-    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
-        Ok(row.try_get::<Option<super::types::public::UserStatus>, _>("status")?)
-    }).collect();
+    let result: Result<Vec<_>, sqlx::Error> = rows
+        .iter()
+        .map(|row| Ok(row.try_get::<Option<super::types::public::UserStatus>, _>("status")?))
+        .collect();
     result.map_err(Into::into)
 }
 
@@ -1116,35 +1311,47 @@ pub struct GetAllUsersWithStarItem {
 ///   Sort Key: created_at DESC
 ///   ->  Seq Scan on users
 ///         Disabled: true
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT * \nFROM public.users \nORDER BY created_at DESC"))]
-pub async fn get_all_users_with_star(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>) -> Result<Vec<GetAllUsersWithStarItem>, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(sql = "SELECT * \nFROM public.users \nORDER BY created_at DESC")
+)]
+pub async fn get_all_users_with_star(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+) -> Result<Vec<GetAllUsersWithStarItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT * 
         FROM public.users 
-        ORDER BY created_at DESC"
+        ORDER BY created_at DESC",
     );
     let rows = query.fetch_all(executor).await?;
-    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
-        Ok(GetAllUsersWithStarItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        status: row.try_get::<Option<super::types::public::UserStatus>, _>("status")?,
-        profile: row.try_get::<Option<serde_json::Value>, _>("profile")?
-            .map(|v| serde_json::from_value::<crate::models::UserProfile>(v)
-            .map_err(|e| sqlx::Error::Decode(Box::new(e))))
-            .transpose()?,
-        settings: row.try_get::<Option<serde_json::Value>, _>("settings")?,
-        is_active: row.try_get::<Option<bool>, _>("is_active")?,
-        age: row.try_get::<Option<i32>, _>("age")?,
-        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
-        updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
-        referrer_id: row.try_get::<Option<i32>, _>("referrer_id")?,
-        social_links: row.try_get::<Option<serde_json::Value>, _>("social_links")?,
-        tags: row.try_get::<Option<Vec<serde_json::Value>>, _>("tags")?,
-        labels: row.try_get::<Vec<serde_json::Value>, _>("labels")?,
-    })
-    }).collect();
+    let result: Result<Vec<_>, sqlx::Error> = rows
+        .iter()
+        .map(|row| {
+            Ok(GetAllUsersWithStarItem {
+                id: row.try_get::<i32, _>("id")?,
+                name: row.try_get::<String, _>("name")?,
+                email: row.try_get::<String, _>("email")?,
+                status: row.try_get::<Option<super::types::public::UserStatus>, _>("status")?,
+                profile: row
+                    .try_get::<Option<serde_json::Value>, _>("profile")?
+                    .map(|v| {
+                        serde_json::from_value::<crate::models::UserProfile>(v)
+                            .map_err(|e| sqlx::Error::Decode(Box::new(e)))
+                    })
+                    .transpose()?,
+                settings: row.try_get::<Option<serde_json::Value>, _>("settings")?,
+                is_active: row.try_get::<Option<bool>, _>("is_active")?,
+                age: row.try_get::<Option<i32>, _>("age")?,
+                created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+                updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
+                referrer_id: row.try_get::<Option<i32>, _>("referrer_id")?,
+                social_links: row.try_get::<Option<serde_json::Value>, _>("social_links")?,
+                tags: row.try_get::<Option<Vec<serde_json::Value>>, _>("tags")?,
+                labels: row.try_get::<Vec<serde_json::Value>, _>("labels")?,
+            })
+        })
+        .collect();
     result.map_err(Into::into)
 }
 
@@ -1171,12 +1378,19 @@ pub struct GetUserByIdWithStarItem {
 /// Query Plan:
 /// Index Scan using users_pkey on users
 ///   Index Cond: (id = 0)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT * \nFROM public.users \nWHERE id = #{user_id}"))]
-pub async fn get_user_by_id_with_star(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, user_id: i32) -> Result<Option<GetUserByIdWithStarItem>, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(sql = "SELECT * \nFROM public.users \nWHERE id = #{user_id}")
+)]
+pub async fn get_user_by_id_with_star(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    user_id: i32,
+) -> Result<Option<GetUserByIdWithStarItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT * 
         FROM public.users 
-        WHERE id = $1"
+        WHERE id = $1",
     );
     let query = query.bind(user_id);
     let row = query.fetch_optional(executor).await?;
@@ -1184,27 +1398,30 @@ pub async fn get_user_by_id_with_star(executor: impl sqlx::Executor<'_, Database
         Some(row) => {
             let result: Result<_, sqlx::Error> = (|| {
                 Ok(GetUserByIdWithStarItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        status: row.try_get::<Option<super::types::public::UserStatus>, _>("status")?,
-        profile: row.try_get::<Option<serde_json::Value>, _>("profile")?
-            .map(|v| serde_json::from_value::<crate::models::UserProfile>(v)
-            .map_err(|e| sqlx::Error::Decode(Box::new(e))))
-            .transpose()?,
-        settings: row.try_get::<Option<serde_json::Value>, _>("settings")?,
-        is_active: row.try_get::<Option<bool>, _>("is_active")?,
-        age: row.try_get::<Option<i32>, _>("age")?,
-        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
-        updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
-        referrer_id: row.try_get::<Option<i32>, _>("referrer_id")?,
-        social_links: row.try_get::<Option<serde_json::Value>, _>("social_links")?,
-        tags: row.try_get::<Option<Vec<serde_json::Value>>, _>("tags")?,
-        labels: row.try_get::<Vec<serde_json::Value>, _>("labels")?,
-    })
+                    id: row.try_get::<i32, _>("id")?,
+                    name: row.try_get::<String, _>("name")?,
+                    email: row.try_get::<String, _>("email")?,
+                    status: row.try_get::<Option<super::types::public::UserStatus>, _>("status")?,
+                    profile: row
+                        .try_get::<Option<serde_json::Value>, _>("profile")?
+                        .map(|v| {
+                            serde_json::from_value::<crate::models::UserProfile>(v)
+                                .map_err(|e| sqlx::Error::Decode(Box::new(e)))
+                        })
+                        .transpose()?,
+                    settings: row.try_get::<Option<serde_json::Value>, _>("settings")?,
+                    is_active: row.try_get::<Option<bool>, _>("is_active")?,
+                    age: row.try_get::<Option<i32>, _>("age")?,
+                    created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+                    updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
+                    referrer_id: row.try_get::<Option<i32>, _>("referrer_id")?,
+                    social_links: row.try_get::<Option<serde_json::Value>, _>("social_links")?,
+                    tags: row.try_get::<Option<Vec<serde_json::Value>>, _>("tags")?,
+                    labels: row.try_get::<Vec<serde_json::Value>, _>("labels")?,
+                })
             })();
             result.map(Some).map_err(Into::into)
-        },
+        }
         None => Ok(None),
     }
 }
@@ -1228,12 +1445,21 @@ pub struct GetUserByIdAndEmailItem {
 /// Index Scan using users_email_key on users
 ///   Index Cond: ((email)::text = 'dummy'::text)
 ///   Filter: (id = 0)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email \nFROM public.users \nWHERE id = #{id} AND email = #{email}"))]
-pub async fn get_user_by_id_and_email(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, params: &GetUserByIdAndEmailParams) -> Result<Option<GetUserByIdAndEmailItem>, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "SELECT id, name, email \nFROM public.users \nWHERE id = #{id} AND email = #{email}"
+    )
+)]
+pub async fn get_user_by_id_and_email(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    params: &GetUserByIdAndEmailParams,
+) -> Result<Option<GetUserByIdAndEmailItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, name, email 
         FROM public.users 
-        WHERE id = $1 AND email = $2"
+        WHERE id = $1 AND email = $2",
     );
     let query = query.bind(params.id);
     let query = query.bind(&params.email);
@@ -1242,33 +1468,41 @@ pub async fn get_user_by_id_and_email(executor: impl sqlx::Executor<'_, Database
         Some(row) => {
             let result: Result<_, sqlx::Error> = (|| {
                 Ok(GetUserByIdAndEmailItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-    })
+                    id: row.try_get::<i32, _>("id")?,
+                    name: row.try_get::<String, _>("name")?,
+                    email: row.try_get::<String, _>("email")?,
+                })
             })();
             result.map(Some).map_err(Into::into)
-        },
+        }
         None => Ok(None),
     }
 }
 
 /// Test non-null override with native {col!} syntax on boolean literal in RETURNING
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "UPDATE public.users\nSET name = #{name}\nWHERE id = #{id}\nRETURNING true AS {applied!}"))]
-pub async fn update_user_returning_applied(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, name: String, id: i32) -> Result<Option<bool>, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "UPDATE public.users\nSET name = #{name}\nWHERE id = #{id}\nRETURNING true AS {applied!}"
+    )
+)]
+pub async fn update_user_returning_applied(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    name: String,
+    id: i32,
+) -> Result<Option<bool>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"UPDATE public.users
         SET name = $1
         WHERE id = $2
-        RETURNING true AS applied"
+        RETURNING true AS applied",
     );
     let query = query.bind(&name);
     let query = query.bind(id);
     let row = query.fetch_optional(executor).await?;
     match row {
-        Some(row) => {
-            Ok(Some(row.try_get::<bool, _>("applied")?))
-        },
+        Some(row) => Ok(Some(row.try_get::<bool, _>("applied")?)),
         None => Ok(None),
     }
 }
@@ -1316,21 +1550,30 @@ pub struct DeleteUserByIdAndEmailItem {
 }
 
 /// Delete user by ID and email - reuses GetUserByIdAndEmailParams struct
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "DELETE FROM public.users \nWHERE id = #{id} AND email = #{email} \nRETURNING id, email"))]
-pub async fn delete_user_by_id_and_email(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, params: &GetUserByIdAndEmailParams) -> Result<DeleteUserByIdAndEmailItem, super::Error<DeleteUserByIdAndEmailConstraints>> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "DELETE FROM public.users \nWHERE id = #{id} AND email = #{email} \nRETURNING id, email"
+    )
+)]
+pub async fn delete_user_by_id_and_email(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    params: &GetUserByIdAndEmailParams,
+) -> Result<DeleteUserByIdAndEmailItem, super::Error<DeleteUserByIdAndEmailConstraints>> {
     let query = sqlx::query(
         r"DELETE FROM public.users 
         WHERE id = $1 AND email = $2 
-        RETURNING id, email"
+        RETURNING id, email",
     );
     let query = query.bind(params.id);
     let query = query.bind(&params.email);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(DeleteUserByIdAndEmailItem {
-        id: row.try_get::<i32, _>("id")?,
-        email: row.try_get::<String, _>("email")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            email: row.try_get::<String, _>("email")?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -1340,10 +1583,19 @@ pub async fn delete_user_by_id_and_email(executor: impl sqlx::Executor<'_, Datab
 /// Query Plan:
 /// Index Scan using users_pkey on users
 ///   Index Cond: (id = 0)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT created_at > now() - interval '1 year' AS \"is_recent!\" FROM public.users WHERE id = #{id}"))]
-pub async fn get_user_is_recent(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, id: i32) -> Result<bool, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "SELECT created_at > now() - interval '1 year' AS \"is_recent!\" FROM public.users WHERE id = #{id}"
+    )
+)]
+pub async fn get_user_is_recent(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    id: i32,
+) -> Result<bool, super::ErrorReadOnly> {
     let query = sqlx::query(
-        r"SELECT created_at > now() - interval '1 year' AS is_recent FROM public.users WHERE id = $1"
+        r"SELECT created_at > now() - interval '1 year' AS is_recent FROM public.users WHERE id = $1",
     );
     let query = query.bind(id);
     let row = query.fetch_one(executor).await?;
@@ -1394,13 +1646,22 @@ pub struct UpdateUserContactInfoItem {
 }
 
 /// Update user contact info - reuses GetUserByIdAndEmailItem return struct as params
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "UPDATE public.users \nSET name = #{name}, email = #{email} \nWHERE id = #{id} \nRETURNING id, name, email"))]
-pub async fn update_user_contact_info(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, params: &GetUserByIdAndEmailItem) -> Result<UpdateUserContactInfoItem, super::Error<UpdateUserContactInfoConstraints>> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "UPDATE public.users \nSET name = #{name}, email = #{email} \nWHERE id = #{id} \nRETURNING id, name, email"
+    )
+)]
+pub async fn update_user_contact_info(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    params: &GetUserByIdAndEmailItem,
+) -> Result<UpdateUserContactInfoItem, super::Error<UpdateUserContactInfoConstraints>> {
     let query = sqlx::query(
         r"UPDATE public.users 
         SET name = $1, email = $2 
         WHERE id = $3 
-        RETURNING id, name, email"
+        RETURNING id, name, email",
     );
     let query = query.bind(&params.name);
     let query = query.bind(&params.email);
@@ -1408,10 +1669,10 @@ pub async fn update_user_contact_info(executor: impl sqlx::Executor<'_, Database
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(UpdateUserContactInfoItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            name: row.try_get::<String, _>("name")?,
+            email: row.try_get::<String, _>("email")?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -1468,14 +1729,27 @@ pub struct UpdateUserProfileDiffItem {
 }
 
 /// Update user profile with conditional name/email - generates UpdateUserProfileDiffParams
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "UPDATE public.users \nSET profile = #{profile}, updated_at = NOW() \n#[, name = #{name?}] \n#[, email = #{email?}] \nWHERE id = #{user_id} \nRETURNING id, name, email, profile, updated_at"))]
-pub async fn update_user_profile_diff(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, old: &UpdateUserProfileDiffParams, new: &UpdateUserProfileDiffParams, profile: crate::models::UserProfile, user_id: i32) -> Result<UpdateUserProfileDiffItem, super::Error<UpdateUserProfileDiffConstraints>> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "UPDATE public.users \nSET profile = #{profile}, updated_at = NOW() \n#[, name = #{name?}] \n#[, email = #{email?}] \nWHERE id = #{user_id} \nRETURNING id, name, email, profile, updated_at"
+    )
+)]
+pub async fn update_user_profile_diff(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    old: &UpdateUserProfileDiffParams,
+    new: &UpdateUserProfileDiffParams,
+    profile: crate::models::UserProfile,
+    user_id: i32,
+) -> Result<UpdateUserProfileDiffItem, super::Error<UpdateUserProfileDiffConstraints>> {
     let mut final_sql = r"UPDATE public.users 
 SET profile = $1, updated_at = NOW() 
 #[, name = #{name?}] 
 #[, email = #{email?}] 
 WHERE id = $2 
-RETURNING id, name, email, profile, updated_at".to_string();
+RETURNING id, name, email, profile, updated_at"
+        .to_string();
     let mut included_params = Vec::new();
 
     if old.name != new.name {
@@ -1510,7 +1784,8 @@ RETURNING id, name, email, profile, updated_at".to_string();
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
-    let profile_json = serde_json::to_value(&profile).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
+    let profile_json =
+        serde_json::to_value(&profile).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
     query = query.bind(profile_json);
     query = query.bind(&user_id);
     if included_params.contains(&r"name") {
@@ -1524,15 +1799,18 @@ RETURNING id, name, email, profile, updated_at".to_string();
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(UpdateUserProfileDiffItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        profile: row.try_get::<Option<serde_json::Value>, _>("profile")?
-            .map(|v| serde_json::from_value::<crate::models::UserProfile>(v)
-            .map_err(|e| sqlx::Error::Decode(Box::new(e))))
-            .transpose()?,
-        updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            name: row.try_get::<String, _>("name")?,
+            email: row.try_get::<String, _>("email")?,
+            profile: row
+                .try_get::<Option<serde_json::Value>, _>("profile")?
+                .map(|v| {
+                    serde_json::from_value::<crate::models::UserProfile>(v)
+                        .map_err(|e| sqlx::Error::Decode(Box::new(e)))
+                })
+                .transpose()?,
+            updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -1582,14 +1860,27 @@ pub struct UpdateUserMetadataDiffItem {
 }
 
 /// Update user metadata - reuses UpdateUserProfileDiffParams struct
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "UPDATE public.users \nSET profile = #{profile}, updated_at = NOW() \n#[, name = #{name?}] \n#[, email = #{email?}] \nWHERE id = #{user_id} \nRETURNING id, name, email, updated_at"))]
-pub async fn update_user_metadata_diff(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, old: &UpdateUserProfileDiffParams, new: &UpdateUserProfileDiffParams, profile: crate::models::UserProfile, user_id: i32) -> Result<UpdateUserMetadataDiffItem, super::Error<UpdateUserMetadataDiffConstraints>> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "UPDATE public.users \nSET profile = #{profile}, updated_at = NOW() \n#[, name = #{name?}] \n#[, email = #{email?}] \nWHERE id = #{user_id} \nRETURNING id, name, email, updated_at"
+    )
+)]
+pub async fn update_user_metadata_diff(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    old: &UpdateUserProfileDiffParams,
+    new: &UpdateUserProfileDiffParams,
+    profile: crate::models::UserProfile,
+    user_id: i32,
+) -> Result<UpdateUserMetadataDiffItem, super::Error<UpdateUserMetadataDiffConstraints>> {
     let mut final_sql = r"UPDATE public.users 
 SET profile = $1, updated_at = NOW() 
 #[, name = #{name?}] 
 #[, email = #{email?}] 
 WHERE id = $2 
-RETURNING id, name, email, updated_at".to_string();
+RETURNING id, name, email, updated_at"
+        .to_string();
     let mut included_params = Vec::new();
 
     if old.name != new.name {
@@ -1624,7 +1915,8 @@ RETURNING id, name, email, updated_at".to_string();
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
-    let profile_json = serde_json::to_value(&profile).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
+    let profile_json =
+        serde_json::to_value(&profile).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
     query = query.bind(profile_json);
     query = query.bind(&user_id);
     if included_params.contains(&r"name") {
@@ -1638,11 +1930,11 @@ RETURNING id, name, email, updated_at".to_string();
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(UpdateUserMetadataDiffItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            name: row.try_get::<String, _>("name")?,
+            email: row.try_get::<String, _>("email")?,
+            updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -1659,21 +1951,28 @@ pub struct UserSummary {
 /// Query Plan:
 /// Index Scan using users_pkey on users
 ///   Index Cond: (id = 0)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email \nFROM public.users \nWHERE id = #{user_id}"))]
-pub async fn get_user_summary(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, user_id: i32) -> Result<UserSummary, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(sql = "SELECT id, name, email \nFROM public.users \nWHERE id = #{user_id}")
+)]
+pub async fn get_user_summary(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    user_id: i32,
+) -> Result<UserSummary, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, name, email 
         FROM public.users 
-        WHERE id = $1"
+        WHERE id = $1",
     );
     let query = query.bind(user_id);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(UserSummary {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            name: row.try_get::<String, _>("name")?,
+            email: row.try_get::<String, _>("email")?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -1683,12 +1982,19 @@ pub async fn get_user_summary(executor: impl sqlx::Executor<'_, Database = sqlx:
 /// Query Plan:
 /// Index Scan using users_email_key on users
 ///   Index Cond: ((email)::text = 'dummy'::text)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email \nFROM public.users \nWHERE email = #{email}"))]
-pub async fn get_user_info_by_email(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, email: String) -> Result<Option<UserSummary>, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(sql = "SELECT id, name, email \nFROM public.users \nWHERE email = #{email}")
+)]
+pub async fn get_user_info_by_email(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    email: String,
+) -> Result<Option<UserSummary>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, name, email 
         FROM public.users 
-        WHERE email = $1"
+        WHERE email = $1",
     );
     let query = query.bind(&email);
     let row = query.fetch_optional(executor).await?;
@@ -1696,13 +2002,13 @@ pub async fn get_user_info_by_email(executor: impl sqlx::Executor<'_, Database =
         Some(row) => {
             let result: Result<_, sqlx::Error> = (|| {
                 Ok(UserSummary {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-    })
+                    id: row.try_get::<i32, _>("id")?,
+                    name: row.try_get::<String, _>("name")?,
+                    email: row.try_get::<String, _>("email")?,
+                })
             })();
             result.map(Some).map_err(Into::into)
-        },
+        }
         None => Ok(None),
     }
 }
@@ -1714,21 +2020,30 @@ pub async fn get_user_info_by_email(executor: impl sqlx::Executor<'_, Database =
 ///   Sort Key: name
 ///   ->  Seq Scan on users
 ///         Disabled: true
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email \nFROM public.users \nORDER BY name"))]
-pub async fn get_all_user_summaries(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>) -> Result<Vec<UserSummary>, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(sql = "SELECT id, name, email \nFROM public.users \nORDER BY name")
+)]
+pub async fn get_all_user_summaries(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+) -> Result<Vec<UserSummary>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, name, email 
         FROM public.users 
-        ORDER BY name"
+        ORDER BY name",
     );
     let rows = query.fetch_all(executor).await?;
-    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
-        Ok(UserSummary {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-    })
-    }).collect();
+    let result: Result<Vec<_>, sqlx::Error> = rows
+        .iter()
+        .map(|row| {
+            Ok(UserSummary {
+                id: row.try_get::<i32, _>("id")?,
+                name: row.try_get::<String, _>("name")?,
+                email: row.try_get::<String, _>("email")?,
+            })
+        })
+        .collect();
     result.map_err(Into::into)
 }
 
@@ -1746,23 +2061,32 @@ pub struct UserDetails {
 /// Query Plan:
 /// Index Scan using users_pkey on users
 ///   Index Cond: (id = 0)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, age, created_at \nFROM public.users \nWHERE id = #{user_id}"))]
-pub async fn get_user_details(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, user_id: i32) -> Result<UserDetails, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "SELECT id, name, email, age, created_at \nFROM public.users \nWHERE id = #{user_id}"
+    )
+)]
+pub async fn get_user_details(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    user_id: i32,
+) -> Result<UserDetails, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, name, email, age, created_at 
         FROM public.users 
-        WHERE id = $1"
+        WHERE id = $1",
     );
     let query = query.bind(user_id);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(UserDetails {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        age: row.try_get::<Option<i32>, _>("age")?,
-        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            name: row.try_get::<String, _>("name")?,
+            email: row.try_get::<String, _>("email")?,
+            age: row.try_get::<Option<i32>, _>("age")?,
+            created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -1773,24 +2097,36 @@ pub async fn get_user_details(executor: impl sqlx::Executor<'_, Database = sqlx:
 /// Seq Scan on users
 ///   Disabled: true
 ///   Filter: ((name)::text ~~* 'dummy'::text)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, age, created_at \nFROM public.users \nWHERE name ILIKE #{pattern}"))]
-pub async fn search_user_details(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, pattern: String) -> Result<Vec<UserDetails>, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "SELECT id, name, email, age, created_at \nFROM public.users \nWHERE name ILIKE #{pattern}"
+    )
+)]
+pub async fn search_user_details(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    pattern: String,
+) -> Result<Vec<UserDetails>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, name, email, age, created_at 
         FROM public.users 
-        WHERE name ILIKE $1"
+        WHERE name ILIKE $1",
     );
     let query = query.bind(&pattern);
     let rows = query.fetch_all(executor).await?;
-    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
-        Ok(UserDetails {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        age: row.try_get::<Option<i32>, _>("age")?,
-        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
-    })
-    }).collect();
+    let result: Result<Vec<_>, sqlx::Error> = rows
+        .iter()
+        .map(|row| {
+            Ok(UserDetails {
+                id: row.try_get::<i32, _>("id")?,
+                name: row.try_get::<String, _>("name")?,
+                email: row.try_get::<String, _>("email")?,
+                age: row.try_get::<Option<i32>, _>("age")?,
+                created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+            })
+        })
+        .collect();
     result.map_err(Into::into)
 }
 
@@ -1800,12 +2136,21 @@ pub async fn search_user_details(executor: impl sqlx::Executor<'_, Database = sq
 /// Index Scan using users_email_key on users
 ///   Index Cond: ((email)::text = 'dummy'::text)
 ///   Filter: (id = 0)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email \nFROM public.users \nWHERE id = #{id} AND email = #{email}"))]
-pub async fn find_user_by_criteria(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, params: &GetUserByIdAndEmailParams) -> Result<Option<UserSummary>, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "SELECT id, name, email \nFROM public.users \nWHERE id = #{id} AND email = #{email}"
+    )
+)]
+pub async fn find_user_by_criteria(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    params: &GetUserByIdAndEmailParams,
+) -> Result<Option<UserSummary>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, name, email 
         FROM public.users 
-        WHERE id = $1 AND email = $2"
+        WHERE id = $1 AND email = $2",
     );
     let query = query.bind(params.id);
     let query = query.bind(&params.email);
@@ -1814,13 +2159,13 @@ pub async fn find_user_by_criteria(executor: impl sqlx::Executor<'_, Database = 
         Some(row) => {
             let result: Result<_, sqlx::Error> = (|| {
                 Ok(UserSummary {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-    })
+                    id: row.try_get::<i32, _>("id")?,
+                    name: row.try_get::<String, _>("name")?,
+                    email: row.try_get::<String, _>("email")?,
+                })
             })();
             result.map(Some).map_err(Into::into)
-        },
+        }
         None => Ok(None),
     }
 }
@@ -1838,12 +2183,19 @@ pub struct GetUserSimpleItem {
 /// Query Plan:
 /// Index Scan using users_pkey on users
 ///   Index Cond: (id = 0)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, created_at\nFROM public.users\nWHERE id = #{user_id}"))]
-pub async fn get_user_simple(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, user_id: i32) -> Result<Option<GetUserSimpleItem>, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(sql = "SELECT id, name, email, created_at\nFROM public.users\nWHERE id = #{user_id}")
+)]
+pub async fn get_user_simple(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    user_id: i32,
+) -> Result<Option<GetUserSimpleItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, name, email, created_at
         FROM public.users
-        WHERE id = $1"
+        WHERE id = $1",
     );
     let query = query.bind(user_id);
     let row = query.fetch_optional(executor).await?;
@@ -1851,14 +2203,14 @@ pub async fn get_user_simple(executor: impl sqlx::Executor<'_, Database = sqlx::
         Some(row) => {
             let result: Result<_, sqlx::Error> = (|| {
                 Ok(GetUserSimpleItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
-    })
+                    id: row.try_get::<i32, _>("id")?,
+                    name: row.try_get::<String, _>("name")?,
+                    email: row.try_get::<String, _>("email")?,
+                    created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+                })
             })();
             result.map(Some).map_err(Into::into)
-        },
+        }
         None => Ok(None),
     }
 }
@@ -1881,22 +2233,29 @@ pub struct UserWithCustomDerives {
 /// Query Plan:
 /// Index Scan using users_pkey on users
 ///   Index Cond: (id = 0)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, age\nFROM public.users\nWHERE id = #{user_id}"))]
-pub async fn test_custom_derives(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, params: &TestCustomDerivesParams) -> Result<UserWithCustomDerives, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(sql = "SELECT id, name, email, age\nFROM public.users\nWHERE id = #{user_id}")
+)]
+pub async fn test_custom_derives(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    params: &TestCustomDerivesParams,
+) -> Result<UserWithCustomDerives, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, name, email, age
         FROM public.users
-        WHERE id = $1"
+        WHERE id = $1",
     );
     let query = query.bind(params.user_id);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(UserWithCustomDerives {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        age: row.try_get::<Option<i32>, _>("age")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            name: row.try_get::<String, _>("name")?,
+            email: row.try_get::<String, _>("email")?,
+            age: row.try_get::<Option<i32>, _>("age")?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -1911,19 +2270,26 @@ pub struct UserId {
 /// Query Plan:
 /// Index Scan using users_email_key on users
 ///   Index Cond: ((email)::text = 'dummy'::text)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id\nFROM public.users\nWHERE email = #{email}"))]
-pub async fn get_user_id_only(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, email: String) -> Result<UserId, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(sql = "SELECT id\nFROM public.users\nWHERE email = #{email}")
+)]
+pub async fn get_user_id_only(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    email: String,
+) -> Result<UserId, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id
         FROM public.users
-        WHERE email = $1"
+        WHERE email = $1",
     );
     let query = query.bind(&email);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(UserId {
-        id: row.try_get::<i32, _>("id")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -1933,12 +2299,19 @@ pub async fn get_user_id_only(executor: impl sqlx::Executor<'_, Database = sqlx:
 /// Query Plan:
 /// Index Scan using users_email_key on users
 ///   Index Cond: ((email)::text = 'dummy'::text)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id\nFROM public.users\nWHERE email = #{email}"))]
-pub async fn get_user_id_raw(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, email: String) -> Result<i32, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(sql = "SELECT id\nFROM public.users\nWHERE email = #{email}")
+)]
+pub async fn get_user_id_raw(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    email: String,
+) -> Result<i32, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id
         FROM public.users
-        WHERE email = $1"
+        WHERE email = $1",
     );
     let query = query.bind(&email);
     let row = query.fetch_one(executor).await?;
@@ -1990,27 +2363,41 @@ pub struct UpdateUserSocialLinksItem {
 }
 
 /// Update user's social links
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "UPDATE public.users \nSET social_links = #{social_links}, updated_at = NOW()\nWHERE id = #{user_id}\nRETURNING id, name, email, social_links;"))]
-pub async fn update_user_social_links(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, social_links: Vec<crate::models::UserSocialLink>, user_id: i32) -> Result<UpdateUserSocialLinksItem, super::Error<UpdateUserSocialLinksConstraints>> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "UPDATE public.users \nSET social_links = #{social_links}, updated_at = NOW()\nWHERE id = #{user_id}\nRETURNING id, name, email, social_links;"
+    )
+)]
+pub async fn update_user_social_links(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    social_links: Vec<crate::models::UserSocialLink>,
+    user_id: i32,
+) -> Result<UpdateUserSocialLinksItem, super::Error<UpdateUserSocialLinksConstraints>> {
     let query = sqlx::query(
         r"UPDATE public.users 
         SET social_links = $1, updated_at = NOW()
         WHERE id = $2
-        RETURNING id, name, email, social_links;"
+        RETURNING id, name, email, social_links;",
     );
-    let query = query.bind(serde_json::to_value(&social_links).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
+    let query = query
+        .bind(serde_json::to_value(&social_links).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
     let query = query.bind(user_id);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(UpdateUserSocialLinksItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        social_links: row.try_get::<Option<serde_json::Value>, _>("social_links")?
-            .map(|v| serde_json::from_value::<Vec<crate::models::UserSocialLink>>(v)
-            .map_err(|e| sqlx::Error::Decode(Box::new(e))))
-            .transpose()?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            name: row.try_get::<String, _>("name")?,
+            email: row.try_get::<String, _>("email")?,
+            social_links: row
+                .try_get::<Option<serde_json::Value>, _>("social_links")?
+                .map(|v| {
+                    serde_json::from_value::<Vec<crate::models::UserSocialLink>>(v)
+                        .map_err(|e| sqlx::Error::Decode(Box::new(e)))
+                })
+                .transpose()?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -2029,26 +2416,38 @@ pub struct GetUserSocialLinksItem {
 /// Query Plan:
 /// Index Scan using users_pkey on users
 ///   Index Cond: (id = 0)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, email, social_links, created_at\nFROM public.users\nWHERE id = #{user_id};"))]
-pub async fn get_user_social_links(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, user_id: i32) -> Result<GetUserSocialLinksItem, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "SELECT id, name, email, social_links, created_at\nFROM public.users\nWHERE id = #{user_id};"
+    )
+)]
+pub async fn get_user_social_links(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    user_id: i32,
+) -> Result<GetUserSocialLinksItem, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, name, email, social_links, created_at
         FROM public.users
-        WHERE id = $1;"
+        WHERE id = $1;",
     );
     let query = query.bind(user_id);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(GetUserSocialLinksItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        social_links: row.try_get::<Option<serde_json::Value>, _>("social_links")?
-            .map(|v| serde_json::from_value::<Vec<crate::models::UserSocialLink>>(v)
-            .map_err(|e| sqlx::Error::Decode(Box::new(e))))
-            .transpose()?,
-        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            name: row.try_get::<String, _>("name")?,
+            email: row.try_get::<String, _>("email")?,
+            social_links: row
+                .try_get::<Option<serde_json::Value>, _>("social_links")?
+                .map(|v| {
+                    serde_json::from_value::<Vec<crate::models::UserSocialLink>>(v)
+                        .map_err(|e| sqlx::Error::Decode(Box::new(e)))
+                })
+                .transpose()?,
+            created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -2098,27 +2497,42 @@ pub struct InsertUserWithSocialLinksItem {
 }
 
 /// Add a new user with social links
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.users (name, email, status, social_links)\nVALUES (#{name}, #{email}, 'pending', #{social_links})\nRETURNING id, name, email, social_links;"))]
-pub async fn insert_user_with_social_links(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, name: String, email: String, social_links: Vec<crate::models::UserSocialLink>) -> Result<InsertUserWithSocialLinksItem, super::Error<InsertUserWithSocialLinksConstraints>> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "INSERT INTO public.users (name, email, status, social_links)\nVALUES (#{name}, #{email}, 'pending', #{social_links})\nRETURNING id, name, email, social_links;"
+    )
+)]
+pub async fn insert_user_with_social_links(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    name: String,
+    email: String,
+    social_links: Vec<crate::models::UserSocialLink>,
+) -> Result<InsertUserWithSocialLinksItem, super::Error<InsertUserWithSocialLinksConstraints>> {
     let query = sqlx::query(
         r"INSERT INTO public.users (name, email, status, social_links)
         VALUES ($1, $2, 'pending', $3)
-        RETURNING id, name, email, social_links;"
+        RETURNING id, name, email, social_links;",
     );
     let query = query.bind(&name);
     let query = query.bind(&email);
-    let query = query.bind(serde_json::to_value(&social_links).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
+    let query = query
+        .bind(serde_json::to_value(&social_links).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(InsertUserWithSocialLinksItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        social_links: row.try_get::<Option<serde_json::Value>, _>("social_links")?
-            .map(|v| serde_json::from_value::<Vec<crate::models::UserSocialLink>>(v)
-            .map_err(|e| sqlx::Error::Decode(Box::new(e))))
-            .transpose()?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            name: row.try_get::<String, _>("name")?,
+            email: row.try_get::<String, _>("email")?,
+            social_links: row
+                .try_get::<Option<serde_json::Value>, _>("social_links")?
+                .map(|v| {
+                    serde_json::from_value::<Vec<crate::models::UserSocialLink>>(v)
+                        .map_err(|e| sqlx::Error::Decode(Box::new(e)))
+                })
+                .transpose()?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -2173,8 +2587,18 @@ pub struct TestExplicitNativeMultiunzipItem {
 }
 
 /// Test multiunzip with @native suffix for Vec<Option<i32>>
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.users (name, age)\nSELECT * FROM UNNEST(\n    #{names}::text[],\n    #{age}::int4[]\n)\nRETURNING id, name, age;"))]
-pub async fn test_explicit_native_multiunzip(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, items: Vec<TestExplicitNativeMultiunzipRecord>) -> Result<TestExplicitNativeMultiunzipItem, super::Error<TestExplicitNativeMultiunzipConstraints>> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "INSERT INTO public.users (name, age)\nSELECT * FROM UNNEST(\n    #{names}::text[],\n    #{age}::int4[]\n)\nRETURNING id, name, age;"
+    )
+)]
+pub async fn test_explicit_native_multiunzip(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    items: Vec<TestExplicitNativeMultiunzipRecord>,
+) -> Result<TestExplicitNativeMultiunzipItem, super::Error<TestExplicitNativeMultiunzipConstraints>>
+{
     use itertools::Itertools;
     let query = sqlx::query(
         r"INSERT INTO public.users (name, age)
@@ -2182,22 +2606,21 @@ pub async fn test_explicit_native_multiunzip(executor: impl sqlx::Executor<'_, D
           $1::text[],
           $2::int4[]
         )
-        RETURNING id, name, age;"
+        RETURNING id, name, age;",
     );
-    let (names, age): (Vec<_>, Vec<_>) =
-        items
-            .into_iter()
-            .map(|item| (item.names, item.age))
-            .multiunzip();
+    let (names, age): (Vec<_>, Vec<_>) = items
+        .into_iter()
+        .map(|item| (item.names, item.age))
+        .multiunzip();
     let query = query.bind(names);
     let query = query.bind(age);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(TestExplicitNativeMultiunzipItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        age: row.try_get::<Option<i32>, _>("age")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            name: row.try_get::<String, _>("name")?,
+            age: row.try_get::<Option<i32>, _>("age")?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -2246,25 +2669,38 @@ pub struct TestExplicitNativeWithoutMultiunzipItem {
 }
 
 /// Test without multiunzip with @native suffix for Vec<Option<i32>>
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.users (name, age)\nSELECT * FROM UNNEST(\n    #{names}::text[],\n    #{age}::int4[]\n)\nRETURNING id, name, age;"))]
-pub async fn test_explicit_native_without_multiunzip(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, names: Vec<String>, age: Vec<Option<i32>>) -> Result<TestExplicitNativeWithoutMultiunzipItem, super::Error<TestExplicitNativeWithoutMultiunzipConstraints>> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "INSERT INTO public.users (name, age)\nSELECT * FROM UNNEST(\n    #{names}::text[],\n    #{age}::int4[]\n)\nRETURNING id, name, age;"
+    )
+)]
+pub async fn test_explicit_native_without_multiunzip(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    names: Vec<String>,
+    age: Vec<Option<i32>>,
+) -> Result<
+    TestExplicitNativeWithoutMultiunzipItem,
+    super::Error<TestExplicitNativeWithoutMultiunzipConstraints>,
+> {
     let query = sqlx::query(
         r"INSERT INTO public.users (name, age)
         SELECT * FROM UNNEST(
           $1::text[],
           $2::int4[]
         )
-        RETURNING id, name, age;"
+        RETURNING id, name, age;",
     );
     let query = query.bind(names);
     let query = query.bind(age);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(TestExplicitNativeWithoutMultiunzipItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        age: row.try_get::<Option<i32>, _>("age")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            name: row.try_get::<String, _>("name")?,
+            age: row.try_get::<Option<i32>, _>("age")?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -2281,24 +2717,33 @@ pub struct TestNestedRowItem {
 /// Query Plan:
 /// Index Scan using users_pkey on users u
 ///   Index Cond: (id = 0)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT \n    u.id,\n    u.name,\n    u as user_details\nFROM public.users u\nWHERE u.id = #{user_id};"))]
-pub async fn test_nested_row(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, user_id: i32) -> Result<TestNestedRowItem, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "SELECT \n    u.id,\n    u.name,\n    u as user_details\nFROM public.users u\nWHERE u.id = #{user_id};"
+    )
+)]
+pub async fn test_nested_row(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    user_id: i32,
+) -> Result<TestNestedRowItem, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT 
           u.id,
           u.name,
           u as user_details
         FROM public.users u
-        WHERE u.id = $1;"
+        WHERE u.id = $1;",
     );
     let query = query.bind(user_id);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(TestNestedRowItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        user_details: row.try_get::<Option<super::types::public::Users>, _>("user_details")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            name: row.try_get::<String, _>("name")?,
+            user_details: row.try_get::<Option<super::types::public::Users>, _>("user_details")?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -2356,8 +2801,17 @@ pub struct TestOptionalMultiunzipItem {
 }
 
 /// Test batch insert with optional parameter (age is nullable)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.users (name, email, age)\nSELECT name, email, age\nFROM UNNEST(\n        #{name}::text [],\n        #{email}::text [],\n        #{age?}::int4 []\n    ) AS t(name, email, age)\nRETURNING id, name, email, age, created_at"))]
-pub async fn test_optional_multiunzip(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, items: Vec<TestOptionalMultiunzipRecord>) -> Result<Vec<TestOptionalMultiunzipItem>, super::Error<TestOptionalMultiunzipConstraints>> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "INSERT INTO public.users (name, email, age)\nSELECT name, email, age\nFROM UNNEST(\n        #{name}::text [],\n        #{email}::text [],\n        #{age?}::int4 []\n    ) AS t(name, email, age)\nRETURNING id, name, email, age, created_at"
+    )
+)]
+pub async fn test_optional_multiunzip(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    items: Vec<TestOptionalMultiunzipRecord>,
+) -> Result<Vec<TestOptionalMultiunzipItem>, super::Error<TestOptionalMultiunzipConstraints>> {
     use itertools::Itertools;
     let query = sqlx::query(
         r"INSERT INTO public.users (name, email, age)
@@ -2367,26 +2821,28 @@ pub async fn test_optional_multiunzip(executor: impl sqlx::Executor<'_, Database
             $2::text [],
             $3::int4 []
           ) AS t(name, email, age)
-        RETURNING id, name, email, age, created_at"
+        RETURNING id, name, email, age, created_at",
     );
-    let (name, email, age): (Vec<_>, Vec<_>, Vec<_>) =
-        items
-            .into_iter()
-            .map(|item| (item.name, item.email, item.age))
-            .multiunzip();
+    let (name, email, age): (Vec<_>, Vec<_>, Vec<_>) = items
+        .into_iter()
+        .map(|item| (item.name, item.email, item.age))
+        .multiunzip();
     let query = query.bind(name);
     let query = query.bind(email);
     let query = query.bind(age);
     let rows = query.fetch_all(executor).await?;
-    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
-        Ok(TestOptionalMultiunzipItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        age: row.try_get::<Option<i32>, _>("age")?,
-        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
-    })
-    }).collect();
+    let result: Result<Vec<_>, sqlx::Error> = rows
+        .iter()
+        .map(|row| {
+            Ok(TestOptionalMultiunzipItem {
+                id: row.try_get::<i32, _>("id")?,
+                name: row.try_get::<String, _>("name")?,
+                email: row.try_get::<String, _>("email")?,
+                age: row.try_get::<Option<i32>, _>("age")?,
+                created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+            })
+        })
+        .collect();
     result.map_err(Into::into)
 }
 
@@ -2436,8 +2892,22 @@ pub struct TestOptionalWithoutMultiunzipItem {
 }
 
 /// Test batch insert with nullable array elements (not entire array optional)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.users (name, email, age)\nSELECT name, email, age\nFROM UNNEST(\n        #{name}::text [],\n        #{email}::text [],\n        #{age[?]}::int4 []\n    ) AS t(name, email, age)\nRETURNING id, name, email, age, created_at"))]
-pub async fn test_optional_without_multiunzip(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, name: Vec<String>, email: Vec<String>, age: Vec<Option<i32>>) -> Result<Vec<TestOptionalWithoutMultiunzipItem>, super::Error<TestOptionalWithoutMultiunzipConstraints>> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "INSERT INTO public.users (name, email, age)\nSELECT name, email, age\nFROM UNNEST(\n        #{name}::text [],\n        #{email}::text [],\n        #{age[?]}::int4 []\n    ) AS t(name, email, age)\nRETURNING id, name, email, age, created_at"
+    )
+)]
+pub async fn test_optional_without_multiunzip(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    name: Vec<String>,
+    email: Vec<String>,
+    age: Vec<Option<i32>>,
+) -> Result<
+    Vec<TestOptionalWithoutMultiunzipItem>,
+    super::Error<TestOptionalWithoutMultiunzipConstraints>,
+> {
     let query = sqlx::query(
         r"INSERT INTO public.users (name, email, age)
         SELECT name, email, age
@@ -2446,21 +2916,23 @@ pub async fn test_optional_without_multiunzip(executor: impl sqlx::Executor<'_, 
             $2::text [],
             $3::int4 []
           ) AS t(name, email, age)
-        RETURNING id, name, email, age, created_at"
+        RETURNING id, name, email, age, created_at",
     );
     let query = query.bind(name);
     let query = query.bind(email);
     let query = query.bind(age);
     let rows = query.fetch_all(executor).await?;
-    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
-        Ok(TestOptionalWithoutMultiunzipItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        email: row.try_get::<String, _>("email")?,
-        age: row.try_get::<Option<i32>, _>("age")?,
-        created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
-    })
-    }).collect();
+    let result: Result<Vec<_>, sqlx::Error> = rows
+        .iter()
+        .map(|row| {
+            Ok(TestOptionalWithoutMultiunzipItem {
+                id: row.try_get::<i32, _>("id")?,
+                name: row.try_get::<String, _>("name")?,
+                email: row.try_get::<String, _>("email")?,
+                age: row.try_get::<Option<i32>, _>("age")?,
+                created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
+            })
+        })
+        .collect();
     result.map_err(Into::into)
 }
-

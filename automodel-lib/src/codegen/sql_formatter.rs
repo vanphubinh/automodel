@@ -55,6 +55,15 @@ pub fn format_sql_embedded(sql: &str) -> String {
     out
 }
 
+/// Format SQL for tracing span fields: collapse whitespace, then apply Style 1 layout.
+pub fn format_sql_for_trace(sql: &str) -> String {
+    let collapsed: String = sql.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() {
+        return String::new();
+    }
+    format_sql_style1(&collapsed)
+}
+
 fn finalize_output(mut out: String, had_semicolon: bool) -> String {
     if !had_semicolon {
         return out;
@@ -147,13 +156,34 @@ fn format_update(sql: &str) -> String {
 
 fn format_insert(sql: &str) -> String {
     let upper = sql.to_ascii_uppercase();
-    if upper.starts_with("INSERT INTO") {
-        let body = &sql["INSERT INTO".len()..];
-        let mut out = String::from("INSERT INTO\n");
+    if !upper.starts_with("INSERT INTO") {
+        return sql.to_string();
+    }
+
+    let body = &sql["INSERT INTO".len()..];
+    let mut out = String::from("INSERT INTO\n");
+
+    let Some(values_at) = find_keyword_at_depth_zero(body, "VALUES", 0) else {
         format_indented_lines(&mut out, body.trim(), false);
         return out;
-    }
-    sql.to_string()
+    };
+
+    format_indented_lines(&mut out, body[..values_at].trim(), false);
+
+    out.push_str("VALUES\n");
+    let after_values = &body[values_at + "VALUES".len()..];
+
+    let tail_keywords = ["RETURNING", "ON CONFLICT"];
+    let tail_at = find_first_keyword_at_depth_zero(after_values, &tail_keywords);
+
+    let (values_clause, tail) = match tail_at {
+        Some(pos) => (after_values[..pos].trim(), after_values[pos..].trim()),
+        None => (after_values.trim(), ""),
+    };
+
+    format_indented_lines(&mut out, values_clause, false);
+    out.push_str(&format_tail_clauses(tail));
+    out
 }
 
 fn format_delete(sql: &str) -> String {
@@ -214,6 +244,7 @@ fn format_tail_clauses(tail: &str) -> String {
             "LIMIT",
             "OFFSET",
             "RETURNING",
+            "ON CONFLICT",
         ];
         let next_at = find_first_keyword_at_depth_zero(rest, &next_keywords);
 
@@ -324,6 +355,7 @@ fn format_indented_lines(out: &mut String, content: &str, split_joins: bool) {
 
 fn find_clause_keyword(sql: &str) -> Option<&'static str> {
     let keywords = [
+        "ON CONFLICT",
         "GROUP BY",
         "ORDER BY",
         "RETURNING",
@@ -744,5 +776,24 @@ mod tests {
         assert!(formatted.starts_with("\n    SELECT\n        party_id,"));
         assert!(formatted.contains("\n    WHERE\n        1=1\n        AND (#{include_archived} OR archived_at IS NULL)\n        #[AND party_type = #{party_type?}]\n"));
         assert!(formatted.ends_with("\n    LIMIT\n        #{limit};"));
+    }
+
+    #[test]
+    fn formats_insert_with_values_and_returning() {
+        let sql = "INSERT INTO public.orders (tenant_id, product_name, amount) VALUES ($1, $2, $3) RETURNING id, tenant_id, product_name, amount, created_at";
+        let formatted = format_sql_style1(sql);
+        assert_eq!(
+            formatted,
+            "INSERT INTO\n    public.orders (tenant_id, product_name, amount)\nVALUES\n    ($1, $2, $3)\nRETURNING\n    id,\n    tenant_id,\n    product_name,\n    amount,\n    created_at\n"
+        );
+    }
+
+    #[test]
+    fn format_sql_for_trace_wraps_long_queries() {
+        let sql = "INSERT INTO public.orders (tenant_id, product_name, amount)\nVALUES ($1, $2, $3)\nRETURNING id, tenant_id, product_name, amount, created_at";
+        let formatted = format_sql_for_trace(sql);
+        assert!(formatted.contains("INSERT INTO\n"));
+        assert!(formatted.contains("VALUES\n"));
+        assert!(formatted.contains("RETURNING\n"));
     }
 }

@@ -19,7 +19,9 @@ use std::path::Path;
 pub use datetime_crate::DateTimeCrate;
 pub use query_definition::TelemetryLevel;
 
-use crate::codegen::generate_root_module;
+pub use crate::codegen::format_sql_for_trace;
+
+use crate::codegen::{generate_root_module, rustfmt_generated_files};
 use serde::{Deserialize, Serialize};
 
 /// Crate to use for multiunzip operations in batch inserts
@@ -414,9 +416,7 @@ impl AutoModel {
             });
 
         // PHASE 1: Analyze all queries and collect information
-        let analyzed_queries = self
-            .analyze_all_queries(&client, &domain_enums)
-            .await?;
+        let analyzed_queries = self.analyze_all_queries(&client, &domain_enums).await?;
 
         // Build TypeSystem from captured statements (no re-preparation needed)
         let type_system = Self::build_type_system(
@@ -463,6 +463,8 @@ impl AutoModel {
             // Delete the file if it exists from a previous run with warnings
             let _ = fs::remove_file(&warn_file);
         }
+
+        rustfmt_generated_files(output_path)?;
 
         Ok(())
     }
@@ -645,24 +647,16 @@ impl AutoModel {
                 println!("cargo:info=Analyzing query '{}'", query.name);
 
                 // Extract type information (captures Statement for later TypeSystem building)
-                let type_info = extract_query_types(
-                    client,
-                    &query.sql,
-                    query.types.as_ref(),
-                    datetime_crate,
-                )
-                .await?;
+                let type_info =
+                    extract_query_types(client, &query.sql, query.types.as_ref(), datetime_crate)
+                        .await?;
 
                 // Analyze query with EXPLAIN to detect mutation and optionally get performance data
                 // EXPLAIN fails on mutations (INSERT/UPDATE/DELETE), so we use that to detect them
                 // This also pre-computes EXPLAIN params during the analysis phase
-                let analysis_result = Self::analyze_query_with_explain(
-                    client,
-                    query,
-                    datetime_crate,
-                    domain_enums,
-                )
-                .await?;
+                let analysis_result =
+                    Self::analyze_query_with_explain(client, query, datetime_crate, domain_enums)
+                        .await?;
 
                 let analyzed_query = QueryDefinitionRuntime::new(
                     query.clone(),
@@ -843,8 +837,8 @@ impl AutoModel {
                     // No special params, use dummy params for all parameters
                     let (converted_sql, _param_names, _label) = &query.sql_variants[0];
                     match crate::types_extractor::prepare_analysis_statement(client, converted_sql)
-                    .await
-                {
+                        .await
+                    {
                         Ok(statement) => {
                             let param_types = statement.params();
                             let (dummy_params, _) = crate::types_extractor::create_dummy_params(
@@ -869,21 +863,22 @@ impl AutoModel {
                     // Prepare to get param types for non-special params
                     let (converted_sql, _param_names, _label) = &query.sql_variants[0];
                     match crate::types_extractor::prepare_analysis_statement(client, converted_sql)
-                    .await
-                {
+                        .await
+                    {
                         Ok(statement) => {
                             let param_types = statement.params();
-                            let (all_dummy_params, _) = crate::types_extractor::create_dummy_params(
-                                param_types,
-                                datetime_crate,
-                                domain_enums,
-                                Some(&crate::types_extractor::DummyParamContext {
-                                    param_names,
-                                    sql: converted_sql,
-                                    client,
-                                }),
-                            )
-                            .await?;
+                            let (all_dummy_params, _) =
+                                crate::types_extractor::create_dummy_params(
+                                    param_types,
+                                    datetime_crate,
+                                    domain_enums,
+                                    Some(&crate::types_extractor::DummyParamContext {
+                                        param_names,
+                                        sql: converted_sql,
+                                        client,
+                                    }),
+                                )
+                                .await?;
 
                             // Filter to only non-special params
                             let mut non_special_dummy_params = Vec::new();
@@ -1157,17 +1152,18 @@ impl AutoModel {
                     match crate::types_extractor::prepare_analysis_statement(client, sql).await {
                         Ok(statement) => {
                             let param_types = statement.params();
-                            let (all_dummy_params, _) = crate::types_extractor::create_dummy_params(
-                                param_types,
-                                datetime_crate,
-                                domain_enums,
-                                Some(&crate::types_extractor::DummyParamContext {
-                                    param_names,
-                                    sql,
-                                    client,
-                                }),
-                            )
-                            .await?;
+                            let (all_dummy_params, _) =
+                                crate::types_extractor::create_dummy_params(
+                                    param_types,
+                                    datetime_crate,
+                                    domain_enums,
+                                    Some(&crate::types_extractor::DummyParamContext {
+                                        param_names,
+                                        sql,
+                                        client,
+                                    }),
+                                )
+                                .await?;
 
                             // Filter to only non-special params
                             let mut non_special_dummy_params = Vec::new();

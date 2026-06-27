@@ -1,2 +1,2 @@
-# Skip files marked with @generated (AutoModel output)
-format_generated_files = false
+# Generated code is rustfmt'd by AutoModel after codegen.
+# Running cargo fmt on the workspace is safe and should be a no-op for @generated files.

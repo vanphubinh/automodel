@@ -43,8 +43,17 @@ pub struct BatchInsertArticlesItem {
 }
 
 /// Batch insert articles with nullable JSONB columns using multiunzip
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.articles (title, metadata, contributors)\nSELECT title, metadata, contributors\nFROM UNNEST(\n        #{title}::text [],\n        #{metadata?}::jsonb [],\n        #{contributors?}::jsonb []\n    ) AS t(title, metadata, contributors)\nRETURNING id, title, metadata, contributors;"))]
-pub async fn batch_insert_articles(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, items: Vec<BatchInsertArticlesRecord>) -> Result<Vec<BatchInsertArticlesItem>, super::Error<BatchInsertArticlesConstraints>> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "INSERT INTO public.articles (title, metadata, contributors)\nSELECT title, metadata, contributors\nFROM UNNEST(\n        #{title}::text [],\n        #{metadata?}::jsonb [],\n        #{contributors?}::jsonb []\n    ) AS t(title, metadata, contributors)\nRETURNING id, title, metadata, contributors;"
+    )
+)]
+pub async fn batch_insert_articles(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    items: Vec<BatchInsertArticlesRecord>,
+) -> Result<Vec<BatchInsertArticlesItem>, super::Error<BatchInsertArticlesConstraints>> {
     use itertools::Itertools;
     let query = sqlx::query(
         r"INSERT INTO public.articles (title, metadata, contributors)
@@ -54,25 +63,32 @@ pub async fn batch_insert_articles(executor: impl sqlx::Executor<'_, Database = 
             $2::jsonb [],
             $3::jsonb []
           ) AS t(title, metadata, contributors)
-        RETURNING id, title, metadata, contributors;"
+        RETURNING id, title, metadata, contributors;",
     );
-    let (title, metadata, contributors): (Vec<_>, Vec<_>, Vec<_>) =
-        items
-            .into_iter()
-            .map(|item| (item.title, item.metadata, item.contributors))
-            .multiunzip();
+    let (title, metadata, contributors): (Vec<_>, Vec<_>, Vec<_>) = items
+        .into_iter()
+        .map(|item| (item.title, item.metadata, item.contributors))
+        .multiunzip();
     let query = query.bind(title);
     let query = query.bind(metadata);
     let query = query.bind(contributors);
     let rows = query.fetch_all(executor).await?;
-    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
-        Ok(BatchInsertArticlesItem {
-        id: row.try_get::<i32, _>("id")?,
-        title: row.try_get::<String, _>("title")?,
-        metadata: row.try_get::<Option<sqlx::types::Json<crate::models::ArticleMetadata>>, _>("metadata")?,
-        contributors: row.try_get::<Option<sqlx::types::Json<Vec<crate::models::ArticleContributor>>>, _>("contributors")?,
-    })
-    }).collect();
+    let result: Result<Vec<_>, sqlx::Error> = rows
+        .iter()
+        .map(|row| {
+            Ok(BatchInsertArticlesItem {
+                id: row.try_get::<i32, _>("id")?,
+                title: row.try_get::<String, _>("title")?,
+                metadata: row
+                    .try_get::<Option<sqlx::types::Json<crate::models::ArticleMetadata>>, _>(
+                        "metadata",
+                    )?,
+                contributors: row.try_get::<Option<
+                    sqlx::types::Json<Vec<crate::models::ArticleContributor>>,
+                >, _>("contributors")?,
+            })
+        })
+        .collect();
     result.map_err(Into::into)
 }
 
@@ -89,22 +105,36 @@ pub struct GetArticleByIdItem {
 /// Query Plan:
 /// Index Scan using articles_pkey on articles
 ///   Index Cond: (id = 0)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, title, metadata, contributors\nFROM public.articles\nWHERE id = #{id};"))]
-pub async fn get_article_by_id(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, id: i32) -> Result<GetArticleByIdItem, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "SELECT id, title, metadata, contributors\nFROM public.articles\nWHERE id = #{id};"
+    )
+)]
+pub async fn get_article_by_id(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    id: i32,
+) -> Result<GetArticleByIdItem, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, title, metadata, contributors
         FROM public.articles
-        WHERE id = $1;"
+        WHERE id = $1;",
     );
     let query = query.bind(id);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(GetArticleByIdItem {
-        id: row.try_get::<i32, _>("id")?,
-        title: row.try_get::<String, _>("title")?,
-        metadata: row.try_get::<Option<sqlx::types::Json<crate::models::ArticleMetadata>>, _>("metadata")?,
-        contributors: row.try_get::<Option<sqlx::types::Json<Vec<crate::models::ArticleContributor>>>, _>("contributors")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            title: row.try_get::<String, _>("title")?,
+            metadata: row.try_get::<Option<sqlx::types::Json<crate::models::ArticleMetadata>>, _>(
+                "metadata",
+            )?,
+            contributors: row
+                .try_get::<Option<sqlx::types::Json<Vec<crate::models::ArticleContributor>>>, _>(
+                    "contributors",
+                )?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -149,8 +179,20 @@ pub struct BatchInsertArticlesScalarNativeItem {
 }
 
 /// Batch insert articles with scalar @native JSONB types using multiunzip (regression test for type truncation)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.articles (title, metadata, contributors)\nSELECT title, metadata, contributors\nFROM UNNEST(\n        #{title}::text [],\n        #{metadata?}::jsonb [],\n        #{contributors?}::jsonb []\n    ) AS t(title, metadata, contributors)\nRETURNING id, title, metadata, contributors;"))]
-pub async fn batch_insert_articles_scalar_native(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, items: Vec<BatchInsertArticlesScalarNativeRecord>) -> Result<Vec<BatchInsertArticlesScalarNativeItem>, super::Error<BatchInsertArticlesScalarNativeConstraints>> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "INSERT INTO public.articles (title, metadata, contributors)\nSELECT title, metadata, contributors\nFROM UNNEST(\n        #{title}::text [],\n        #{metadata?}::jsonb [],\n        #{contributors?}::jsonb []\n    ) AS t(title, metadata, contributors)\nRETURNING id, title, metadata, contributors;"
+    )
+)]
+pub async fn batch_insert_articles_scalar_native(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    items: Vec<BatchInsertArticlesScalarNativeRecord>,
+) -> Result<
+    Vec<BatchInsertArticlesScalarNativeItem>,
+    super::Error<BatchInsertArticlesScalarNativeConstraints>,
+> {
     use itertools::Itertools;
     let query = sqlx::query(
         r"INSERT INTO public.articles (title, metadata, contributors)
@@ -160,25 +202,31 @@ pub async fn batch_insert_articles_scalar_native(executor: impl sqlx::Executor<'
             $2::jsonb [],
             $3::jsonb []
           ) AS t(title, metadata, contributors)
-        RETURNING id, title, metadata, contributors;"
+        RETURNING id, title, metadata, contributors;",
     );
-    let (title, metadata, contributors): (Vec<_>, Vec<_>, Vec<_>) =
-        items
-            .into_iter()
-            .map(|item| (item.title, item.metadata, item.contributors))
-            .multiunzip();
+    let (title, metadata, contributors): (Vec<_>, Vec<_>, Vec<_>) = items
+        .into_iter()
+        .map(|item| (item.title, item.metadata, item.contributors))
+        .multiunzip();
     let query = query.bind(title);
     let query = query.bind(metadata);
     let query = query.bind(contributors);
     let rows = query.fetch_all(executor).await?;
-    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
-        Ok(BatchInsertArticlesScalarNativeItem {
-        id: row.try_get::<i32, _>("id")?,
-        title: row.try_get::<String, _>("title")?,
-        metadata: row.try_get::<Option<sqlx::types::Json<crate::models::ArticleMetadata>>, _>("metadata")?,
-        contributors: row.try_get::<Option<sqlx::types::Json<Vec<crate::models::ArticleContributor>>>, _>("contributors")?,
-    })
-    }).collect();
+    let result: Result<Vec<_>, sqlx::Error> = rows
+        .iter()
+        .map(|row| {
+            Ok(BatchInsertArticlesScalarNativeItem {
+                id: row.try_get::<i32, _>("id")?,
+                title: row.try_get::<String, _>("title")?,
+                metadata: row
+                    .try_get::<Option<sqlx::types::Json<crate::models::ArticleMetadata>>, _>(
+                        "metadata",
+                    )?,
+                contributors: row.try_get::<Option<
+                    sqlx::types::Json<Vec<crate::models::ArticleContributor>>,
+                >, _>("contributors")?,
+            })
+        })
+        .collect();
     result.map_err(Into::into)
 }
-

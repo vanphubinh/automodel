@@ -15,10 +15,8 @@ static PGROONGA_QUERY_ESCAPE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("valid pgroonga regex")
 });
 
-static PGROONGA_QUERY_PARAM: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)&@~\s*(\$\d+)(\s*::text)?")
-        .expect("valid pgroonga regex")
-});
+static PGROONGA_QUERY_PARAM: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)&@~\s*(\$\d+)(\s*::text)?").expect("valid pgroonga regex"));
 
 static PGROONGA_TERM_ESCAPE_PUBLIC: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)&@\s+public\.pgroonga_query_escape\s*\(\s*(\$\d+)(\s*::text)?\s*\)")
@@ -30,10 +28,8 @@ static PGROONGA_TERM_ESCAPE: LazyLock<Regex> = LazyLock::new(|| {
         .expect("valid pgroonga regex")
 });
 
-static PGROONGA_TERM_PARAM: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)&@\s+(\$\d+)(\s*::text)?")
-        .expect("valid pgroonga regex")
-});
+static PGROONGA_TERM_PARAM: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)&@\s+(\$\d+)(\s*::text)?").expect("valid pgroonga regex"));
 
 fn pgroonga_param_cast(caps: &regex::Captures<'_>) -> String {
     let param = caps.get(1).expect("param").as_str();
@@ -115,9 +111,7 @@ pub async fn prepare_analysis_statement(
     client: &tokio_postgres::Client,
     sql: &str,
 ) -> Result<Statement, tokio_postgres::Error> {
-    client
-        .prepare(&normalize_pgroonga_for_prepare(sql))
-        .await
+    client.prepare(&normalize_pgroonga_for_prepare(sql)).await
 }
 
 /// Strip non-null column cast syntax from SQL and return cleaned SQL + set of forced-non-null column names.
@@ -736,7 +730,8 @@ async fn extract_input_types(
             .rust_name(datetime_crate)
             .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        let base_type_name = if is_text_like_param_type(param_type) && !clean_param_name.is_empty() {
+        let base_type_name = if is_text_like_param_type(param_type) && !clean_param_name.is_empty()
+        {
             if let Some((domain_type, _)) =
                 resolve_domain_type_for_param(client, clean_param_name, sql).await?
             {
@@ -1340,11 +1335,9 @@ pub async fn create_dummy_params(
 
             // Date & Time Types
             &Type::TIMESTAMPTZ => match datetime_crate {
-                crate::datetime_crate::DateTimeCrate::Jiff => Box::new(
-                    "1970-01-01T00:00:00Z"
-                        .parse::<jiff::Timestamp>()
-                        .unwrap(),
-                ),
+                crate::datetime_crate::DateTimeCrate::Jiff => {
+                    Box::new("1970-01-01T00:00:00Z".parse::<jiff::Timestamp>().unwrap())
+                }
                 crate::datetime_crate::DateTimeCrate::Time => {
                     Box::new(time::OffsetDateTime::UNIX_EPOCH)
                 }
@@ -1353,23 +1346,25 @@ pub async fn create_dummy_params(
                 crate::datetime_crate::DateTimeCrate::Jiff => {
                     Box::new(jiff::civil::date(2000, 1, 1).at(0, 0, 0, 0))
                 }
-                crate::datetime_crate::DateTimeCrate::Time => Box::new(
-                    time::PrimitiveDateTime::new(
+                crate::datetime_crate::DateTimeCrate::Time => {
+                    Box::new(time::PrimitiveDateTime::new(
                         time::Date::from_calendar_date(2000, time::Month::January, 1).unwrap(),
                         time::Time::MIDNIGHT,
-                    ),
-                ),
+                    ))
+                }
             },
             &Type::DATE => match datetime_crate {
                 crate::datetime_crate::DateTimeCrate::Jiff => {
                     Box::new(jiff::civil::date(2000, 1, 1))
                 }
-                crate::datetime_crate::DateTimeCrate::Time => Box::new(
-                    time::Date::from_calendar_date(2000, time::Month::January, 1).unwrap(),
-                ),
+                crate::datetime_crate::DateTimeCrate::Time => {
+                    Box::new(time::Date::from_calendar_date(2000, time::Month::January, 1).unwrap())
+                }
             },
             &Type::TIME => match datetime_crate {
-                crate::datetime_crate::DateTimeCrate::Jiff => Box::new(jiff::civil::time(0, 0, 0, 0)),
+                crate::datetime_crate::DateTimeCrate::Jiff => {
+                    Box::new(jiff::civil::time(0, 0, 0, 0))
+                }
                 crate::datetime_crate::DateTimeCrate::Time => Box::new(time::Time::MIDNIGHT),
             },
 
@@ -1395,17 +1390,13 @@ pub async fn create_dummy_params(
                 crate::datetime_crate::DateTimeCrate::Jiff => {
                     Box::new(Vec::<jiff::civil::Date>::new())
                 }
-                crate::datetime_crate::DateTimeCrate::Time => {
-                    Box::new(Vec::<time::Date>::new())
-                }
+                crate::datetime_crate::DateTimeCrate::Time => Box::new(Vec::<time::Date>::new()),
             },
             &Type::TIME_ARRAY => match datetime_crate {
                 crate::datetime_crate::DateTimeCrate::Jiff => {
                     Box::new(Vec::<jiff::civil::Time>::new())
                 }
-                crate::datetime_crate::DateTimeCrate::Time => {
-                    Box::new(Vec::<time::Time>::new())
-                }
+                crate::datetime_crate::DateTimeCrate::Time => Box::new(Vec::<time::Time>::new()),
             },
             &Type::TIMESTAMP_ARRAY => match datetime_crate {
                 crate::datetime_crate::DateTimeCrate::Jiff => {
@@ -1450,8 +1441,7 @@ mod pgroonga_tests {
 
     #[test]
     fn normalize_pgroonga_query_operator_with_escape_helper() {
-        let sql =
-            "SELECT 1 FROM public.parties WHERE display_name &@~ pgroonga_query_escape($3)";
+        let sql = "SELECT 1 FROM public.parties WHERE display_name &@~ pgroonga_query_escape($3)";
         let normalized = normalize_pgroonga_for_prepare(sql);
         assert_eq!(
             normalized,

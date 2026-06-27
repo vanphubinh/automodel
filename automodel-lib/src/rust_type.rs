@@ -124,10 +124,7 @@ impl RustName for PgType {
                 to_pascal_case(self.name())
             )),
             tokio_postgres::types::Kind::Array(elem_type) => {
-                Ok(format!(
-                    "Vec<{}>",
-                    elem_type.rust_name(datetime_crate)?
-                ))
+                Ok(format!("Vec<{}>", elem_type.rust_name(datetime_crate)?))
             }
             tokio_postgres::types::Kind::Range(elem_type) => {
                 let elem_wire = elem_type.rust_name(datetime_crate)?;
@@ -439,7 +436,10 @@ pub struct TypeInfo {
 }
 
 impl TypeInfo {
-    pub fn try_from(pg_type: &PgType, datetime_crate: DateTimeCrate) -> Result<Self, UnsupportedTypeError> {
+    pub fn try_from(
+        pg_type: &PgType,
+        datetime_crate: DateTimeCrate,
+    ) -> Result<Self, UnsupportedTypeError> {
         Ok(Self {
             id: pg_type.oid(),
             pg_name: pg_type.name().to_string(),
@@ -547,7 +547,10 @@ pub struct StructField {
 }
 
 impl StructField {
-    pub fn try_from(pg_field: &PgField, datetime_crate: DateTimeCrate) -> Result<Self, UnsupportedTypeError> {
+    pub fn try_from(
+        pg_field: &PgField,
+        datetime_crate: DateTimeCrate,
+    ) -> Result<Self, UnsupportedTypeError> {
         Ok(Self {
             pg_name: pg_field.name().to_string(),
             rust_name: to_snake_case(pg_field.name()),
@@ -583,9 +586,13 @@ impl StructField {
     }
 
     /// Like `codegen`, but uses serde-compatible types for datetime fields in composite structs.
-    pub fn codegen_for_serde(&self, datetime_crate: crate::datetime_crate::DateTimeCrate) -> String {
+    pub fn codegen_for_serde(
+        &self,
+        datetime_crate: crate::datetime_crate::DateTimeCrate,
+    ) -> String {
         let rust_type = self.rust_type();
-        let type_str = if let Some(serde_type) = datetime_crate.serde_type_for_wire_type(rust_type) {
+        let type_str = if let Some(serde_type) = datetime_crate.serde_type_for_wire_type(rust_type)
+        {
             if self.is_nullable {
                 format!("Option<{}>", serde_type)
             } else {
@@ -601,10 +608,7 @@ impl StructField {
 
     /// Generates the encode expression for this field inside a `PgRecordEncoder`.
     /// For JSON-wrapped fields, wraps the value in `sqlx::types::Json` internally.
-    fn codegen_encode_expr(
-        &self,
-        datetime_crate: crate::datetime_crate::DateTimeCrate,
-    ) -> String {
+    fn codegen_encode_expr(&self, datetime_crate: crate::datetime_crate::DateTimeCrate) -> String {
         if !self.needs_json_wrapper {
             if datetime_crate.is_datetime_wire_type(self.rust_type()) {
                 return match datetime_crate {
@@ -670,19 +674,14 @@ impl StructField {
 
     /// Generates an inline decode expression for use in struct field initialization.
     /// For JSON-wrapped fields, decodes as `Json<T>` and unwraps to the clean type.
-    fn codegen_decode_expr(
-        &self,
-        datetime_crate: crate::datetime_crate::DateTimeCrate,
-    ) -> String {
+    fn codegen_decode_expr(&self, datetime_crate: crate::datetime_crate::DateTimeCrate) -> String {
         if !self.needs_json_wrapper {
             if datetime_crate.is_datetime_wire_type(self.rust_type()) {
                 let wire = self.rust_type();
                 return match datetime_crate {
                     crate::datetime_crate::DateTimeCrate::Jiff => {
                         if self.is_nullable {
-                            format!(
-                                "decoder.try_decode::<Option<{wire}>>()?.map(|v| v.to_jiff())"
-                            )
+                            format!("decoder.try_decode::<Option<{wire}>>()?.map(|v| v.to_jiff())")
                         } else {
                             format!("decoder.try_decode::<{wire}>()?.to_jiff()")
                         }
@@ -783,14 +782,19 @@ impl TypeInfo {
     ) -> Option<String> {
         match &self.kind {
             TypeKind::Enum(enum_info) => Some(self.codegen_enum(enum_info, custom_derives)),
-            TypeKind::Struct(fields) => Some(self.codegen_struct(fields, custom_derives, datetime_crate)),
+            TypeKind::Struct(fields) => {
+                Some(self.codegen_struct(fields, custom_derives, datetime_crate))
+            }
             TypeKind::Alias(alias) => Some(self.codegen_alias(alias)),
             _ => None,
         }
     }
 
     /// Whether generated code for this type references the `ToSqlx` trait.
-    pub fn needs_to_sqlx_trait(&self, datetime_crate: crate::datetime_crate::DateTimeCrate) -> bool {
+    pub fn needs_to_sqlx_trait(
+        &self,
+        datetime_crate: crate::datetime_crate::DateTimeCrate,
+    ) -> bool {
         if !datetime_crate.needs_to_sqlx_import() {
             return false;
         }
@@ -821,10 +825,7 @@ impl TypeInfo {
             custom_derives,
         );
 
-        let sqlx_type_name = enum_info
-            .sqlx_type_name
-            .as_deref()
-            .unwrap_or(&self.pg_name);
+        let sqlx_type_name = enum_info.sqlx_type_name.as_deref().unwrap_or(&self.pg_name);
 
         let mut code = format!(
             "{}\n#[sqlx(type_name = \"{}\")]\npub enum {} {{\n",

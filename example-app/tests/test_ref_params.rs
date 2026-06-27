@@ -75,14 +75,10 @@ async fn test_user_model_diff_by_ref() {
     let pool = common::get_pool().await;
     let email = common::unique_email("ref_model_diff");
 
-    let created = generated::user_model::create_user(
-        pool,
-        "Model Diff".to_string(),
-        email,
-        Some(22),
-    )
-    .await
-    .unwrap();
+    let created =
+        generated::user_model::create_user(pool, "Model Diff".to_string(), email, Some(22))
+            .await
+            .unwrap();
 
     let old = created.clone();
     let new = generated::user_model::UserModel {
@@ -111,14 +107,10 @@ async fn test_user_model_full_update_by_ref() {
     let pool = common::get_pool().await;
     let email = common::unique_email("ref_full_update");
 
-    let created = generated::user_model::create_user(
-        pool,
-        "Full Update".to_string(),
-        email,
-        Some(20),
-    )
-    .await
-    .unwrap();
+    let created =
+        generated::user_model::create_user(pool, "Full Update".to_string(), email, Some(20))
+            .await
+            .unwrap();
 
     let params = generated::user_model::UserModel {
         id: created.id,
@@ -128,7 +120,9 @@ async fn test_user_model_full_update_by_ref() {
     };
 
     // Passed by reference
-    let updated = generated::user_model::update_user_full(pool, &params).await.unwrap();
+    let updated = generated::user_model::update_user_full(pool, &params)
+        .await
+        .unwrap();
 
     assert_eq!(updated.name, params.name);
     assert_eq!(updated.age, params.age);
@@ -168,15 +162,9 @@ async fn test_option_params() {
     assert_eq!(updated.age, Some(28)); // unchanged
 
     // Update only age
-    let updated = generated::users::update_user_fields(
-        pool,
-        None,
-        None,
-        Some(99),
-        user.id,
-    )
-    .await
-    .unwrap();
+    let updated = generated::users::update_user_fields(pool, None, None, Some(99), user.id)
+        .await
+        .unwrap();
 
     assert_eq!(updated.name, "Option Updated"); // unchanged
     assert_eq!(updated.age, Some(99));
@@ -239,7 +227,9 @@ async fn test_multiunzip_batch() {
     ];
 
     // Vec<Record> is consumed (owned parameter), items are unzipped into column-vectors
-    generated::users::insert_users_batch(pool, items).await.unwrap();
+    generated::users::insert_users_batch(pool, items)
+        .await
+        .unwrap();
 }
 
 /// Test multiunzip batch insert with Vec<Record> containing Option and Json fields.
@@ -267,7 +257,9 @@ async fn test_multiunzip_with_option_json_fields() {
         },
     ];
 
-    let results = generated::articles::batch_insert_articles(pool, items).await.unwrap();
+    let results = generated::articles::batch_insert_articles(pool, items)
+        .await
+        .unwrap();
     assert_eq!(results.len(), 2);
     assert_eq!(results[0].title, "Article Ref A");
     assert!(results[0].metadata.is_some());
@@ -287,7 +279,9 @@ async fn test_params_struct_reuse_across_calls() {
     };
 
     // First call — by reference
-    let r1 = generated::users::insert_user_structured(pool, &params).await.unwrap();
+    let r1 = generated::users::insert_user_structured(pool, &params)
+        .await
+        .unwrap();
     assert_eq!(r1.name, params.name);
 
     // Clone and modify email for second insert (unique constraint)
@@ -297,9 +291,11 @@ async fn test_params_struct_reuse_across_calls() {
     };
 
     // Second call — original params still usable, clone works
-    let r2 = generated::users::insert_user_structured(pool, &params2).await.unwrap();
+    let r2 = generated::users::insert_user_structured(pool, &params2)
+        .await
+        .unwrap();
     assert_eq!(r2.name, params.name); // same name from original
-    assert_ne!(r1.email, r2.email);   // different emails
+    assert_ne!(r1.email, r2.email); // different emails
 
     // Original struct not consumed
     assert_eq!(params.age, 50);

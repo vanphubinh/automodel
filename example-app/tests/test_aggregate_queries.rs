@@ -4,13 +4,11 @@ use example_app::generated;
 use jiff_sqlx::ToSqlx;
 
 fn days_ago(days: i64) -> jiff_sqlx::Timestamp {
-    (jiff::Timestamp::now() - jiff::Span::new().hours(days * 24))
-        .to_sqlx()
+    (jiff::Timestamp::now() - jiff::Span::new().hours(days * 24)).to_sqlx()
 }
 
 fn days_from_now(days: i64) -> jiff_sqlx::Timestamp {
-    (jiff::Timestamp::now() + jiff::Span::new().hours(days * 24))
-        .to_sqlx()
+    (jiff::Timestamp::now() + jiff::Span::new().hours(days * 24)).to_sqlx()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -55,12 +55,24 @@ pub struct InsertProductItem {
 }
 
 /// Insert a product with domain-typed fields
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "INSERT INTO public.products (name, price, contact_email, priority)\nVALUES (#{name}, #{price}, #{contact_email}, #{priority})\nRETURNING id, name, price, contact_email, priority"))]
-pub async fn insert_product(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, name: String, price: super::types::public::PositiveInt, contact_email: super::types::public::EmailAddress, priority: super::types::public::ProductPriority) -> Result<InsertProductItem, super::Error<InsertProductConstraints>> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "INSERT INTO public.products (name, price, contact_email, priority)\nVALUES (#{name}, #{price}, #{contact_email}, #{priority})\nRETURNING id, name, price, contact_email, priority"
+    )
+)]
+pub async fn insert_product(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    name: String,
+    price: super::types::public::PositiveInt,
+    contact_email: super::types::public::EmailAddress,
+    priority: super::types::public::ProductPriority,
+) -> Result<InsertProductItem, super::Error<InsertProductConstraints>> {
     let query = sqlx::query(
         r"INSERT INTO public.products (name, price, contact_email, priority)
         VALUES ($1, $2, $3, $4)
-        RETURNING id, name, price, contact_email, priority"
+        RETURNING id, name, price, contact_email, priority",
     );
     let query = query.bind(&name);
     let query = query.bind(price);
@@ -69,12 +81,12 @@ pub async fn insert_product(executor: impl sqlx::Executor<'_, Database = sqlx::P
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(InsertProductItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        price: row.try_get::<super::types::public::PositiveInt, _>("price")?,
-        contact_email: row.try_get::<super::types::public::EmailAddress, _>("contact_email")?,
-        priority: row.try_get::<super::types::public::ProductPriority, _>("priority")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            name: row.try_get::<String, _>("name")?,
+            price: row.try_get::<super::types::public::PositiveInt, _>("price")?,
+            contact_email: row.try_get::<super::types::public::EmailAddress, _>("contact_email")?,
+            priority: row.try_get::<super::types::public::ProductPriority, _>("priority")?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -93,20 +105,25 @@ pub struct GetAllProductsItem {
 /// Query Plan:
 /// Seq Scan on products
 ///   Disabled: true
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, price, contact_email, priority FROM public.products"))]
-pub async fn get_all_products(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>) -> Result<GetAllProductsItem, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id, name, price, contact_email, priority FROM public.products"
-    );
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(sql = "SELECT id, name, price, contact_email, priority FROM public.products")
+)]
+pub async fn get_all_products(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+) -> Result<GetAllProductsItem, super::ErrorReadOnly> {
+    let query =
+        sqlx::query(r"SELECT id, name, price, contact_email, priority FROM public.products");
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(GetAllProductsItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        price: row.try_get::<super::types::public::PositiveInt, _>("price")?,
-        contact_email: row.try_get::<super::types::public::EmailAddress, _>("contact_email")?,
-        priority: row.try_get::<super::types::public::ProductPriority, _>("priority")?,
-    })
+            id: row.try_get::<i32, _>("id")?,
+            name: row.try_get::<String, _>("name")?,
+            price: row.try_get::<super::types::public::PositiveInt, _>("price")?,
+            contact_email: row.try_get::<super::types::public::EmailAddress, _>("contact_email")?,
+            priority: row.try_get::<super::types::public::ProductPriority, _>("priority")?,
+        })
     })();
     result.map_err(Into::into)
 }
@@ -126,24 +143,36 @@ pub struct GetProductsByPriorityItem {
 /// Seq Scan on products
 ///   Disabled: true
 ///   Filter: ((priority)::text = (('low'::text)::public.product_priority)::text)
-#[tracing::instrument(level = "debug", skip_all, fields(sql = "SELECT id, name, price, contact_email, priority\nFROM public.products\nWHERE priority = #{priority}"))]
-pub async fn get_products_by_priority(executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>, priority: super::types::public::ProductPriority) -> Result<Vec<GetProductsByPriorityItem>, super::ErrorReadOnly> {
+#[tracing::instrument(
+    level = "debug",
+    skip_all,
+    fields(
+        sql = "SELECT id, name, price, contact_email, priority\nFROM public.products\nWHERE priority = #{priority}"
+    )
+)]
+pub async fn get_products_by_priority(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    priority: super::types::public::ProductPriority,
+) -> Result<Vec<GetProductsByPriorityItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
         r"SELECT id, name, price, contact_email, priority
         FROM public.products
-        WHERE priority = $1"
+        WHERE priority = $1",
     );
     let query = query.bind(priority);
     let rows = query.fetch_all(executor).await?;
-    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {
-        Ok(GetProductsByPriorityItem {
-        id: row.try_get::<i32, _>("id")?,
-        name: row.try_get::<String, _>("name")?,
-        price: row.try_get::<super::types::public::PositiveInt, _>("price")?,
-        contact_email: row.try_get::<super::types::public::EmailAddress, _>("contact_email")?,
-        priority: row.try_get::<super::types::public::ProductPriority, _>("priority")?,
-    })
-    }).collect();
+    let result: Result<Vec<_>, sqlx::Error> = rows
+        .iter()
+        .map(|row| {
+            Ok(GetProductsByPriorityItem {
+                id: row.try_get::<i32, _>("id")?,
+                name: row.try_get::<String, _>("name")?,
+                price: row.try_get::<super::types::public::PositiveInt, _>("price")?,
+                contact_email: row
+                    .try_get::<super::types::public::EmailAddress, _>("contact_email")?,
+                priority: row.try_get::<super::types::public::ProductPriority, _>("priority")?,
+            })
+        })
+        .collect();
     result.map_err(Into::into)
 }
-

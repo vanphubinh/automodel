@@ -56,7 +56,7 @@ pub enum Error<C: TryFrom<ErrorConstraintInfo>> {
 
     /// Row not found error
     RowNotFound,
-    
+
     /// System under stress, timeout
     PoolTimeout,
 
@@ -112,10 +112,9 @@ impl<C: TryFrom<ErrorConstraintInfo>> From<sqlx::Error> for Error<C> {
             sqlx::Error::PoolClosed => Self::InternalError("Pool closed".to_string(), error),
             sqlx::Error::WorkerCrashed => Self::InternalError("Worker crashed".to_string(), error),
             sqlx::Error::Migrate(_) => Self::InternalError("Migration error".to_string(), error),
-            sqlx::Error::InvalidSavePointStatement => Self::InternalError(
-                "Invalid save point statement".to_string(),
-                error,
-            ),
+            sqlx::Error::InvalidSavePointStatement => {
+                Self::InternalError("Invalid save point statement".to_string(), error)
+            }
             sqlx::Error::BeginFailed => Self::InternalError("Begin failed".to_string(), error),
             _ => Self::InternalError("Unknown sqlx error".to_string(), error),
         }
@@ -132,7 +131,11 @@ where
                 if let Some(c) = constraint {
                     write!(f, "Constraint violation: {:#?}", c)
                 } else {
-                    write!(f, "Unknown constraint violation: {} on table {}", info.constraint_name, info.table_name)
+                    write!(
+                        f,
+                        "Unknown constraint violation: {} on table {}",
+                        info.constraint_name, info.table_name
+                    )
                 }
             }
             Error::RowNotFound => write!(f, "Row not found"),
