@@ -328,8 +328,8 @@ pub fn generate_structured_params_struct(
 
         // Only add if we haven't seen this parameter name before
         if !unique_params.contains_key(&clean_param_name) {
-            // Use the type as-is (including Option wrapper if nullable)
-            let final_type = if rust_type.is_nullable {
+            // Use the type as-is (including Option wrapper if nullable or conditional)
+            let final_type = if rust_type.is_nullable || rust_type.is_optional {
                 format!("Option<{}>", rust_type.rust_type())
             } else {
                 rust_type.rust_type().to_string()
