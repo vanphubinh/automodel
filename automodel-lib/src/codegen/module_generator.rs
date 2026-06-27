@@ -85,7 +85,6 @@ pub enum Error<C: TryFrom<ErrorConstraintInfo>> {
 
     /// Row not found error
     RowNotFound,
-    
     /// System under stress, timeout
     PoolTimeout,
 
@@ -141,10 +140,9 @@ impl<C: TryFrom<ErrorConstraintInfo>> From<sqlx::Error> for Error<C> {
             sqlx::Error::PoolClosed => Self::InternalError("Pool closed".to_string(), error),
             sqlx::Error::WorkerCrashed => Self::InternalError("Worker crashed".to_string(), error),
             sqlx::Error::Migrate(_) => Self::InternalError("Migration error".to_string(), error),
-            sqlx::Error::InvalidSavePointStatement => Self::InternalError(
-                "Invalid save point statement".to_string(),
-                error,
-            ),
+            sqlx::Error::InvalidSavePointStatement => {
+                Self::InternalError("Invalid save point statement".to_string(), error)
+            }
             sqlx::Error::BeginFailed => Self::InternalError("Begin failed".to_string(), error),
             _ => Self::InternalError("Unknown sqlx error".to_string(), error),
         }
@@ -190,7 +188,6 @@ where
 pub enum ErrorReadOnly {
     /// Row not found error
     RowNotFound,
-
     /// System under stress, timeout
     PoolTimeout,
 
@@ -466,7 +463,11 @@ fn generate_inline_raw_string_literal(content: &str) -> String {
 fn generate_embedded_raw_string(sql: &str) -> String {
     let content = format_sql_literal_content(sql);
     let delimiter = raw_string_delimiter(&content);
-    format!("r{delimiter}\"{content}{delimiter}", delimiter = delimiter, content = content)
+    format!(
+        "r{delimiter}\"{content}\"{delimiter}",
+        delimiter = delimiter,
+        content = content,
+    )
 }
 
 /// Generate Rust function code for a SQL query without enum definitions
@@ -633,6 +634,9 @@ pub fn generate_function_code_without_enums(
                 // Remove cost estimates, row counts, and width from the plan to avoid instability
                 // These values change between runs and make the generated code unstable
                 let cleaned_line = remove_plan_statistics(line);
+                if cleaned_line.is_empty() {
+                    continue;
+                }
                 code.push_str(&format!("/// {}\n", cleaned_line));
             }
         }
@@ -1857,5 +1861,12 @@ mod tests {
             format_sql_literal_content(sql),
             "\n    SELECT\n        id,\n        name\n    FROM\n        users\n    WHERE\n        active = true"
         );
+    }
+
+    #[test]
+    fn generate_embedded_raw_string_closes_the_literal() {
+        let raw = generate_embedded_raw_string("SELECT 1");
+        assert!(raw.starts_with("r\""));
+        assert!(raw.ends_with('"'));
     }
 }
