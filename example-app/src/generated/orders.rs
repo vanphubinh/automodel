@@ -43,24 +43,29 @@ pub struct InsertOrderItem {
 }
 
 /// Insert a new order
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "INSERT INTO public.orders (tenant_id, product_name, amount)\nVALUES (#{tenant_id}, #{product_name}, #{amount})\nRETURNING id, tenant_id, product_name, amount, created_at"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn insert_order(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     tenant_id: i32,
     product_name: String,
     amount: rust_decimal::Decimal,
 ) -> Result<InsertOrderItem, super::Error<InsertOrderConstraints>> {
-    let query = sqlx::query(
-        r"INSERT INTO public.orders (tenant_id, product_name, amount)
-        VALUES ($1, $2, $3)
-        RETURNING id, tenant_id, product_name, amount, created_at",
+    let sql = r"
+    INSERT INTO
+        public.orders (tenant_id, product_name, amount)
+    VALUES
+        ($1, $2, $3)
+    RETURNING
+        id,
+        tenant_id,
+        product_name,
+        amount,
+        created_at";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(tenant_id);
     let query = query.bind(&product_name);
     let query = query.bind(amount);
@@ -95,23 +100,29 @@ pub struct GetOrdersByTenantItem {
 ///         Recheck Cond: (tenant_id = 0)
 ///         ->  Bitmap Index Scan on orders_p0_pkey
 ///               Index Cond: (tenant_id = 0)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "SELECT id, tenant_id, product_name, amount, created_at\nFROM public.orders\nWHERE tenant_id = #{tenant_id}\nORDER BY created_at DESC"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_orders_by_tenant(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     tenant_id: i32,
 ) -> Result<Vec<GetOrdersByTenantItem>, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id, tenant_id, product_name, amount, created_at
-        FROM public.orders
-        WHERE tenant_id = $1
-        ORDER BY created_at DESC",
+    let sql = r"
+    SELECT
+        id,
+        tenant_id,
+        product_name,
+        amount,
+        created_at
+    FROM
+        public.orders
+    WHERE
+        tenant_id = $1
+    ORDER BY
+        created_at DESC";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(tenant_id);
     let rows = query.fetch_all(executor).await?;
     let result: Result<Vec<_>, sqlx::Error> = rows
@@ -156,23 +167,29 @@ pub struct GetOrdersByProductItem {
 ///         ->  Seq Scan on orders_p3 orders_4
 ///               Disabled: true
 ///               Filter: (product_name = 'dummy'::text)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "SELECT id, tenant_id, product_name, amount, created_at\nFROM public.orders\nWHERE product_name = #{product_name}\nORDER BY created_at DESC"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_orders_by_product(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     product_name: String,
 ) -> Result<Vec<GetOrdersByProductItem>, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id, tenant_id, product_name, amount, created_at
-        FROM public.orders
-        WHERE product_name = $1
-        ORDER BY created_at DESC",
+    let sql = r"
+    SELECT
+        id,
+        tenant_id,
+        product_name,
+        amount,
+        created_at
+    FROM
+        public.orders
+    WHERE
+        product_name = $1
+    ORDER BY
+        created_at DESC";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&product_name);
     let rows = query.fetch_all(executor).await?;
     let result: Result<Vec<_>, sqlx::Error> = rows
@@ -221,23 +238,29 @@ pub struct GetOrdersByTenantRangeItem {
 ///               Recheck Cond: (tenant_id > 0)
 ///               ->  Bitmap Index Scan on orders_p3_pkey
 ///                     Index Cond: (tenant_id > 0)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "SELECT id, tenant_id, product_name, amount, created_at\nFROM public.orders\nWHERE tenant_id > #{min_tenant_id}\nORDER BY created_at DESC"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_orders_by_tenant_range(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     min_tenant_id: i32,
 ) -> Result<Vec<GetOrdersByTenantRangeItem>, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id, tenant_id, product_name, amount, created_at
-        FROM public.orders
-        WHERE tenant_id > $1
-        ORDER BY created_at DESC",
+    let sql = r"
+    SELECT
+        id,
+        tenant_id,
+        product_name,
+        amount,
+        created_at
+    FROM
+        public.orders
+    WHERE
+        tenant_id > $1
+    ORDER BY
+        created_at DESC";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(min_tenant_id);
     let rows = query.fetch_all(executor).await?;
     let result: Result<Vec<_>, sqlx::Error> = rows

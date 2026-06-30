@@ -48,25 +48,31 @@ pub struct UpdateUserSocialLinksNullableItem {
 }
 
 /// Update user's social links with nullable value
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "UPDATE public.users\nSET social_links = #{social_links?}, updated_at = NOW()\nWHERE id = #{user_id}\nRETURNING id, name, email, social_links;"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn update_user_social_links_nullable(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     social_links: Option<Vec<crate::models::UserSocialLink>>,
     user_id: i32,
 ) -> Result<UpdateUserSocialLinksNullableItem, super::Error<UpdateUserSocialLinksNullableConstraints>>
 {
-    let query = sqlx::query(
-        r"UPDATE public.users
-        SET social_links = $1, updated_at = NOW()
-        WHERE id = $2
-        RETURNING id, name, email, social_links;",
+    let sql = r"
+    UPDATE
+        public.users
+    SET
+        social_links = $1
+        updated_at = NOW()
+    WHERE
+        id = $2
+    RETURNING
+        id,
+        name,
+        email,
+        social_links;";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(
         social_links
             .as_ref()
@@ -145,13 +151,7 @@ pub struct InsertUserSocialLinksStructuredItem {
 }
 
 /// Insert user with social links using structured parameters
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "INSERT INTO public.users (name, email, status, social_links)\nVALUES (#{name}, #{email}, 'pending', #{social_links})\nRETURNING id, name, email, social_links;"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn insert_user_social_links_structured(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     params: &InsertUserSocialLinksStructuredParams,
@@ -159,11 +159,21 @@ pub async fn insert_user_social_links_structured(
     InsertUserSocialLinksStructuredItem,
     super::Error<InsertUserSocialLinksStructuredConstraints>,
 > {
-    let query = sqlx::query(
-        r"INSERT INTO public.users (name, email, status, social_links)
-        VALUES ($1, $2, 'pending', $3)
-        RETURNING id, name, email, social_links;",
+    let sql = r"
+    INSERT INTO
+        public.users (name, email, status, social_links)
+    VALUES
+        ($1, $2, 'pending', $3)
+    RETURNING
+        id,
+        name,
+        email,
+        social_links;";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&params.name);
     let query = query.bind(&params.email);
     let query = query.bind(
@@ -238,25 +248,27 @@ pub struct UpdateUserSocialLinksDiffItem {
 }
 
 /// Update user social links with conditional set using diff comparison
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "UPDATE public.users\nSET updated_at = NOW()\n#[, name = #{name?}]\n#[, social_links = #{social_links?}]\nWHERE id = #{user_id}\nRETURNING id, name, email, social_links;"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn update_user_social_links_diff(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     old: &UpdateUserSocialLinksDiffParams,
     new: &UpdateUserSocialLinksDiffParams,
     user_id: i32,
 ) -> Result<UpdateUserSocialLinksDiffItem, super::Error<UpdateUserSocialLinksDiffConstraints>> {
-    let mut final_sql = r"UPDATE public.users
-SET updated_at = NOW()
-#[, name = #{name?}]
-#[, social_links = #{social_links?}]
-WHERE id = $1
-RETURNING id, name, email, social_links;"
+    let mut final_sql = r"
+    UPDATE
+        public.users
+    SET
+        updated_at = NOW()
+        #[, name = #{name?}]
+        #[, social_links = #{social_links?}]
+    WHERE
+        id = $1
+    RETURNING
+        id,
+        name,
+        email,
+        social_links;"
         .to_string();
     let mut included_params = Vec::new();
 
@@ -290,6 +302,10 @@ RETURNING id, name, email, social_links;"
         param_counter += 1;
     }
     let _ = param_counter; // Suppress unused assignment warning
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+    );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
@@ -367,13 +383,7 @@ pub struct UpdateUserSocialLinksConditionalItem {
 }
 
 /// Update user social links with conditional set (no diff struct)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "UPDATE public.users\nSET updated_at = NOW()\n#[, name = #{name?}]\n#[, social_links = #{social_links?}]\nWHERE id = #{user_id}\nRETURNING id, name, email, social_links;"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn update_user_social_links_conditional(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     name: Option<String>,
@@ -383,12 +393,20 @@ pub async fn update_user_social_links_conditional(
     UpdateUserSocialLinksConditionalItem,
     super::Error<UpdateUserSocialLinksConditionalConstraints>,
 > {
-    let mut final_sql = r"UPDATE public.users
-SET updated_at = NOW()
-#[, name = #{name?}]
-#[, social_links = #{social_links?}]
-WHERE id = $1
-RETURNING id, name, email, social_links;"
+    let mut final_sql = r"
+    UPDATE
+        public.users
+    SET
+        updated_at = NOW()
+        #[, name = #{name?}]
+        #[, social_links = #{social_links?}]
+    WHERE
+        id = $1
+    RETURNING
+        id,
+        name,
+        email,
+        social_links;"
         .to_string();
     let mut included_params = Vec::new();
 
@@ -422,6 +440,10 @@ RETURNING id, name, email, social_links;"
         param_counter += 1;
     }
     let _ = param_counter; // Suppress unused assignment warning
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+    );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
@@ -506,13 +528,7 @@ pub struct InsertUsersBatchSocialLinksItem {
 }
 
 /// Batch insert users with optional social links using multiunzip
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "INSERT INTO public.users (name, email, social_links)\nSELECT name, email, social_links\nFROM UNNEST(\n        #{name}::text [],\n        #{email}::text [],\n        #{social_links?}::jsonb []\n    ) AS t(name, email, social_links)\nRETURNING id, name, email, social_links;"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn insert_users_batch_social_links(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     items: Vec<InsertUsersBatchSocialLinksRecord>,
@@ -521,16 +537,21 @@ pub async fn insert_users_batch_social_links(
     super::Error<InsertUsersBatchSocialLinksConstraints>,
 > {
     use itertools::Itertools;
-    let query = sqlx::query(
-        r"INSERT INTO public.users (name, email, social_links)
-        SELECT name, email, social_links
-        FROM UNNEST(
-            $1::text [],
-            $2::text [],
-            $3::jsonb []
-          ) AS t(name, email, social_links)
-        RETURNING id, name, email, social_links;",
+    let sql = r"
+    INSERT INTO
+        public.users (name, email, social_links)
+    SELECT name, email, social_links
+    FROM UNNEST(
+        $1::text [],
+        $2::text [],
+        $3::jsonb []
+      ) AS t(name, email, social_links)
+    RETURNING id, name, email, social_links;";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let (name, email, social_links): (Vec<_>, Vec<_>, Vec<_>) = items
         .into_iter()
         .map(|item| (item.name, item.email, item.social_links))
@@ -608,24 +629,30 @@ pub struct UpdateUserTagsItem {
 }
 
 /// Update user tags (jsonb[] column with nullable elements)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "UPDATE public.users\nSET tags = #{tags}, updated_at = NOW()\nWHERE id = #{user_id}\nRETURNING id, name, email, tags;"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn update_user_tags(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     tags: Vec<Option<crate::models::UserTag>>,
     user_id: i32,
 ) -> Result<UpdateUserTagsItem, super::Error<UpdateUserTagsConstraints>> {
-    let query = sqlx::query(
-        r"UPDATE public.users
-        SET tags = $1, updated_at = NOW()
-        WHERE id = $2
-        RETURNING id, name, email, tags;",
+    let sql = r"
+    UPDATE
+        public.users
+    SET
+        tags = $1
+        updated_at = NOW()
+    WHERE
+        id = $2
+    RETURNING
+        id,
+        name,
+        email,
+        tags;";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let tags_json: Vec<Option<serde_json::Value>> = tags
         .iter()
         .map(|el| {
@@ -676,20 +703,26 @@ pub struct GetUserTagsItem {
 /// Query Plan:
 /// Index Scan using users_pkey on users
 ///   Index Cond: (id = 0)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(sql = "SELECT id, name, email, tags\nFROM public.users\nWHERE id = #{user_id};")
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_user_tags(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     user_id: i32,
 ) -> Result<GetUserTagsItem, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id, name, email, tags
-        FROM public.users
-        WHERE id = $1;",
+    let sql = r"
+    SELECT
+        id,
+        name,
+        email,
+        tags
+    FROM
+        public.users
+    WHERE
+        id = $1;";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(user_id);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
@@ -769,22 +802,26 @@ pub struct InsertUserTagsStructuredItem {
 }
 
 /// Insert user with tags using structured parameters (jsonb[] column)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "INSERT INTO public.users (name, email, status, tags)\nVALUES (#{name}, #{email}, 'pending', #{tags})\nRETURNING id, name, email, tags;"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn insert_user_tags_structured(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     params: &InsertUserTagsStructuredParams,
 ) -> Result<InsertUserTagsStructuredItem, super::Error<InsertUserTagsStructuredConstraints>> {
-    let query = sqlx::query(
-        r"INSERT INTO public.users (name, email, status, tags)
-        VALUES ($1, $2, 'pending', $3)
-        RETURNING id, name, email, tags;",
+    let sql = r"
+    INSERT INTO
+        public.users (name, email, status, tags)
+    VALUES
+        ($1, $2, 'pending', $3)
+    RETURNING
+        id,
+        name,
+        email,
+        tags;";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&params.name);
     let query = query.bind(&params.email);
     let tags_json: Vec<Option<serde_json::Value>> = params
@@ -875,25 +912,27 @@ pub struct UpdateUserTagsDiffItem {
 }
 
 /// Update user tags with conditional diff (jsonb[] column)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "UPDATE public.users\nSET updated_at = NOW()\n#[, name = #{name?}]\n#[, tags = #{tags?}]\nWHERE id = #{user_id}\nRETURNING id, name, email, tags;"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn update_user_tags_diff(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     old: &UpdateUserTagsDiffParams,
     new: &UpdateUserTagsDiffParams,
     user_id: i32,
 ) -> Result<UpdateUserTagsDiffItem, super::Error<UpdateUserTagsDiffConstraints>> {
-    let mut final_sql = r"UPDATE public.users
-SET updated_at = NOW()
-#[, name = #{name?}]
-#[, tags = #{tags?}]
-WHERE id = $1
-RETURNING id, name, email, tags;"
+    let mut final_sql = r"
+    UPDATE
+        public.users
+    SET
+        updated_at = NOW()
+        #[, name = #{name?}]
+        #[, tags = #{tags?}]
+    WHERE
+        id = $1
+    RETURNING
+        id,
+        name,
+        email,
+        tags;"
         .to_string();
     let mut included_params = Vec::new();
 
@@ -924,6 +963,10 @@ RETURNING id, name, email, tags;"
         param_counter += 1;
     }
     let _ = param_counter; // Suppress unused assignment warning
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+    );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
@@ -1017,25 +1060,27 @@ pub struct UpdateUserTagsConditionalItem {
 }
 
 /// Update user tags with conditional set (jsonb[] column, no diff struct)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "UPDATE public.users\nSET updated_at = NOW()\n#[, name = #{name?}]\n#[, tags = #{tags?}]\nWHERE id = #{user_id}\nRETURNING id, name, email, tags;"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn update_user_tags_conditional(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     name: Option<String>,
     tags: Option<Vec<Option<crate::models::UserTag>>>,
     user_id: i32,
 ) -> Result<UpdateUserTagsConditionalItem, super::Error<UpdateUserTagsConditionalConstraints>> {
-    let mut final_sql = r"UPDATE public.users
-SET updated_at = NOW()
-#[, name = #{name?}]
-#[, tags = #{tags?}]
-WHERE id = $1
-RETURNING id, name, email, tags;"
+    let mut final_sql = r"
+    UPDATE
+        public.users
+    SET
+        updated_at = NOW()
+        #[, name = #{name?}]
+        #[, tags = #{tags?}]
+    WHERE
+        id = $1
+    RETURNING
+        id,
+        name,
+        email,
+        tags;"
         .to_string();
     let mut included_params = Vec::new();
 
@@ -1066,6 +1111,10 @@ RETURNING id, name, email, tags;"
         param_counter += 1;
     }
     let _ = param_counter; // Suppress unused assignment warning
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+    );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
@@ -1167,30 +1216,29 @@ pub struct InsertUsersBatchTagsItem {
 }
 
 /// Batch insert users with tags using multiunzip (jsonb[] column)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "INSERT INTO public.users (name, email, tags)\nSELECT name, email,\n    CASE WHEN tags IS NULL THEN NULL\n    ELSE ARRAY(SELECT jsonb_array_elements(tags)) END\nFROM UNNEST(\n        #{name}::text [],\n        #{email}::text [],\n        #{tags}::jsonb []\n    ) AS t(name, email, tags)\nRETURNING id, name, email, tags;"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn insert_users_batch_tags(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     items: Vec<InsertUsersBatchTagsRecord>,
 ) -> Result<Vec<InsertUsersBatchTagsItem>, super::Error<InsertUsersBatchTagsConstraints>> {
     use itertools::Itertools;
-    let query = sqlx::query(
-        r"INSERT INTO public.users (name, email, tags)
-        SELECT name, email,
-          CASE WHEN tags IS NULL THEN NULL
-          ELSE ARRAY(SELECT jsonb_array_elements(tags)) END
-        FROM UNNEST(
-            $1::text [],
-            $2::text [],
-            $3::jsonb []
-          ) AS t(name, email, tags)
-        RETURNING id, name, email, tags;",
+    let sql = r"
+    INSERT INTO
+        public.users (name, email, tags)
+    SELECT name, email,
+      CASE WHEN tags IS NULL THEN NULL
+      ELSE ARRAY(SELECT jsonb_array_elements(tags)) END
+    FROM UNNEST(
+        $1::text [],
+        $2::text [],
+        $3::jsonb []
+      ) AS t(name, email, tags)
+    RETURNING id, name, email, tags;";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let (name, email, tags): (Vec<_>, Vec<_>, Vec<_>) = items
         .into_iter()
         .map(|item| (item.name, item.email, item.tags))
@@ -1274,24 +1322,30 @@ pub struct UpdateUserLabelsItem {
 }
 
 /// Update user labels (required jsonb[] column with nullable elements)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "UPDATE public.users\nSET labels = #{labels}, updated_at = NOW()\nWHERE id = #{user_id}\nRETURNING id, name, email, labels;"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn update_user_labels(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     labels: Vec<Option<crate::models::UserTag>>,
     user_id: i32,
 ) -> Result<UpdateUserLabelsItem, super::Error<UpdateUserLabelsConstraints>> {
-    let query = sqlx::query(
-        r"UPDATE public.users
-        SET labels = $1, updated_at = NOW()
-        WHERE id = $2
-        RETURNING id, name, email, labels;",
+    let sql = r"
+    UPDATE
+        public.users
+    SET
+        labels = $1
+        updated_at = NOW()
+    WHERE
+        id = $2
+    RETURNING
+        id,
+        name,
+        email,
+        labels;";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let labels_json: Vec<Option<serde_json::Value>> = labels
         .iter()
         .map(|el| {
@@ -1339,20 +1393,26 @@ pub struct GetUserLabelsItem {
 /// Query Plan:
 /// Index Scan using users_pkey on users
 ///   Index Cond: (id = 0)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(sql = "SELECT id, name, email, labels\nFROM public.users\nWHERE id = #{user_id};")
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_user_labels(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     user_id: i32,
 ) -> Result<GetUserLabelsItem, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id, name, email, labels
-        FROM public.users
-        WHERE id = $1;",
+    let sql = r"
+    SELECT
+        id,
+        name,
+        email,
+        labels
+    FROM
+        public.users
+    WHERE
+        id = $1;";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(user_id);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
@@ -1429,22 +1489,26 @@ pub struct InsertUserLabelsStructuredItem {
 }
 
 /// Insert user with labels using structured parameters (required jsonb[] column)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "INSERT INTO public.users (name, email, status, labels)\nVALUES (#{name}, #{email}, 'pending', #{labels})\nRETURNING id, name, email, labels;"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn insert_user_labels_structured(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     params: &InsertUserLabelsStructuredParams,
 ) -> Result<InsertUserLabelsStructuredItem, super::Error<InsertUserLabelsStructuredConstraints>> {
-    let query = sqlx::query(
-        r"INSERT INTO public.users (name, email, status, labels)
-        VALUES ($1, $2, 'pending', $3)
-        RETURNING id, name, email, labels;",
+    let sql = r"
+    INSERT INTO
+        public.users (name, email, status, labels)
+    VALUES
+        ($1, $2, 'pending', $3)
+    RETURNING
+        id,
+        name,
+        email,
+        labels;";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&params.name);
     let query = query.bind(&params.email);
     let labels_json: Vec<Option<serde_json::Value>> = params
@@ -1532,25 +1596,27 @@ pub struct UpdateUserLabelsDiffItem {
 }
 
 /// Update user labels with conditional diff (required jsonb[] column)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "UPDATE public.users\nSET updated_at = NOW()\n#[, name = #{name?}]\n#[, labels = #{labels?}]\nWHERE id = #{user_id}\nRETURNING id, name, email, labels;"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn update_user_labels_diff(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     old: &UpdateUserLabelsDiffParams,
     new: &UpdateUserLabelsDiffParams,
     user_id: i32,
 ) -> Result<UpdateUserLabelsDiffItem, super::Error<UpdateUserLabelsDiffConstraints>> {
-    let mut final_sql = r"UPDATE public.users
-SET updated_at = NOW()
-#[, name = #{name?}]
-#[, labels = #{labels?}]
-WHERE id = $1
-RETURNING id, name, email, labels;"
+    let mut final_sql = r"
+    UPDATE
+        public.users
+    SET
+        updated_at = NOW()
+        #[, name = #{name?}]
+        #[, labels = #{labels?}]
+    WHERE
+        id = $1
+    RETURNING
+        id,
+        name,
+        email,
+        labels;"
         .to_string();
     let mut included_params = Vec::new();
 
@@ -1581,6 +1647,10 @@ RETURNING id, name, email, labels;"
         param_counter += 1;
     }
     let _ = param_counter; // Suppress unused assignment warning
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+    );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
@@ -1671,25 +1741,27 @@ pub struct UpdateUserLabelsConditionalItem {
 }
 
 /// Update user labels with conditional set (required jsonb[] column, no diff struct)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "UPDATE public.users\nSET updated_at = NOW()\n#[, name = #{name?}]\n#[, labels = #{labels?}]\nWHERE id = #{user_id}\nRETURNING id, name, email, labels;"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn update_user_labels_conditional(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     name: Option<String>,
     labels: Option<Vec<Option<crate::models::UserTag>>>,
     user_id: i32,
 ) -> Result<UpdateUserLabelsConditionalItem, super::Error<UpdateUserLabelsConditionalConstraints>> {
-    let mut final_sql = r"UPDATE public.users
-SET updated_at = NOW()
-#[, name = #{name?}]
-#[, labels = #{labels?}]
-WHERE id = $1
-RETURNING id, name, email, labels;"
+    let mut final_sql = r"
+    UPDATE
+        public.users
+    SET
+        updated_at = NOW()
+        #[, name = #{name?}]
+        #[, labels = #{labels?}]
+    WHERE
+        id = $1
+    RETURNING
+        id,
+        name,
+        email,
+        labels;"
         .to_string();
     let mut included_params = Vec::new();
 
@@ -1720,6 +1792,10 @@ RETURNING id, name, email, labels;"
         param_counter += 1;
     }
     let _ = param_counter; // Suppress unused assignment warning
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+    );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
@@ -1818,29 +1894,28 @@ pub struct InsertUsersBatchLabelsItem {
 }
 
 /// Batch insert users with labels using multiunzip (required jsonb[] column)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "INSERT INTO public.users (name, email, labels)\nSELECT name, email,\n    ARRAY(SELECT jsonb_array_elements(labels))\nFROM UNNEST(\n        #{name}::text [],\n        #{email}::text [],\n        #{labels}::jsonb []\n    ) AS t(name, email, labels)\nRETURNING id, name, email, labels;"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn insert_users_batch_labels(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     items: Vec<InsertUsersBatchLabelsRecord>,
 ) -> Result<Vec<InsertUsersBatchLabelsItem>, super::Error<InsertUsersBatchLabelsConstraints>> {
     use itertools::Itertools;
-    let query = sqlx::query(
-        r"INSERT INTO public.users (name, email, labels)
-        SELECT name, email,
-          ARRAY(SELECT jsonb_array_elements(labels))
-        FROM UNNEST(
-            $1::text [],
-            $2::text [],
-            $3::jsonb []
-          ) AS t(name, email, labels)
-        RETURNING id, name, email, labels;",
+    let sql = r"
+    INSERT INTO
+        public.users (name, email, labels)
+    SELECT name, email,
+      ARRAY(SELECT jsonb_array_elements(labels))
+    FROM UNNEST(
+        $1::text [],
+        $2::text [],
+        $3::jsonb []
+      ) AS t(name, email, labels)
+    RETURNING id, name, email, labels;";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let (name, email, labels): (Vec<_>, Vec<_>, Vec<_>) = items
         .into_iter()
         .map(|item| (item.name, item.email, item.labels))
@@ -1923,23 +1998,22 @@ pub struct InsertUsersBulkCompositeItem {
 }
 
 /// Bulk insert users with social links using composite type UNNEST
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "INSERT INTO public.users (name, email, social_links)\nSELECT r.name, r.email, r.social_links\nFROM UNNEST(#{items}::public.user_with_links_input[]) AS r(name, email, social_links)\nRETURNING id, name, email, social_links"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn insert_users_bulk_composite(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     items: Vec<super::types::public::UserWithLinksInput>,
 ) -> Result<Vec<InsertUsersBulkCompositeItem>, super::Error<InsertUsersBulkCompositeConstraints>> {
-    let query = sqlx::query(
-        r"INSERT INTO public.users (name, email, social_links)
-        SELECT r.name, r.email, r.social_links
-        FROM UNNEST($1::public.user_with_links_input[]) AS r(name, email, social_links)
-        RETURNING id, name, email, social_links",
+    let sql = r"
+    INSERT INTO
+        public.users (name, email, social_links)
+    SELECT r.name, r.email, r.social_links
+    FROM UNNEST($1::public.user_with_links_input[]) AS r(name, email, social_links)
+    RETURNING id, name, email, social_links";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(items);
     let rows = query.fetch_all(executor).await?;
     let result: Result<Vec<_>, sqlx::Error> = rows

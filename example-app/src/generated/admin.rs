@@ -7,15 +7,18 @@ use sqlx::Row;
 ///
 /// Query Plan:
 /// Result
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(sql = "SELECT NOW() as current_time")
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_current_time(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
 ) -> Result<Option<jiff_sqlx::Timestamp>, super::ErrorReadOnly> {
-    let query = sqlx::query(r"SELECT NOW() as current_time");
+    let sql = r"
+    SELECT
+        NOW() as current_time";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+    );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let row = query.fetch_one(executor).await?;
     Ok(row.try_get::<Option<jiff_sqlx::Timestamp>, _>("current_time")?)
 }
@@ -24,15 +27,18 @@ pub async fn get_current_time(
 ///
 /// Query Plan:
 /// Result
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(sql = "SELECT version() as pg_version")
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_version(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
 ) -> Result<Option<String>, super::ErrorReadOnly> {
-    let query = sqlx::query(r"SELECT version() as pg_version");
+    let sql = r"
+    SELECT
+        version() as pg_version";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+    );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let row = query.fetch_one(executor).await?;
     Ok(row.try_get::<Option<String>, _>("pg_version")?)
 }
@@ -59,13 +65,7 @@ impl TryFrom<super::ErrorConstraintInfo> for InsertAllTypesTestConstraints {
 }
 
 /// Insert a row with all PostgreSQL types
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "INSERT INTO public.all_types_test (\n  bool_col, char_col, int2_col, int4_col, int8_col, float4_col, float8_col, numeric_col,\n  name_col, text_col, varchar_col, bpchar_col, bytea_col, bit_col, varbit_col,\n  date_col, time_col, timestamp_col, timestamptz_col, interval_col, timetz_col,\n  int4_range_col, int8_range_col, num_range_col, ts_range_col, tstz_range_col, date_range_col,\n  inet_col, cidr_col, macaddr_col, json_col, jsonb_col, uuid_col,\n  bool_array_col, int4_array_col, int8_array_col, text_array_col, float8_array_col,\n  int4_range_array_col, date_range_array_col\n) VALUES (\n  #{bool_col}, #{char_col}, #{int2_col}, #{int4_col}, #{int8_col}, #{float4_col}, #{float8_col}, #{numeric_col},\n  #{name_col}, #{text_col}, #{varchar_col}, #{bpchar_col}, #{bytea_col}, #{bit_col}, #{varbit_col},\n  #{date_col}, #{time_col}, #{timestamp_col}, #{timestamptz_col}, #{interval_col}, #{timetz_col},\n  #{int4_range_col}, #{int8_range_col}, #{num_range_col}, #{ts_range_col}, #{tstz_range_col}, #{date_range_col},\n  #{inet_col}, #{cidr_col}, #{macaddr_col}, #{json_col}, #{jsonb_col}, #{uuid_col},\n  #{bool_array_col}, #{int4_array_col}, #{int8_array_col}, #{text_array_col}, #{float8_array_col},\n  #{int4_range_array_col}, #{date_range_array_col}\n)\nRETURNING id"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn insert_all_types_test(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     bool_col: bool,
@@ -109,26 +109,34 @@ pub async fn insert_all_types_test(
     int4_range_array_col: Vec<sqlx::postgres::types::PgRange<i32>>,
     date_range_array_col: Vec<sqlx::postgres::types::PgRange<time::Date>>,
 ) -> Result<i32, super::Error<InsertAllTypesTestConstraints>> {
-    let query = sqlx::query(
-        r"INSERT INTO public.all_types_test (
-         bool_col, char_col, int2_col, int4_col, int8_col, float4_col, float8_col, numeric_col,
-         name_col, text_col, varchar_col, bpchar_col, bytea_col, bit_col, varbit_col,
-         date_col, time_col, timestamp_col, timestamptz_col, interval_col, timetz_col,
-         int4_range_col, int8_range_col, num_range_col, ts_range_col, tstz_range_col, date_range_col,
-         inet_col, cidr_col, macaddr_col, json_col, jsonb_col, uuid_col,
-         bool_array_col, int4_array_col, int8_array_col, text_array_col, float8_array_col,
-         int4_range_array_col, date_range_array_col
-        ) VALUES (
-         $1, $2, $3, $4, $5, $6, $7, $8,
-         $9, $10, $11, $12, $13, $14, $15,
-         $16, $17, $18, $19, $20, $21,
-         $22, $23, $24, $25, $26, $27,
-         $28, $29, $30, $31, $32, $33,
-         $34, $35, $36, $37, $38,
-         $39, $40
-        )
-        RETURNING id",
+    let sql = r"
+    INSERT INTO
+        public.all_types_test (
+     bool_col, char_col, int2_col, int4_col, int8_col, float4_col, float8_col, numeric_col,
+     name_col, text_col, varchar_col, bpchar_col, bytea_col, bit_col, varbit_col,
+     date_col, time_col, timestamp_col, timestamptz_col, interval_col, timetz_col,
+     int4_range_col, int8_range_col, num_range_col, ts_range_col, tstz_range_col, date_range_col,
+     inet_col, cidr_col, macaddr_col, json_col, jsonb_col, uuid_col,
+     bool_array_col, int4_array_col, int8_array_col, text_array_col, float8_array_col,
+     int4_range_array_col, date_range_array_col
+    )
+    VALUES
+        (
+     $1, $2, $3, $4, $5, $6, $7, $8,
+     $9, $10, $11, $12, $13, $14, $15,
+     $16, $17, $18, $19, $20, $21,
+     $22, $23, $24, $25, $26, $27,
+     $28, $29, $30, $31, $32, $33,
+     $34, $35, $36, $37, $38,
+     $39, $40
+    )
+    RETURNING
+        id";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(bool_col);
     let query = query.bind(&char_col);
     let query = query.bind(int2_col);
@@ -224,30 +232,64 @@ pub struct GetAllTypesTestItem {
 /// Query Plan:
 /// Index Scan using all_types_test_pkey on all_types_test
 ///   Index Cond: (id = 0)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "SELECT\n  id, bool_col, char_col, int2_col, int4_col, int8_col, float4_col, float8_col, numeric_col,\n  name_col, text_col, varchar_col, bpchar_col, bytea_col, bit_col, varbit_col,\n  date_col, time_col, timestamp_col, timestamptz_col, interval_col, timetz_col,\n  int4_range_col, int8_range_col, num_range_col, ts_range_col, tstz_range_col, date_range_col,\n  inet_col, cidr_col, macaddr_col, json_col, jsonb_col, uuid_col,\n  bool_array_col, int4_array_col, int8_array_col, text_array_col, float8_array_col,\n  int4_range_array_col, date_range_array_col,\n  created_at\nFROM public.all_types_test\nWHERE id = #{id}"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_all_types_test(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     id: i32,
 ) -> Result<GetAllTypesTestItem, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT
-         id, bool_col, char_col, int2_col, int4_col, int8_col, float4_col, float8_col, numeric_col,
-         name_col, text_col, varchar_col, bpchar_col, bytea_col, bit_col, varbit_col,
-         date_col, time_col, timestamp_col, timestamptz_col, interval_col, timetz_col,
-         int4_range_col, int8_range_col, num_range_col, ts_range_col, tstz_range_col, date_range_col,
-         inet_col, cidr_col, macaddr_col, json_col, jsonb_col, uuid_col,
-         bool_array_col, int4_array_col, int8_array_col, text_array_col, float8_array_col,
-         int4_range_array_col, date_range_array_col,
-         created_at
-        FROM public.all_types_test
-        WHERE id = $1",
+    let sql = r"
+    SELECT
+        id,
+        bool_col,
+        char_col,
+        int2_col,
+        int4_col,
+        int8_col,
+        float4_col,
+        float8_col,
+        numeric_col,
+        name_col,
+        text_col,
+        varchar_col,
+        bpchar_col,
+        bytea_col,
+        bit_col,
+        varbit_col,
+        date_col,
+        time_col,
+        timestamp_col,
+        timestamptz_col,
+        interval_col,
+        timetz_col,
+        int4_range_col,
+        int8_range_col,
+        num_range_col,
+        ts_range_col,
+        tstz_range_col,
+        date_range_col,
+        inet_col,
+        cidr_col,
+        macaddr_col,
+        json_col,
+        jsonb_col,
+        uuid_col,
+        bool_array_col,
+        int4_array_col,
+        int8_array_col,
+        text_array_col,
+        float8_array_col,
+        int4_range_array_col,
+        date_range_array_col,
+        created_at
+    FROM
+        public.all_types_test
+    WHERE
+        id = $1";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(id);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {

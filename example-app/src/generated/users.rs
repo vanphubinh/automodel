@@ -49,13 +49,7 @@ pub struct InsertUserItem {
 }
 
 /// Insert a new user with all fields and return the created user
-#[tracing::instrument(
-    level = "trace",
-    skip(executor, profile),
-    fields(
-        sql = "INSERT INTO public.users (name, email, age, profile)\nVALUES (#{name}, #{email}, #{age}, #{profile})\nRETURNING id, name, email, age, created_at"
-    )
-)]
+#[tracing::instrument(level = "trace", skip(executor, profile), fields(sql = tracing::field::Empty))]
 pub async fn insert_user(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     name: String,
@@ -63,11 +57,22 @@ pub async fn insert_user(
     age: i32,
     profile: crate::models::UserProfile,
 ) -> Result<InsertUserItem, super::Error<InsertUserConstraints>> {
-    let query = sqlx::query(
-        r"INSERT INTO public.users (name, email, age, profile)
-        VALUES ($1, $2, $3, $4)
-        RETURNING id, name, email, age, created_at",
+    let sql = r"
+    INSERT INTO
+        public.users (name, email, age, profile)
+    VALUES
+        ($1, $2, $3, $4)
+    RETURNING
+        id,
+        name,
+        email,
+        age,
+        created_at";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&name);
     let query = query.bind(&email);
     let query = query.bind(age);
@@ -130,27 +135,26 @@ pub struct InsertUsersBatchRecord {
 }
 
 /// Insert multiple public.users using UNNEST pattern with multiunzip
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "INSERT INTO public.users (name, email, age)\nSELECT *\nFROM UNNEST(\n        #{name}::text [],\n        #{email}::text [],\n        #{age}::int4 []\n    )"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn insert_users_batch(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     items: Vec<InsertUsersBatchRecord>,
 ) -> Result<(), super::Error<InsertUsersBatchConstraints>> {
     use itertools::Itertools;
-    let query = sqlx::query(
-        r"INSERT INTO public.users (name, email, age)
-        SELECT *
-        FROM UNNEST(
-            $1::text [],
-            $2::text [],
-            $3::int4 []
-          )",
+    let sql = r"
+    INSERT INTO
+        public.users (name, email, age)
+    SELECT *
+    FROM UNNEST(
+        $1::text [],
+        $2::text [],
+        $3::int4 []
+      )";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let (name, email, age): (Vec<_>, Vec<_>, Vec<_>) = items
         .into_iter()
         .map(|item| (item.name, item.email, item.age))
@@ -180,21 +184,28 @@ pub struct GetAllUsersItem {
 ///   Sort Key: created_at DESC
 ///   ->  Seq Scan on users
 ///         Disabled: true
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "SELECT id, name, email, age, profile, created_at, updated_at \nFROM public.users \nORDER BY created_at DESC"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_all_users(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
 ) -> Result<Vec<GetAllUsersItem>, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id, name, email, age, profile, created_at, updated_at 
-        FROM public.users 
-        ORDER BY created_at DESC",
+    let sql = r"
+    SELECT
+        id,
+        name,
+        email,
+        age,
+        profile,
+        created_at,
+        updated_at
+    FROM
+        public.users
+    ORDER BY
+        created_at DESC";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let rows = query.fetch_all(executor).await?;
     let result: Result<Vec<_>, sqlx::Error> = rows
         .iter()
@@ -237,9 +248,19 @@ pub async fn find_user_by_email(
     email: String,
 ) -> Result<Option<FindUserByEmailItem>, super::ErrorReadOnly> {
     let query = sqlx::query(
-        r"SELECT id, name, email, age, profile, created_at, updated_at 
-        FROM public.users 
-        WHERE email = $1",
+        r"
+    SELECT
+        id,
+        name,
+        email,
+        age,
+        profile,
+        created_at,
+        updated_at
+    FROM
+        public.users
+    WHERE
+        email = $1",
     );
     let query = query.bind(&email);
     let row = query.fetch_optional(executor).await?;
@@ -309,29 +330,32 @@ pub struct UpdateUserProfileItem {
 }
 
 /// Update a user's profile by their ID
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "UPDATE public.users\nSET profile = #{profile}, updated_at = NOW() \nWHERE id = #{user_id} \nRETURNING id,\n    name,\n    email,\n    age,\n    profile,\n    updated_at"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn update_user_profile(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     profile: crate::models::UserProfile,
     user_id: i32,
 ) -> Result<UpdateUserProfileItem, super::Error<UpdateUserProfileConstraints>> {
-    let query = sqlx::query(
-        r"UPDATE public.users
-        SET profile = $1, updated_at = NOW() 
-        WHERE id = $2 
-        RETURNING id,
-          name,
-          email,
-          age,
-          profile,
-          updated_at",
+    let sql = r"
+    UPDATE
+        public.users
+    SET
+        profile = $1
+        updated_at = NOW()
+    WHERE
+        id = $2
+    RETURNING
+        id,
+        name,
+        email,
+        age,
+        profile,
+        updated_at";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query =
         query.bind(serde_json::to_value(&profile).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
     let query = query.bind(user_id);
@@ -370,23 +394,15 @@ pub struct FindUsersByNameAndAgeItem {
 /// Seq Scan on users
 ///   Disabled: true
 ///   Filter: (((name)::text ~~* 'dummy'::text) AND ((name)::text = 'dummy'::text))
-///
 /// === find_users_by_name_and_age (variant 1) ===
 /// Index Scan using idx_users_age_updated_at on users
 ///   Index Cond: (age >= 0)
 ///   Filter: (((name)::text ~~* 'dummy'::text) AND ((name)::text = 'dummy'::text))
-///
 /// === find_users_by_name_and_age (variant 2) ===
 /// Index Scan using idx_users_age_updated_at on users
 ///   Index Cond: (age <= 0)
 ///   Filter: (((name)::text ~~* 'dummy'::text) AND ((name)::text = 'dummy'::text))
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "SELECT id, name, email, age \nFROM public.users \nWHERE name ILIKE #{name_pattern} \n#[AND age >= #{min_age?}] \nAND name = #{name_exact} \n#[AND age <= #{max_age?}] \nORDER BY name"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn find_users_by_name_and_age(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     name_pattern: String,
@@ -394,13 +410,21 @@ pub async fn find_users_by_name_and_age(
     name_exact: String,
     max_age: Option<i32>,
 ) -> Result<Vec<FindUsersByNameAndAgeItem>, super::ErrorReadOnly> {
-    let mut final_sql = r"SELECT id, name, email, age 
-FROM public.users 
-WHERE name ILIKE $1 
-#[AND age >= #{min_age?}] 
-AND name = $2 
-#[AND age <= #{max_age?}] 
-ORDER BY name"
+    let mut final_sql = r"
+    SELECT
+        id,
+        name,
+        email,
+        age
+    FROM
+        public.users
+    WHERE
+        name ILIKE $1
+        #[AND age >= #{min_age?}]
+        AND name = $2
+        #[AND age <= #{max_age?}]
+    ORDER BY
+        name"
         .to_string();
     let mut included_params = Vec::new();
 
@@ -433,6 +457,10 @@ ORDER BY name"
         param_counter += 1;
     }
     let _ = param_counter; // Suppress unused assignment warning
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+    );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
@@ -480,23 +508,31 @@ pub struct GetRecentUsersItem {
 ///   ->  Seq Scan on users
 ///         Disabled: true
 ///         Filter: (created_at > '1970-01-01 08:00:00+08'::timestamp with time zone)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "SELECT id, name, email, age, profile, created_at, updated_at \nFROM public.users \nWHERE created_at > #{since} \nORDER BY created_at DESC"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_recent_users(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     since: jiff_sqlx::Timestamp,
 ) -> Result<Vec<GetRecentUsersItem>, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id, name, email, age, profile, created_at, updated_at 
-        FROM public.users 
-        WHERE created_at > $1 
-        ORDER BY created_at DESC",
+    let sql = r"
+    SELECT
+        id,
+        name,
+        email,
+        age,
+        profile,
+        created_at,
+        updated_at
+    FROM
+        public.users
+    WHERE
+        created_at > $1
+    ORDER BY
+        created_at DESC";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(since);
     let rows = query.fetch_all(executor).await?;
     if rows.is_empty() {
@@ -541,24 +577,31 @@ pub struct GetActiveUsersByAgeRangeItem {
 /// Index Scan using idx_users_age on users
 ///   Index Cond: ((age >= 0) AND (age <= 0))
 ///   Filter: (updated_at > (now - '30 days'::interval))
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "SELECT id, name, email, age, profile, created_at \nFROM public.users \nWHERE age BETWEEN #{min_age} AND #{max_age} \nAND updated_at > NOW() - INTERVAL '30 days'"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_active_users_by_age_range(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     min_age: i32,
     max_age: i32,
 ) -> Result<Vec<GetActiveUsersByAgeRangeItem>, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id, name, email, age, profile, created_at 
-        FROM public.users 
-        WHERE age BETWEEN $1 AND $2 
-        AND updated_at > NOW() - INTERVAL '30 days'",
+    let sql = r"
+    SELECT
+        id,
+        name,
+        email,
+        age,
+        profile,
+        created_at
+    FROM
+        public.users
+    WHERE
+        age BETWEEN $1
+        AND $2
+        AND updated_at > NOW() - INTERVAL '30 days'";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(min_age);
     let query = query.bind(max_age);
     let rows = query.fetch_all(executor).await?;
@@ -602,23 +645,27 @@ pub struct SearchUsersByNamePatternItem {
 ///   ->  Seq Scan on users
 ///         Disabled: true
 ///         Filter: ((name)::text ~~* 'dummy'::text)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "SELECT id, name, email \nFROM public.users \nWHERE name ILIKE #{pattern} \nORDER BY name"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn search_users_by_name_pattern(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     pattern: String,
 ) -> Result<Vec<SearchUsersByNamePatternItem>, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id, name, email 
-        FROM public.users 
-        WHERE name ILIKE $1 
-        ORDER BY name",
+    let sql = r"
+    SELECT
+        id,
+        name,
+        email
+    FROM
+        public.users
+    WHERE
+        name ILIKE $1
+    ORDER BY
+        name";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&pattern);
     let rows = query.fetch_all(executor).await?;
     if rows.is_empty() {
@@ -654,46 +701,46 @@ pub struct SearchUsersAdvancedItem {
 ///   Sort Key: created_at DESC
 ///   ->  Seq Scan on users
 ///         Disabled: true
-///
 /// === search_users_advanced (variant 1) ===
 /// Sort
 ///   Sort Key: created_at DESC
 ///   ->  Seq Scan on users
 ///         Disabled: true
 ///         Filter: ((name)::text ~~* 'dummy'::text)
-///
 /// === search_users_advanced (variant 2) ===
 /// Sort
 ///   Sort Key: created_at DESC
 ///   ->  Index Scan using idx_users_age_updated_at on users
 ///         Index Cond: (age >= 0)
-///
 /// === search_users_advanced (variant 3) ===
 /// Sort
 ///   Sort Key: created_at DESC
 ///   ->  Seq Scan on users
 ///         Disabled: true
 ///         Filter: (created_at >= '1970-01-01 08:00:00+08'::timestamp with time zone)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "SELECT id, name, email, age, created_at \nFROM public.users \nWHERE 1=1 \n#[AND name ILIKE #{name_pattern?}] \n#[AND age >= #{min_age?}] \n#[AND created_at >= #{since?}] \nORDER BY created_at DESC"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn search_users_advanced(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     name_pattern: Option<String>,
     min_age: Option<i32>,
     since: Option<jiff_sqlx::Timestamp>,
 ) -> Result<Vec<SearchUsersAdvancedItem>, super::ErrorReadOnly> {
-    let mut final_sql = r"SELECT id, name, email, age, created_at 
-FROM public.users 
-WHERE 1=1 
-#[AND name ILIKE #{name_pattern?}] 
-#[AND age >= #{min_age?}] 
-#[AND created_at >= #{since?}] 
-ORDER BY created_at DESC"
+    let mut final_sql = r"
+    SELECT
+        id,
+        name,
+        email,
+        age,
+        created_at
+    FROM
+        public.users
+    WHERE
+        1=1
+        #[AND name ILIKE #{name_pattern?}]
+        #[AND age >= #{min_age?}]
+        #[AND created_at >= #{since?}]
+    ORDER BY
+        created_at DESC"
         .to_string();
     let mut included_params = Vec::new();
 
@@ -739,6 +786,10 @@ ORDER BY created_at DESC"
         param_counter += 1;
     }
     let _ = param_counter; // Suppress unused assignment warning
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+    );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
@@ -786,23 +837,28 @@ pub struct GetUsersByStatusItem {
 ///   ->  Seq Scan on users
 ///         Disabled: true
 ///         Filter: (status = 'active'::public.user_status)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "SELECT id, name, email, status \nFROM public.users \nWHERE status = #{user_status} \nORDER BY name"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_users_by_status(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     user_status: super::types::public::UserStatus,
 ) -> Result<Vec<GetUsersByStatusItem>, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id, name, email, status 
-        FROM public.users 
-        WHERE status = $1 
-        ORDER BY name",
+    let sql = r"
+    SELECT
+        id,
+        name,
+        email,
+        status
+    FROM
+        public.users
+    WHERE
+        status = $1
+    ORDER BY
+        name";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(user_status);
     let rows = query.fetch_all(executor).await?;
     let result: Result<Vec<_>, sqlx::Error> = rows
@@ -862,24 +918,27 @@ pub struct UpdateUserStatusItem {
 }
 
 /// Update user status and return the new status
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "UPDATE public.users \nSET status = #{new_status} \nWHERE id = #{user_id} \nRETURNING id, status"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn update_user_status(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     new_status: super::types::public::UserStatus,
     user_id: i32,
 ) -> Result<UpdateUserStatusItem, super::Error<UpdateUserStatusConstraints>> {
-    let query = sqlx::query(
-        r"UPDATE public.users 
-        SET status = $1 
-        WHERE id = $2 
-        RETURNING id, status",
+    let sql = r"
+    UPDATE
+        public.users
+    SET
+        status = $1
+    WHERE
+        id = $2
+    RETURNING
+        id,
+        status";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(new_status);
     let query = query.bind(user_id);
     let row = query.fetch_one(executor).await?;
@@ -938,13 +997,7 @@ pub struct UpdateUserFieldsItem {
 }
 
 /// Update user fields conditionally - only updates fields that are provided (not None)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "UPDATE public.users \nSET updated_at = NOW() \n#[, name = #{name?}] \n#[, email = #{email?}] \n#[, age = #{age?}] \nWHERE id = #{user_id} \nRETURNING id, name, email, age, updated_at"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn update_user_fields(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     name: Option<String>,
@@ -952,13 +1005,22 @@ pub async fn update_user_fields(
     age: Option<i32>,
     user_id: i32,
 ) -> Result<UpdateUserFieldsItem, super::Error<UpdateUserFieldsConstraints>> {
-    let mut final_sql = r"UPDATE public.users 
-SET updated_at = NOW() 
-#[, name = #{name?}] 
-#[, email = #{email?}] 
-#[, age = #{age?}] 
-WHERE id = $1 
-RETURNING id, name, email, age, updated_at"
+    let mut final_sql = r"
+    UPDATE
+        public.users
+    SET
+        updated_at = NOW()
+        #[, name = #{name?}]
+        #[, email = #{email?}]
+        #[, age = #{age?}]
+    WHERE
+        id = $1
+    RETURNING
+        id,
+        name,
+        email,
+        age,
+        updated_at"
         .to_string();
     let mut included_params = Vec::new();
 
@@ -1000,6 +1062,10 @@ RETURNING id, name, email, age, updated_at"
         param_counter += 1;
     }
     let _ = param_counter; // Suppress unused assignment warning
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+    );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
@@ -1082,26 +1148,29 @@ pub struct UpdateUserFieldsDiffItem {
 }
 
 /// Update user fields using diff-based conditional updates - compares old and new structs
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "UPDATE public.users \nSET updated_at = NOW() \n#[, name = #{name?}] \n#[, email = #{email?}] \n#[, age = #{age?}] \nWHERE id = #{user_id} \nRETURNING id, name, email, age, updated_at"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn update_user_fields_diff(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     old: &UpdateUserFieldsDiffParams,
     new: &UpdateUserFieldsDiffParams,
     user_id: i32,
 ) -> Result<UpdateUserFieldsDiffItem, super::Error<UpdateUserFieldsDiffConstraints>> {
-    let mut final_sql = r"UPDATE public.users 
-SET updated_at = NOW() 
-#[, name = #{name?}] 
-#[, email = #{email?}] 
-#[, age = #{age?}] 
-WHERE id = $1 
-RETURNING id, name, email, age, updated_at"
+    let mut final_sql = r"
+    UPDATE
+        public.users
+    SET
+        updated_at = NOW()
+        #[, name = #{name?}]
+        #[, email = #{email?}]
+        #[, age = #{age?}]
+    WHERE
+        id = $1
+    RETURNING
+        id,
+        name,
+        email,
+        age,
+        updated_at"
         .to_string();
     let mut included_params = Vec::new();
 
@@ -1143,6 +1212,10 @@ RETURNING id, name, email, age, updated_at"
         param_counter += 1;
     }
     let _ = param_counter; // Suppress unused assignment warning
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+    );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
@@ -1225,22 +1298,27 @@ pub struct InsertUserStructuredItem {
 }
 
 /// Insert a new user using structured parameters - all params passed as a single struct
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "INSERT INTO public.users (name, email, age) \nVALUES (#{name}, #{email}, #{age}) \nRETURNING id, name, email, age, created_at"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn insert_user_structured(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     params: &InsertUserStructuredParams,
 ) -> Result<InsertUserStructuredItem, super::Error<InsertUserStructuredConstraints>> {
-    let query = sqlx::query(
-        r"INSERT INTO public.users (name, email, age) 
-        VALUES ($1, $2, $3) 
-        RETURNING id, name, email, age, created_at",
+    let sql = r"
+    INSERT INTO
+        public.users (name, email, age)
+    VALUES
+        ($1, $2, $3)
+    RETURNING
+        id,
+        name,
+        email,
+        age,
+        created_at";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&params.name);
     let query = query.bind(&params.email);
     let query = query.bind(params.age);
@@ -1265,19 +1343,22 @@ pub async fn insert_user_structured(
 ///         Sort Key: status
 ///         ->  Seq Scan on users
 ///               Disabled: true
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(sql = "SELECT DISTINCT status \nFROM public.users \nORDER BY status")
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_all_user_statuses(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
 ) -> Result<Vec<Option<super::types::public::UserStatus>>, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT DISTINCT status 
-        FROM public.users 
-        ORDER BY status",
+    let sql = r"
+    SELECT
+        DISTINCT status
+    FROM
+        public.users
+    ORDER BY
+        status";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let rows = query.fetch_all(executor).await?;
     let result: Result<Vec<_>, sqlx::Error> = rows
         .iter()
@@ -1311,19 +1392,22 @@ pub struct GetAllUsersWithStarItem {
 ///   Sort Key: created_at DESC
 ///   ->  Seq Scan on users
 ///         Disabled: true
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(sql = "SELECT * \nFROM public.users \nORDER BY created_at DESC")
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_all_users_with_star(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
 ) -> Result<Vec<GetAllUsersWithStarItem>, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT * 
-        FROM public.users 
-        ORDER BY created_at DESC",
+    let sql = r"
+    SELECT
+        *
+    FROM
+        public.users
+    ORDER BY
+        created_at DESC";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let rows = query.fetch_all(executor).await?;
     let result: Result<Vec<_>, sqlx::Error> = rows
         .iter()
@@ -1378,20 +1462,23 @@ pub struct GetUserByIdWithStarItem {
 /// Query Plan:
 /// Index Scan using users_pkey on users
 ///   Index Cond: (id = 0)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(sql = "SELECT * \nFROM public.users \nWHERE id = #{user_id}")
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_user_by_id_with_star(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     user_id: i32,
 ) -> Result<Option<GetUserByIdWithStarItem>, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT * 
-        FROM public.users 
-        WHERE id = $1",
+    let sql = r"
+    SELECT
+        *
+    FROM
+        public.users
+    WHERE
+        id = $1";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(user_id);
     let row = query.fetch_optional(executor).await?;
     match row {
@@ -1445,22 +1532,26 @@ pub struct GetUserByIdAndEmailItem {
 /// Index Scan using users_email_key on users
 ///   Index Cond: ((email)::text = 'dummy'::text)
 ///   Filter: (id = 0)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "SELECT id, name, email \nFROM public.users \nWHERE id = #{id} AND email = #{email}"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_user_by_id_and_email(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     params: &GetUserByIdAndEmailParams,
 ) -> Result<Option<GetUserByIdAndEmailItem>, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id, name, email 
-        FROM public.users 
-        WHERE id = $1 AND email = $2",
+    let sql = r"
+    SELECT
+        id,
+        name,
+        email
+    FROM
+        public.users
+    WHERE
+        id = $1
+        AND email = $2";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(params.id);
     let query = query.bind(&params.email);
     let row = query.fetch_optional(executor).await?;
@@ -1480,24 +1571,26 @@ pub async fn get_user_by_id_and_email(
 }
 
 /// Test non-null override with native {col!} syntax on boolean literal in RETURNING
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "UPDATE public.users\nSET name = #{name}\nWHERE id = #{id}\nRETURNING true AS {applied!}"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn update_user_returning_applied(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     name: String,
     id: i32,
 ) -> Result<Option<bool>, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"UPDATE public.users
-        SET name = $1
-        WHERE id = $2
-        RETURNING true AS applied",
+    let sql = r"
+    UPDATE
+        public.users
+    SET
+        name = $1
+    WHERE
+        id = $2
+    RETURNING
+        true AS applied";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&name);
     let query = query.bind(id);
     let row = query.fetch_optional(executor).await?;
@@ -1550,22 +1643,25 @@ pub struct DeleteUserByIdAndEmailItem {
 }
 
 /// Delete user by ID and email - reuses GetUserByIdAndEmailParams struct
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "DELETE FROM public.users \nWHERE id = #{id} AND email = #{email} \nRETURNING id, email"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn delete_user_by_id_and_email(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     params: &GetUserByIdAndEmailParams,
 ) -> Result<DeleteUserByIdAndEmailItem, super::Error<DeleteUserByIdAndEmailConstraints>> {
-    let query = sqlx::query(
-        r"DELETE FROM public.users 
-        WHERE id = $1 AND email = $2 
-        RETURNING id, email",
+    let sql = r"
+    DELETE FROM
+        public.users
+    WHERE
+        id = $1
+        AND email = $2
+    RETURNING
+        id,
+        email";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(params.id);
     let query = query.bind(&params.email);
     let row = query.fetch_one(executor).await?;
@@ -1583,20 +1679,23 @@ pub async fn delete_user_by_id_and_email(
 /// Query Plan:
 /// Index Scan using users_pkey on users
 ///   Index Cond: (id = 0)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "SELECT created_at > now() - interval '1 year' AS \"is_recent!\" FROM public.users WHERE id = #{id}"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_user_is_recent(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     id: i32,
 ) -> Result<bool, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT created_at > now() - interval '1 year' AS is_recent FROM public.users WHERE id = $1",
+    let sql = r"
+    SELECT
+        created_at > now() - interval '1 year' AS is_recent
+    FROM
+        public.users
+    WHERE
+        id = $1";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(id);
     let row = query.fetch_one(executor).await?;
     Ok(row.try_get::<bool, _>("is_recent")?)
@@ -1646,23 +1745,28 @@ pub struct UpdateUserContactInfoItem {
 }
 
 /// Update user contact info - reuses GetUserByIdAndEmailItem return struct as params
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "UPDATE public.users \nSET name = #{name}, email = #{email} \nWHERE id = #{id} \nRETURNING id, name, email"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn update_user_contact_info(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     params: &GetUserByIdAndEmailItem,
 ) -> Result<UpdateUserContactInfoItem, super::Error<UpdateUserContactInfoConstraints>> {
-    let query = sqlx::query(
-        r"UPDATE public.users 
-        SET name = $1, email = $2 
-        WHERE id = $3 
-        RETURNING id, name, email",
+    let sql = r"
+    UPDATE
+        public.users
+    SET
+        name = $1
+        email = $2
+    WHERE
+        id = $3
+    RETURNING
+        id,
+        name,
+        email";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&params.name);
     let query = query.bind(&params.email);
     let query = query.bind(params.id);
@@ -1729,13 +1833,7 @@ pub struct UpdateUserProfileDiffItem {
 }
 
 /// Update user profile with conditional name/email - generates UpdateUserProfileDiffParams
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "UPDATE public.users \nSET profile = #{profile}, updated_at = NOW() \n#[, name = #{name?}] \n#[, email = #{email?}] \nWHERE id = #{user_id} \nRETURNING id, name, email, profile, updated_at"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn update_user_profile_diff(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     old: &UpdateUserProfileDiffParams,
@@ -1743,12 +1841,22 @@ pub async fn update_user_profile_diff(
     profile: crate::models::UserProfile,
     user_id: i32,
 ) -> Result<UpdateUserProfileDiffItem, super::Error<UpdateUserProfileDiffConstraints>> {
-    let mut final_sql = r"UPDATE public.users 
-SET profile = $1, updated_at = NOW() 
-#[, name = #{name?}] 
-#[, email = #{email?}] 
-WHERE id = $2 
-RETURNING id, name, email, profile, updated_at"
+    let mut final_sql = r"
+    UPDATE
+        public.users
+    SET
+        profile = $1
+        updated_at = NOW()
+        #[, name = #{name?}]
+        #[, email = #{email?}]
+    WHERE
+        id = $2
+    RETURNING
+        id,
+        name,
+        email,
+        profile,
+        updated_at"
         .to_string();
     let mut included_params = Vec::new();
 
@@ -1781,6 +1889,10 @@ RETURNING id, name, email, profile, updated_at"
         param_counter += 1;
     }
     let _ = param_counter; // Suppress unused assignment warning
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+    );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
@@ -1860,13 +1972,7 @@ pub struct UpdateUserMetadataDiffItem {
 }
 
 /// Update user metadata - reuses UpdateUserProfileDiffParams struct
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "UPDATE public.users \nSET profile = #{profile}, updated_at = NOW() \n#[, name = #{name?}] \n#[, email = #{email?}] \nWHERE id = #{user_id} \nRETURNING id, name, email, updated_at"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn update_user_metadata_diff(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     old: &UpdateUserProfileDiffParams,
@@ -1874,12 +1980,21 @@ pub async fn update_user_metadata_diff(
     profile: crate::models::UserProfile,
     user_id: i32,
 ) -> Result<UpdateUserMetadataDiffItem, super::Error<UpdateUserMetadataDiffConstraints>> {
-    let mut final_sql = r"UPDATE public.users 
-SET profile = $1, updated_at = NOW() 
-#[, name = #{name?}] 
-#[, email = #{email?}] 
-WHERE id = $2 
-RETURNING id, name, email, updated_at"
+    let mut final_sql = r"
+    UPDATE
+        public.users
+    SET
+        profile = $1
+        updated_at = NOW()
+        #[, name = #{name?}]
+        #[, email = #{email?}]
+    WHERE
+        id = $2
+    RETURNING
+        id,
+        name,
+        email,
+        updated_at"
         .to_string();
     let mut included_params = Vec::new();
 
@@ -1912,6 +2027,10 @@ RETURNING id, name, email, updated_at"
         param_counter += 1;
     }
     let _ = param_counter; // Suppress unused assignment warning
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+    );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
@@ -1951,20 +2070,25 @@ pub struct UserSummary {
 /// Query Plan:
 /// Index Scan using users_pkey on users
 ///   Index Cond: (id = 0)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(sql = "SELECT id, name, email \nFROM public.users \nWHERE id = #{user_id}")
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_user_summary(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     user_id: i32,
 ) -> Result<UserSummary, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id, name, email 
-        FROM public.users 
-        WHERE id = $1",
+    let sql = r"
+    SELECT
+        id,
+        name,
+        email
+    FROM
+        public.users
+    WHERE
+        id = $1";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(user_id);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
@@ -1982,20 +2106,25 @@ pub async fn get_user_summary(
 /// Query Plan:
 /// Index Scan using users_email_key on users
 ///   Index Cond: ((email)::text = 'dummy'::text)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(sql = "SELECT id, name, email \nFROM public.users \nWHERE email = #{email}")
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_user_info_by_email(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     email: String,
 ) -> Result<Option<UserSummary>, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id, name, email 
-        FROM public.users 
-        WHERE email = $1",
+    let sql = r"
+    SELECT
+        id,
+        name,
+        email
+    FROM
+        public.users
+    WHERE
+        email = $1";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&email);
     let row = query.fetch_optional(executor).await?;
     match row {
@@ -2020,19 +2149,24 @@ pub async fn get_user_info_by_email(
 ///   Sort Key: name
 ///   ->  Seq Scan on users
 ///         Disabled: true
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(sql = "SELECT id, name, email \nFROM public.users \nORDER BY name")
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_all_user_summaries(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
 ) -> Result<Vec<UserSummary>, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id, name, email 
-        FROM public.users 
-        ORDER BY name",
+    let sql = r"
+    SELECT
+        id,
+        name,
+        email
+    FROM
+        public.users
+    ORDER BY
+        name";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let rows = query.fetch_all(executor).await?;
     let result: Result<Vec<_>, sqlx::Error> = rows
         .iter()
@@ -2061,22 +2195,27 @@ pub struct UserDetails {
 /// Query Plan:
 /// Index Scan using users_pkey on users
 ///   Index Cond: (id = 0)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "SELECT id, name, email, age, created_at \nFROM public.users \nWHERE id = #{user_id}"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_user_details(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     user_id: i32,
 ) -> Result<UserDetails, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id, name, email, age, created_at 
-        FROM public.users 
-        WHERE id = $1",
+    let sql = r"
+    SELECT
+        id,
+        name,
+        email,
+        age,
+        created_at
+    FROM
+        public.users
+    WHERE
+        id = $1";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(user_id);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
@@ -2097,22 +2236,27 @@ pub async fn get_user_details(
 /// Seq Scan on users
 ///   Disabled: true
 ///   Filter: ((name)::text ~~* 'dummy'::text)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "SELECT id, name, email, age, created_at \nFROM public.users \nWHERE name ILIKE #{pattern}"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn search_user_details(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     pattern: String,
 ) -> Result<Vec<UserDetails>, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id, name, email, age, created_at 
-        FROM public.users 
-        WHERE name ILIKE $1",
+    let sql = r"
+    SELECT
+        id,
+        name,
+        email,
+        age,
+        created_at
+    FROM
+        public.users
+    WHERE
+        name ILIKE $1";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&pattern);
     let rows = query.fetch_all(executor).await?;
     let result: Result<Vec<_>, sqlx::Error> = rows
@@ -2136,22 +2280,26 @@ pub async fn search_user_details(
 /// Index Scan using users_email_key on users
 ///   Index Cond: ((email)::text = 'dummy'::text)
 ///   Filter: (id = 0)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "SELECT id, name, email \nFROM public.users \nWHERE id = #{id} AND email = #{email}"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn find_user_by_criteria(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     params: &GetUserByIdAndEmailParams,
 ) -> Result<Option<UserSummary>, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id, name, email 
-        FROM public.users 
-        WHERE id = $1 AND email = $2",
+    let sql = r"
+    SELECT
+        id,
+        name,
+        email
+    FROM
+        public.users
+    WHERE
+        id = $1
+        AND email = $2";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(params.id);
     let query = query.bind(&params.email);
     let row = query.fetch_optional(executor).await?;
@@ -2183,20 +2331,26 @@ pub struct GetUserSimpleItem {
 /// Query Plan:
 /// Index Scan using users_pkey on users
 ///   Index Cond: (id = 0)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(sql = "SELECT id, name, email, created_at\nFROM public.users\nWHERE id = #{user_id}")
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_user_simple(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     user_id: i32,
 ) -> Result<Option<GetUserSimpleItem>, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id, name, email, created_at
-        FROM public.users
-        WHERE id = $1",
+    let sql = r"
+    SELECT
+        id,
+        name,
+        email,
+        created_at
+    FROM
+        public.users
+    WHERE
+        id = $1";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(user_id);
     let row = query.fetch_optional(executor).await?;
     match row {
@@ -2233,20 +2387,26 @@ pub struct UserWithCustomDerives {
 /// Query Plan:
 /// Index Scan using users_pkey on users
 ///   Index Cond: (id = 0)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(sql = "SELECT id, name, email, age\nFROM public.users\nWHERE id = #{user_id}")
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn test_custom_derives(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     params: &TestCustomDerivesParams,
 ) -> Result<UserWithCustomDerives, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id, name, email, age
-        FROM public.users
-        WHERE id = $1",
+    let sql = r"
+    SELECT
+        id,
+        name,
+        email,
+        age
+    FROM
+        public.users
+    WHERE
+        id = $1";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(params.user_id);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
@@ -2270,20 +2430,23 @@ pub struct UserId {
 /// Query Plan:
 /// Index Scan using users_email_key on users
 ///   Index Cond: ((email)::text = 'dummy'::text)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(sql = "SELECT id\nFROM public.users\nWHERE email = #{email}")
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_user_id_only(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     email: String,
 ) -> Result<UserId, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id
-        FROM public.users
-        WHERE email = $1",
+    let sql = r"
+    SELECT
+        id
+    FROM
+        public.users
+    WHERE
+        email = $1";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&email);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
@@ -2299,20 +2462,23 @@ pub async fn get_user_id_only(
 /// Query Plan:
 /// Index Scan using users_email_key on users
 ///   Index Cond: ((email)::text = 'dummy'::text)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(sql = "SELECT id\nFROM public.users\nWHERE email = #{email}")
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_user_id_raw(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     email: String,
 ) -> Result<i32, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id
-        FROM public.users
-        WHERE email = $1",
+    let sql = r"
+    SELECT
+        id
+    FROM
+        public.users
+    WHERE
+        email = $1";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&email);
     let row = query.fetch_one(executor).await?;
     Ok(row.try_get::<i32, _>("id")?)
@@ -2363,24 +2529,30 @@ pub struct UpdateUserSocialLinksItem {
 }
 
 /// Update user's social links
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "UPDATE public.users \nSET social_links = #{social_links}, updated_at = NOW()\nWHERE id = #{user_id}\nRETURNING id, name, email, social_links;"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn update_user_social_links(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     social_links: Vec<crate::models::UserSocialLink>,
     user_id: i32,
 ) -> Result<UpdateUserSocialLinksItem, super::Error<UpdateUserSocialLinksConstraints>> {
-    let query = sqlx::query(
-        r"UPDATE public.users 
-        SET social_links = $1, updated_at = NOW()
-        WHERE id = $2
-        RETURNING id, name, email, social_links;",
+    let sql = r"
+    UPDATE
+        public.users
+    SET
+        social_links = $1
+        updated_at = NOW()
+    WHERE
+        id = $2
+    RETURNING
+        id,
+        name,
+        email,
+        social_links;";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query
         .bind(serde_json::to_value(&social_links).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
     let query = query.bind(user_id);
@@ -2416,22 +2588,27 @@ pub struct GetUserSocialLinksItem {
 /// Query Plan:
 /// Index Scan using users_pkey on users
 ///   Index Cond: (id = 0)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "SELECT id, name, email, social_links, created_at\nFROM public.users\nWHERE id = #{user_id};"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_user_social_links(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     user_id: i32,
 ) -> Result<GetUserSocialLinksItem, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id, name, email, social_links, created_at
-        FROM public.users
-        WHERE id = $1;",
+    let sql = r"
+    SELECT
+        id,
+        name,
+        email,
+        social_links,
+        created_at
+    FROM
+        public.users
+    WHERE
+        id = $1;";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(user_id);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
@@ -2497,24 +2674,28 @@ pub struct InsertUserWithSocialLinksItem {
 }
 
 /// Add a new user with social links
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "INSERT INTO public.users (name, email, status, social_links)\nVALUES (#{name}, #{email}, 'pending', #{social_links})\nRETURNING id, name, email, social_links;"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn insert_user_with_social_links(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     name: String,
     email: String,
     social_links: Vec<crate::models::UserSocialLink>,
 ) -> Result<InsertUserWithSocialLinksItem, super::Error<InsertUserWithSocialLinksConstraints>> {
-    let query = sqlx::query(
-        r"INSERT INTO public.users (name, email, status, social_links)
-        VALUES ($1, $2, 'pending', $3)
-        RETURNING id, name, email, social_links;",
+    let sql = r"
+    INSERT INTO
+        public.users (name, email, status, social_links)
+    VALUES
+        ($1, $2, 'pending', $3)
+    RETURNING
+        id,
+        name,
+        email,
+        social_links;";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&name);
     let query = query.bind(&email);
     let query = query
@@ -2587,27 +2768,26 @@ pub struct TestExplicitNativeMultiunzipItem {
 }
 
 /// Test multiunzip with @native suffix for Vec<Option<i32>>
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "INSERT INTO public.users (name, age)\nSELECT * FROM UNNEST(\n    #{names}::text[],\n    #{age}::int4[]\n)\nRETURNING id, name, age;"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn test_explicit_native_multiunzip(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     items: Vec<TestExplicitNativeMultiunzipRecord>,
 ) -> Result<TestExplicitNativeMultiunzipItem, super::Error<TestExplicitNativeMultiunzipConstraints>>
 {
     use itertools::Itertools;
-    let query = sqlx::query(
-        r"INSERT INTO public.users (name, age)
-        SELECT * FROM UNNEST(
-          $1::text[],
-          $2::int4[]
-        )
-        RETURNING id, name, age;",
+    let sql = r"
+    INSERT INTO
+        public.users (name, age)
+    SELECT * FROM UNNEST(
+      $1::text[],
+      $2::int4[]
+    )
+    RETURNING id, name, age;";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let (names, age): (Vec<_>, Vec<_>) = items
         .into_iter()
         .map(|item| (item.names, item.age))
@@ -2669,13 +2849,7 @@ pub struct TestExplicitNativeWithoutMultiunzipItem {
 }
 
 /// Test without multiunzip with @native suffix for Vec<Option<i32>>
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "INSERT INTO public.users (name, age)\nSELECT * FROM UNNEST(\n    #{names}::text[],\n    #{age}::int4[]\n)\nRETURNING id, name, age;"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn test_explicit_native_without_multiunzip(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     names: Vec<String>,
@@ -2684,14 +2858,19 @@ pub async fn test_explicit_native_without_multiunzip(
     TestExplicitNativeWithoutMultiunzipItem,
     super::Error<TestExplicitNativeWithoutMultiunzipConstraints>,
 > {
-    let query = sqlx::query(
-        r"INSERT INTO public.users (name, age)
-        SELECT * FROM UNNEST(
-          $1::text[],
-          $2::int4[]
-        )
-        RETURNING id, name, age;",
+    let sql = r"
+    INSERT INTO
+        public.users (name, age)
+    SELECT * FROM UNNEST(
+      $1::text[],
+      $2::int4[]
+    )
+    RETURNING id, name, age;";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(names);
     let query = query.bind(age);
     let row = query.fetch_one(executor).await?;
@@ -2717,25 +2896,25 @@ pub struct TestNestedRowItem {
 /// Query Plan:
 /// Index Scan using users_pkey on users u
 ///   Index Cond: (id = 0)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "SELECT \n    u.id,\n    u.name,\n    u as user_details\nFROM public.users u\nWHERE u.id = #{user_id};"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn test_nested_row(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     user_id: i32,
 ) -> Result<TestNestedRowItem, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT 
-          u.id,
-          u.name,
-          u as user_details
-        FROM public.users u
-        WHERE u.id = $1;",
+    let sql = r"
+    SELECT
+        u.id,
+        u.name,
+        u as user_details
+    FROM
+        public.users u
+    WHERE
+        u.id = $1;";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(user_id);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
@@ -2801,28 +2980,27 @@ pub struct TestOptionalMultiunzipItem {
 }
 
 /// Test batch insert with optional parameter (age is nullable)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "INSERT INTO public.users (name, email, age)\nSELECT name, email, age\nFROM UNNEST(\n        #{name}::text [],\n        #{email}::text [],\n        #{age?}::int4 []\n    ) AS t(name, email, age)\nRETURNING id, name, email, age, created_at"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn test_optional_multiunzip(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     items: Vec<TestOptionalMultiunzipRecord>,
 ) -> Result<Vec<TestOptionalMultiunzipItem>, super::Error<TestOptionalMultiunzipConstraints>> {
     use itertools::Itertools;
-    let query = sqlx::query(
-        r"INSERT INTO public.users (name, email, age)
-        SELECT name, email, age
-        FROM UNNEST(
-            $1::text [],
-            $2::text [],
-            $3::int4 []
-          ) AS t(name, email, age)
-        RETURNING id, name, email, age, created_at",
+    let sql = r"
+    INSERT INTO
+        public.users (name, email, age)
+    SELECT name, email, age
+    FROM UNNEST(
+        $1::text [],
+        $2::text [],
+        $3::int4 []
+      ) AS t(name, email, age)
+    RETURNING id, name, email, age, created_at";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let (name, email, age): (Vec<_>, Vec<_>, Vec<_>) = items
         .into_iter()
         .map(|item| (item.name, item.email, item.age))
@@ -2892,13 +3070,7 @@ pub struct TestOptionalWithoutMultiunzipItem {
 }
 
 /// Test batch insert with nullable array elements (not entire array optional)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "INSERT INTO public.users (name, email, age)\nSELECT name, email, age\nFROM UNNEST(\n        #{name}::text [],\n        #{email}::text [],\n        #{age[?]}::int4 []\n    ) AS t(name, email, age)\nRETURNING id, name, email, age, created_at"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn test_optional_without_multiunzip(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     name: Vec<String>,
@@ -2908,16 +3080,21 @@ pub async fn test_optional_without_multiunzip(
     Vec<TestOptionalWithoutMultiunzipItem>,
     super::Error<TestOptionalWithoutMultiunzipConstraints>,
 > {
-    let query = sqlx::query(
-        r"INSERT INTO public.users (name, email, age)
-        SELECT name, email, age
-        FROM UNNEST(
-            $1::text [],
-            $2::text [],
-            $3::int4 []
-          ) AS t(name, email, age)
-        RETURNING id, name, email, age, created_at",
+    let sql = r"
+    INSERT INTO
+        public.users (name, email, age)
+    SELECT name, email, age
+    FROM UNNEST(
+        $1::text [],
+        $2::text [],
+        $3::int4 []
+      ) AS t(name, email, age)
+    RETURNING id, name, email, age, created_at";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(name);
     let query = query.bind(email);
     let query = query.bind(age);

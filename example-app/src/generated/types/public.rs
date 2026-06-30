@@ -8,45 +8,6 @@ pub type PositiveInt = std::num::NonZeroI32;
 pub type EmailAddress = String;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, sqlx::Type)]
-#[sqlx(type_name = "text")]
-pub enum ProductPriority {
-    #[sqlx(rename = "low")]
-    Low,
-    #[sqlx(rename = "medium")]
-    Medium,
-    #[sqlx(rename = "high")]
-    High,
-    #[sqlx(rename = "urgent")]
-    Urgent,
-}
-
-impl std::str::FromStr for ProductPriority {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "low" => Ok(ProductPriority::Low),
-            "medium" => Ok(ProductPriority::Medium),
-            "high" => Ok(ProductPriority::High),
-            "urgent" => Ok(ProductPriority::Urgent),
-            _ => Err(format!("Invalid ProductPriority variant: {}", s)),
-        }
-    }
-}
-
-impl std::fmt::Display for ProductPriority {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            ProductPriority::Low => "low",
-            ProductPriority::Medium => "medium",
-            ProductPriority::High => "high",
-            ProductPriority::Urgent => "urgent",
-        };
-        write!(f, "{}", s)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, sqlx::Type)]
 #[sqlx(type_name = "user_status")]
 pub enum UserStatus {
     #[sqlx(rename = "active")]

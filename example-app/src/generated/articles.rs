@@ -43,28 +43,27 @@ pub struct BatchInsertArticlesItem {
 }
 
 /// Batch insert articles with nullable JSONB columns using multiunzip
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "INSERT INTO public.articles (title, metadata, contributors)\nSELECT title, metadata, contributors\nFROM UNNEST(\n        #{title}::text [],\n        #{metadata?}::jsonb [],\n        #{contributors?}::jsonb []\n    ) AS t(title, metadata, contributors)\nRETURNING id, title, metadata, contributors;"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn batch_insert_articles(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     items: Vec<BatchInsertArticlesRecord>,
 ) -> Result<Vec<BatchInsertArticlesItem>, super::Error<BatchInsertArticlesConstraints>> {
     use itertools::Itertools;
-    let query = sqlx::query(
-        r"INSERT INTO public.articles (title, metadata, contributors)
-        SELECT title, metadata, contributors
-        FROM UNNEST(
-            $1::text [],
-            $2::jsonb [],
-            $3::jsonb []
-          ) AS t(title, metadata, contributors)
-        RETURNING id, title, metadata, contributors;",
+    let sql = r"
+    INSERT INTO
+        public.articles (title, metadata, contributors)
+    SELECT title, metadata, contributors
+    FROM UNNEST(
+        $1::text [],
+        $2::jsonb [],
+        $3::jsonb []
+      ) AS t(title, metadata, contributors)
+    RETURNING id, title, metadata, contributors;";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let (title, metadata, contributors): (Vec<_>, Vec<_>, Vec<_>) = items
         .into_iter()
         .map(|item| (item.title, item.metadata, item.contributors))
@@ -105,22 +104,26 @@ pub struct GetArticleByIdItem {
 /// Query Plan:
 /// Index Scan using articles_pkey on articles
 ///   Index Cond: (id = 0)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "SELECT id, title, metadata, contributors\nFROM public.articles\nWHERE id = #{id};"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_article_by_id(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     id: i32,
 ) -> Result<GetArticleByIdItem, super::ErrorReadOnly> {
-    let query = sqlx::query(
-        r"SELECT id, title, metadata, contributors
-        FROM public.articles
-        WHERE id = $1;",
+    let sql = r"
+    SELECT
+        id,
+        title,
+        metadata,
+        contributors
+    FROM
+        public.articles
+    WHERE
+        id = $1;";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(id);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
@@ -179,13 +182,7 @@ pub struct BatchInsertArticlesScalarNativeItem {
 }
 
 /// Batch insert articles with scalar @native JSONB types using multiunzip (regression test for type truncation)
-#[tracing::instrument(
-    level = "debug",
-    skip_all,
-    fields(
-        sql = "INSERT INTO public.articles (title, metadata, contributors)\nSELECT title, metadata, contributors\nFROM UNNEST(\n        #{title}::text [],\n        #{metadata?}::jsonb [],\n        #{contributors?}::jsonb []\n    ) AS t(title, metadata, contributors)\nRETURNING id, title, metadata, contributors;"
-    )
-)]
+#[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn batch_insert_articles_scalar_native(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     items: Vec<BatchInsertArticlesScalarNativeRecord>,
@@ -194,16 +191,21 @@ pub async fn batch_insert_articles_scalar_native(
     super::Error<BatchInsertArticlesScalarNativeConstraints>,
 > {
     use itertools::Itertools;
-    let query = sqlx::query(
-        r"INSERT INTO public.articles (title, metadata, contributors)
-        SELECT title, metadata, contributors
-        FROM UNNEST(
-            $1::text [],
-            $2::jsonb [],
-            $3::jsonb []
-          ) AS t(title, metadata, contributors)
-        RETURNING id, title, metadata, contributors;",
+    let sql = r"
+    INSERT INTO
+        public.articles (title, metadata, contributors)
+    SELECT title, metadata, contributors
+    FROM UNNEST(
+        $1::text [],
+        $2::jsonb [],
+        $3::jsonb []
+      ) AS t(title, metadata, contributors)
+    RETURNING id, title, metadata, contributors;";
+    tracing::Span::current().record(
+        "sql",
+        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
     );
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let (title, metadata, contributors): (Vec<_>, Vec<_>, Vec<_>) = items
         .into_iter()
         .map(|item| (item.title, item.metadata, item.contributors))
