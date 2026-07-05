@@ -11,7 +11,7 @@ use crate::types_extractor::{parse_parameter_names_from_sql, QueryTypeInfo};
 use crate::utils::{to_pascal_case, to_snake_case};
 use anyhow::Result;
 
-pub fn generate_root_module(modules: &Vec<String>, source_hash: u64) -> String {
+pub fn generate_root_module(modules: &Vec<String>, source_hash: u64, runtime_crate: &str) -> String {
     let mut mod_content = String::new();
 
     // Add hash comment at the top for consistency with build-time generation
@@ -34,229 +34,16 @@ pub fn generate_root_module(modules: &Vec<String>, source_hash: u64) -> String {
         mod_content.push('\n');
     }
 
-    // Add generic Error type
-    mod_content.push_str(&generate_generic_error_type());
+    mod_content.push_str(&generate_runtime_error_reexports(runtime_crate));
 
     mod_content
 }
 
-/// Generate the generic Error<C> type for mod.rs
-pub fn generate_generic_error_type() -> String {
-    r#"#[derive(Debug, Clone)]
-pub struct ErrorConstraintInfo {
-    /// Name of the violated constraint
-    pub constraint_name: String,
-    pub table_name: String,
-    #[allow(unused)]
-    pub kind: ErrorConstraintKind,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ErrorConstraintKind {
-    UniqueViolation,
-    ForeignKeyViolation,
-    NotNullViolation,
-    CheckViolation,
-    Other,
-}
-
-impl From<sqlx::error::ErrorKind> for ErrorConstraintKind {
-    fn from(kind: sqlx::error::ErrorKind) -> Self {
-        match kind {
-            sqlx::error::ErrorKind::UniqueViolation => Self::UniqueViolation,
-            sqlx::error::ErrorKind::ForeignKeyViolation => Self::ForeignKeyViolation,
-            sqlx::error::ErrorKind::NotNullViolation => Self::NotNullViolation,
-            sqlx::error::ErrorKind::CheckViolation => Self::CheckViolation,
-            _ => Self::Other,
-        }
-    }
-}
-
-/// Generic error type
-#[derive(Debug)]
-pub enum Error<C: TryFrom<ErrorConstraintInfo>> {
-    /// Catches the cases when a mutation query violates a constraint
-    /// Type C would be an enum specific to each query.
-    /// It would enumerate variants in pascal case for each constraint that can be violated.
-    /// The list of constaints is inferred automatically by the automodel based on the table schema
-    /// involved in the query.
-    /// The Option<C> is None when the constraint name is not recognized (unknown constraint).
-    ConstraintViolation(Option<C>, ErrorConstraintInfo),
-
-    /// Row not found error
-    RowNotFound,
-    /// System under stress, timeout
-    PoolTimeout,
-
-    InternalError(String, sqlx::Error),
-}
-
-impl<C: TryFrom<ErrorConstraintInfo>> From<sqlx::Error> for Error<C> {
-    fn from(error: sqlx::Error) -> Self {
-        match &error {
-            sqlx::Error::RowNotFound => Self::RowNotFound,
-            sqlx::Error::ColumnNotFound(col) => {
-                Self::InternalError(format!("Column not found: {}", col), error)
-            }
-            sqlx::Error::Database(db_err) => {
-                let kind = db_err.kind();
-                match kind {
-                    sqlx::error::ErrorKind::UniqueViolation
-                    | sqlx::error::ErrorKind::ForeignKeyViolation
-                    | sqlx::error::ErrorKind::NotNullViolation
-                    | sqlx::error::ErrorKind::CheckViolation => {
-                        let violation = ErrorConstraintInfo {
-                            constraint_name: db_err.constraint().unwrap_or("").to_string(),
-                            table_name: db_err.table().unwrap_or("").to_string(),
-                            kind: kind.into(),
-                        };
-                        Self::ConstraintViolation(violation.clone().try_into().ok(), violation)
-                    }
-                    _ => Self::InternalError(
-                        format!("Database error: {}", db_err.message()),
-                        error,
-                    ),
-                }
-            }
-            sqlx::Error::Configuration(_) => {
-                Self::InternalError("Configuration error".to_string(), error)
-            }
-            sqlx::Error::InvalidArgument(_) => {
-                Self::InternalError("Invalid argument".to_string(), error)
-            }
-            sqlx::Error::Io(_) => Self::InternalError("IO error".to_string(), error),
-            sqlx::Error::Tls(_) => Self::InternalError("TLS error".to_string(), error),
-            sqlx::Error::Protocol(_) => Self::InternalError("Protocol error".to_string(), error),
-            sqlx::Error::TypeNotFound { type_name } => {
-                Self::InternalError(format!("Type not found: {}", type_name), error)
-            }
-            sqlx::Error::ColumnIndexOutOfBounds { index, len } => Self::InternalError(
-                format!("Column index out of bounds: index {}, len {}", index, len),
-                error,
-            ),
-            sqlx::Error::ColumnDecode { index, source } => Self::InternalError(
-                format!("Column decode error at index {}: {}", index, source),
-                error,
-            ),
-            sqlx::Error::Encode(_) => Self::InternalError("Encode error".to_string(), error),
-            sqlx::Error::Decode(_) => Self::InternalError("Decode error".to_string(), error),
-            sqlx::Error::AnyDriverError(_) => {
-                Self::InternalError("Driver error".to_string(), error)
-            }
-            sqlx::Error::PoolTimedOut => Self::PoolTimeout,
-            sqlx::Error::PoolClosed => Self::InternalError("Pool closed".to_string(), error),
-            sqlx::Error::WorkerCrashed => Self::InternalError("Worker crashed".to_string(), error),
-            sqlx::Error::Migrate(_) => Self::InternalError("Migration error".to_string(), error),
-            sqlx::Error::InvalidSavePointStatement => {
-                Self::InternalError("Invalid save point statement".to_string(), error)
-            }
-            sqlx::Error::BeginFailed => Self::InternalError("Begin failed".to_string(), error),
-            _ => Self::InternalError("Unknown sqlx error".to_string(), error),
-        }
-    }
-}
-
-impl<C> std::fmt::Display for Error<C>
-where
-    C: std::fmt::Debug + TryFrom<ErrorConstraintInfo>,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::ConstraintViolation(constraint, info) => {
-                if let Some(c) = constraint {
-                    write!(f, "Constraint violation: {:#?}", c)
-                } else {
-                    write!(f, "Unknown constraint violation: {} on table {}", info.constraint_name, info.table_name)
-                }
-            }
-            Error::RowNotFound => write!(f, "Row not found"),
-            Error::PoolTimeout => write!(f, "Pool timeout"),
-            Error::InternalError(msg, err) => {
-                write!(f, "Internal error: {}, caused by: {}", msg, err)
-            }
-        }
-    }
-}
-
-impl<C> std::error::Error for Error<C>
-where
-    C: std::fmt::Debug + TryFrom<ErrorConstraintInfo>,
-{
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Error::InternalError(_, err) => Some(err),
-            _ => None,
-        }
-    }
-}
-
-/// Generic error type for read-only queries
-#[derive(Debug)]
-pub enum ErrorReadOnly {
-    /// Row not found error
-    RowNotFound,
-    /// System under stress, timeout
-    PoolTimeout,
-
-    InternalError(String, sqlx::Error),
-}
-
-impl From<sqlx::Error> for ErrorReadOnly {
-    fn from(error: sqlx::Error) -> Self {
-        Error::<ErrorConstraintInfo>::from(error).into()
-    }
-}
-
-impl Into<Error<ErrorConstraintInfo>> for ErrorReadOnly {
-    fn into(self) -> Error<ErrorConstraintInfo> {
-        match self {
-            ErrorReadOnly::RowNotFound => Error::RowNotFound,
-            ErrorReadOnly::PoolTimeout => Error::PoolTimeout,
-            ErrorReadOnly::InternalError(msg, err) => Error::InternalError(msg, err),
-        }
-    }
-}
-
-impl From<Error<ErrorConstraintInfo>> for ErrorReadOnly {
-    fn from(error: Error<ErrorConstraintInfo>) -> Self {
-        match error {
-            Error::RowNotFound => Self::RowNotFound,
-            Error::PoolTimeout => Self::PoolTimeout,
-            Error::InternalError(msg, err) => Self::InternalError(msg, err),
-            Error::ConstraintViolation(c, info) => Self::InternalError(
-                "Constraint violation in read-only query".to_string(),
-                sqlx::Error::Protocol(format!(
-                    "Constraint violation in read-only query: constraint={}, table={}, parsed={:?}",
-                    info.constraint_name, info.table_name, c
-                )),
-            ),
-        }
-    }
-}
-
-impl std::fmt::Display for ErrorReadOnly {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ErrorReadOnly::RowNotFound => write!(f, "Row not found"),
-            ErrorReadOnly::PoolTimeout => write!(f, "Pool timeout"),
-            ErrorReadOnly::InternalError(msg, err) => {
-                write!(f, "Internal error: {}, caused by: {}", msg, err)
-            }
-        }
-    }
-}
-
-impl std::error::Error for ErrorReadOnly {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::InternalError(_, err) => Some(err),
-            _ => None,
-        }
-    }
-}
-
-"#
-    .to_string()
+/// Re-export shared persistence error types from the runtime crate.
+pub fn generate_runtime_error_reexports(runtime_crate: &str) -> String {
+    format!(
+        "pub use {runtime_crate}::{{Error, ErrorConstraintInfo, ErrorReadOnly}};\n"
+    )
 }
 
 /// Generate per-query constraint enum with TryFrom<ErrorConstraintInfo> implementation
@@ -696,36 +483,36 @@ pub fn generate_function_code_without_enums(
 
     let return_type = if type_info.output_types.is_empty() {
         let error_type = if let Some(ref enum_name) = constraint_enum_name {
-            format!("super::Error<{}>", enum_name)
+            format!("super::Error<{enum_name}>")
         } else {
             "super::ErrorReadOnly".to_string()
         };
-        format!("Result<(), {}>", error_type)
+        format!("Result<(), {error_type}>")
     } else {
         match query.expect {
             ExpectedResult::ExactlyOne => {
                 let error_type = if let Some(ref enum_name) = constraint_enum_name {
-                    format!("super::Error<{}>", enum_name)
+                    format!("super::Error<{enum_name}>")
                 } else {
                     "super::ErrorReadOnly".to_string()
                 };
-                format!("Result<{}, {}>", base_return_type, error_type)
+                format!("Result<{base_return_type}, {error_type}>")
             }
             ExpectedResult::PossibleOne => {
                 let error_type = if let Some(ref enum_name) = constraint_enum_name {
-                    format!("super::Error<{}>", enum_name)
+                    format!("super::Error<{enum_name}>")
                 } else {
                     "super::ErrorReadOnly".to_string()
                 };
-                format!("Result<Option<{}>, {}>", base_return_type, error_type)
+                format!("Result<Option<{base_return_type}>, {error_type}>")
             }
             ExpectedResult::AtLeastOne | ExpectedResult::Multiple => {
                 let error_type = if let Some(ref enum_name) = constraint_enum_name {
-                    format!("super::Error<{}>", enum_name)
+                    format!("super::Error<{enum_name}>")
                 } else {
                     "super::ErrorReadOnly".to_string()
                 };
-                format!("Result<Vec<{}>, {}>", base_return_type, error_type)
+                format!("Result<Vec<{base_return_type}>, {error_type}>")
             }
         }
     };

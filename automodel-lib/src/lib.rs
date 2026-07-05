@@ -40,7 +40,7 @@ impl Default for MultiunzipCrate {
 }
 
 /// Default configuration for telemetry and analysis
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DefaultsConfig {
     /// Global telemetry defaults
     #[serde(default)]
@@ -66,6 +66,27 @@ pub struct DefaultsConfig {
     /// - Time: uses the time crate
     #[serde(default)]
     pub datetime_crate: DateTimeCrate,
+    /// Crate path used in generated code for shared persistence error types.
+    /// Defaults to `automodel_runtime`.
+    #[serde(default = "default_runtime_crate")]
+    pub runtime_crate: String,
+}
+
+impl Default for DefaultsConfig {
+    fn default() -> Self {
+        Self {
+            telemetry: DefaultsTelemetryConfig::default(),
+            ensure_indexes: false,
+            derives: DefaultsDerivesConfig::default(),
+            multiunzip_crate: MultiunzipCrate::default(),
+            datetime_crate: DateTimeCrate::default(),
+            runtime_crate: default_runtime_crate(),
+        }
+    }
+}
+
+fn default_runtime_crate() -> String {
+    "automodel_runtime".to_string()
 }
 
 /// Default configuration for telemetry and analysis
@@ -123,6 +144,8 @@ pub struct DefaultsDerivesConfig {
 ///   error_type: [Clone]
 ///
 /// multiunzip_crate: itertools
+///
+/// runtime_crate: automodel_runtime
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AutoModelConfig {
@@ -147,6 +170,9 @@ pub struct AutoModelConfig {
     /// Crate to use for PostgreSQL date/time type mappings in generated code
     #[serde(default)]
     pub datetime_crate: DateTimeCrate,
+    /// Crate path used in generated code for shared persistence error types
+    #[serde(default = "default_runtime_crate")]
+    pub runtime_crate: String,
 }
 
 fn default_queries_dir() -> String {
@@ -174,6 +200,7 @@ impl AutoModelConfig {
             derives: self.derives.clone(),
             multiunzip_crate: self.multiunzip_crate.clone(),
             datetime_crate: self.datetime_crate,
+            runtime_crate: self.runtime_crate.clone(),
         }
     }
 }
@@ -411,12 +438,9 @@ impl AutoModel {
         let analyzed_queries = self.analyze_all_queries(&client).await?;
 
         // Build TypeSystem from captured statements (no re-preparation needed)
-        let type_system = Self::build_type_system(
-            &client,
-            &analyzed_queries,
-            self.defaults.datetime_crate,
-        )
-        .await?;
+        let type_system =
+            Self::build_type_system(&client, &analyzed_queries, self.defaults.datetime_crate)
+                .await?;
         type_system.codegen(&output_path.join("types")).await?;
 
         // Collect all warnings
@@ -441,7 +465,8 @@ impl AutoModel {
 
         // Create the main mod.rs file
         let mod_file = output_path.join("mod.rs");
-        let mut mod_content = generate_root_module(&modules, source_hash);
+        let mut mod_content =
+            generate_root_module(&modules, source_hash, &self.defaults.runtime_crate);
         mod_content.push_str("pub mod types;\n");
         fs::write(&mod_file, &mod_content)?;
 
@@ -611,8 +636,7 @@ impl AutoModel {
                 // EXPLAIN fails on mutations (INSERT/UPDATE/DELETE), so we use that to detect them
                 // This also pre-computes EXPLAIN params during the analysis phase
                 let analysis_result =
-                    Self::analyze_query_with_explain(client, query, datetime_crate)
-                        .await?;
+                    Self::analyze_query_with_explain(client, query, datetime_crate).await?;
 
                 let analyzed_query = QueryDefinitionRuntime::new(
                     query.clone(),
@@ -724,22 +748,10 @@ impl AutoModel {
         // Looks like a SELECT or read-only query - verify with EXPLAIN
         let explain_result = if query.ensure_indexes {
             // Run full performance analysis (which includes EXPLAIN)
-            Self::analyze_query_performance(
-                client,
-                query,
-                &explain_params,
-                datetime_crate,
-            )
-            .await
+            Self::analyze_query_performance(client, query, &explain_params, datetime_crate).await
         } else {
             // Just run a simple EXPLAIN to verify it's read-only
-            Self::detect_mutation_via_explain(
-                client,
-                query,
-                &explain_params,
-                datetime_crate,
-            )
-            .await
+            Self::detect_mutation_via_explain(client, query, &explain_params, datetime_crate).await
         };
 
         match explain_result {
@@ -908,11 +920,8 @@ impl AutoModel {
         datetime_crate: DateTimeCrate,
     ) -> Result<ExplainParams> {
         let analysis_sql = crate::types_extractor::normalize_pgroonga_for_prepare(converted_sql);
-        let (_dummy_params, special_params) = crate::types_extractor::create_dummy_params(
-            param_types,
-            datetime_crate,
-        )
-        .await?;
+        let (_dummy_params, special_params) =
+            crate::types_extractor::create_dummy_params(param_types, datetime_crate).await?;
 
         // Build the EXPLAIN query with special param replacements
         let explain_sql = if special_params.is_empty() {
