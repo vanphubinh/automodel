@@ -46,19 +46,8 @@ tokio = { version = "1.0", features = ["rt"] }
 ```rust
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let defaults = automodel::DefaultsConfig {
-        telemetry: automodel::DefaultsTelemetryConfig {
-            level: automodel::TelemetryLevel::Debug,
-            include_sql: true,
-        },
-        ensure_indexes: true,
-        derives: automodel::DefaultsDerivesConfig {
-            return_type: vec!["Clone".to_string()],
-            parameters_type: vec!["Clone".to_string()],
-            conditions_type: vec!["Clone".to_string()],
-            error_type: vec!["Clone".to_string()],
-        },
-    };
+    println!("cargo:rerun-if-changed=automodel.yml");
+    let config = automodel::AutoModelConfig::from_file("automodel.yml")?;
     automodel::AutoModel::generate(
         || {
             if std::env::var("CI").is_err() {
@@ -73,12 +62,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )
             }
         },
-        "queries",
-        "src/generated",
-        defaults,
+        &config.queries_dir,
+        &config.output_dir,
+        config.defaults(),
+        false,
     )
     .await
 }
+```
+
+Create an `automodel.yml` next to `build.rs`:
+
+```yaml
+queries_dir: queries
+output_dir: src/generated
+
+telemetry:
+  level: debug
+  include_sql: true
+
+ensure_indexes: true
+
+derives:
+  return_type: [Clone]
+  parameters_type: [Clone]
+  conditions_type: [Clone]
+  error_type: [Clone]
+
+multiunzip_crate: itertools
 ```
 
 ### 3. Write SQL queries
@@ -187,27 +198,36 @@ SELECT * FROM users WHERE id = #{id}
 
 ### Default Configuration
 
-Defaults are configured in `build.rs` when calling `AutoModel::generate()`:
+Prefer `automodel.yml` (used by both `build.rs` and the CLI):
+
+```yaml
+queries_dir: queries
+output_dir: src/generated
+
+telemetry:
+  level: debug
+  include_sql: true
+
+ensure_indexes: true
+
+derives:
+  return_type: [Clone]
+  parameters_type: [Clone]
+  conditions_type: [Clone]
+  error_type: [Clone]
+
+multiunzip_crate: itertools
+
+# Schema-level mappings shared by all queries
+types:
+  public.positive_int: "std::num::NonZeroI32"
+```
 
 ```rust
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let defaults = automodel::DefaultsConfig {
-        telemetry: automodel::DefaultsTelemetryConfig {
-            level: automodel::TelemetryLevel::Debug,
-            include_sql: true,
-        },
-        ensure_indexes: true,
-        derives: automodel::DefaultsDerivesConfig {
-            return_type: vec!["Clone".to_string()],
-            parameters_type: vec!["Clone".to_string()],
-            conditions_type: vec!["Clone".to_string()],
-            error_type: vec!["Clone".to_string()],
-        },
-        // Use itertools for multiunzip (default, supports up to 12 parameters)
-        // Change to ManyUnzip for queries with more than 12 parameters in batch inserts
-        multiunzip_crate: automodel::MultiunzipCrate::Itertools,
-    };
+    println!("cargo:rerun-if-changed=automodel.yml");
+    let config = automodel::AutoModelConfig::from_file("automodel.yml")?;
     automodel::AutoModel::generate(
         || {
             if std::env::var("CI").is_err() {
@@ -222,13 +242,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 )
             }
         },
-        "queries",
-        "src/generated",
-        defaults,
+        &config.queries_dir,
+        &config.output_dir,
+        config.defaults(),
+        false,
     )
     .await
 }
 ```
+
+You can also construct `DefaultsConfig` in `build.rs` directly if you are not using a YAML file.
 
 **Telemetry Levels:**
 - `none` - No instrumentation
@@ -264,9 +287,9 @@ If no metadata is provided, sensible defaults are used.
 --    description: Retrieve a user by their ID  # Function documentation
 --    module: custom_module    # Override directory-based module name
 --    expect: exactly_one       # exactly_one | possible_one | at_least_one | multiple
---    types:                    # Custom type mappings
+--    types:                    # Custom type mappings (query-local; prefer automodel.yml for schema-level)
 --      profile: "crate::models::UserProfile"                         # query params/output by name
---      public.positive_int: "std::num::NonZeroI32"                   # domain type alias override
+--      public.positive_int: "std::num::NonZeroI32"                   # domain type alias (also in automodel.yml)
 --      public.users.social_links: "Vec<crate::models::UserSocialLink>"  # composite type field
 --    telemetry:                # Per-query telemetry settings
 --      level: trace
@@ -411,12 +434,21 @@ pub type PositiveInt = i32;
 pub type EmailAddress = String;
 ```
 
-Use 2-segment keys (`schema.domain_name`) in `types:` to override the alias target:
+**Prefer defining reusable domain/composite mappings in `automodel.yml`** so they live in one place:
+
+```yaml
+# automodel.yml
+types:
+  public.positive_int: "std::num::NonZeroI32"
+  public.users.profile: "crate::models::UserProfile"
+```
+
+You can still override (or define) the same mappings per query; values must agree with the global config:
 
 ```sql
 -- @automodel
 --    types:
---      public.positive_int: "std::num::NonZeroI32"
+--      public.positive_int: "std::num::NonZeroI32"  # OK: matches automodel.yml
 -- @end
 ```
 
@@ -426,6 +458,14 @@ pub type PositiveInt = std::num::NonZeroI32;
 ```
 
 Domain CHECK constraints are also included in error type enums for mutation queries (e.g., `PositiveIntCheck`, `EmailAddressCheck`).
+
+**Where to put type mappings:**
+
+| Mapping kind | Key format | Preferred location |
+|--------------|------------|-------------------|
+| Domain alias override | `schema.domain` | `automodel.yml` `types:` |
+| Composite field | `schema.type.field` | `automodel.yml` `types:` |
+| Param/column by name | `field_name` | Per-query SQL `types:` only |
 
 **Type mapping key summary:**
 

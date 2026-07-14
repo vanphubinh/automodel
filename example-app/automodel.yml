@@ -14,3 +14,9 @@ derives:
   error_type: [Clone]
 
 multiunzip_crate: itertools
+
+# Schema-level type mappings (preferred over repeating in every SQL file).
+# - schema.domain     → override generated domain alias in types/
+# - schema.type.field → composite field mapping
+types:
+  public.positive_int: "std::num::NonZeroI32"

@@ -13,6 +13,7 @@ use sqlfile_parser::*;
 use types_extractor::*;
 
 use anyhow::Result;
+use std::collections::HashMap;
 use std::path::Path;
 
 pub use datetime_crate::DateTimeCrate;
@@ -70,6 +71,16 @@ pub struct DefaultsConfig {
     /// Defaults to `automodel_runtime`.
     #[serde(default = "default_runtime_crate")]
     pub runtime_crate: String,
+    /// Global schema-level type mappings (domain aliases and composite fields).
+    /// Prefer these over repeating the same mappings in every SQL file.
+    ///
+    /// Supported keys:
+    /// - `schema.domain` (2-segment): override generated domain type alias
+    /// - `schema.type.field` (3-segment): map a composite type field
+    ///
+    /// Field/parameter name mappings (1-segment keys) belong in per-query SQL metadata.
+    #[serde(default)]
+    pub types: HashMap<String, String>,
 }
 
 impl Default for DefaultsConfig {
@@ -81,6 +92,7 @@ impl Default for DefaultsConfig {
             multiunzip_crate: MultiunzipCrate::default(),
             datetime_crate: DateTimeCrate::default(),
             runtime_crate: default_runtime_crate(),
+            types: HashMap::new(),
         }
     }
 }
@@ -146,6 +158,10 @@ pub struct DefaultsDerivesConfig {
 /// multiunzip_crate: itertools
 ///
 /// runtime_crate: automodel_runtime
+///
+/// types:
+///   public.positive_int: "std::num::NonZeroI32"
+///   public.users.profile: "crate::models::UserProfile"
 /// ```
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AutoModelConfig {
@@ -173,6 +189,10 @@ pub struct AutoModelConfig {
     /// Crate path used in generated code for shared persistence error types
     #[serde(default = "default_runtime_crate")]
     pub runtime_crate: String,
+    /// Global schema-level type mappings shared across all queries.
+    /// See [`DefaultsConfig::types`] for supported key formats.
+    #[serde(default)]
+    pub types: HashMap<String, String>,
 }
 
 fn default_queries_dir() -> String {
@@ -201,6 +221,7 @@ impl AutoModelConfig {
             multiunzip_crate: self.multiunzip_crate.clone(),
             datetime_crate: self.datetime_crate,
             runtime_crate: self.runtime_crate.clone(),
+            types: self.types.clone(),
         }
     }
 }
@@ -308,6 +329,16 @@ impl AutoModel {
             for sql_file in sql_files {
                 let sql_contents = fs::read(&sql_file)?;
                 hasher.update(&sql_contents);
+            }
+        }
+
+        // Include global type mappings so changes in automodel.yml types: trigger regen
+        {
+            let mut type_keys: Vec<_> = defaults.types.keys().collect();
+            type_keys.sort();
+            for key in type_keys {
+                hasher.update(key.as_bytes());
+                hasher.update(defaults.types[key].as_bytes());
             }
         }
 
@@ -438,9 +469,13 @@ impl AutoModel {
         let analyzed_queries = self.analyze_all_queries(&client).await?;
 
         // Build TypeSystem from captured statements (no re-preparation needed)
-        let type_system =
-            Self::build_type_system(&client, &analyzed_queries, self.defaults.datetime_crate)
-                .await?;
+        let type_system = Self::build_type_system(
+            &client,
+            &analyzed_queries,
+            self.defaults.datetime_crate,
+            &self.defaults.types,
+        )
+        .await?;
         type_system.codegen(&output_path.join("types")).await?;
 
         // Collect all warnings
@@ -490,6 +525,7 @@ impl AutoModel {
         client: &tokio_postgres::Client,
         analyzed_queries: &[QueryDefinitionRuntime],
         datetime_crate: DateTimeCrate,
+        global_types: &HashMap<String, String>,
     ) -> Result<rust_type::TypeSystem> {
         let mut type_system = rust_type::TypeSystem::new(datetime_crate);
 
@@ -508,87 +544,39 @@ impl AutoModel {
             .await
             .unwrap_or_else(|e| eprintln!("Warning: failed to resolve field nullability: {}", e));
 
-        // Apply custom type mappings from query-level `types:` configs.
+        // Apply custom type mappings from automodel.yml `types:` and query-level `types:`.
         //
-        // Two key formats:
+        // Two key formats for schema-level (TypeSystem) mappings:
         //   2-segment: schema.domain_name → alias override (e.g. "public.positive_int": "std::num::NonZeroI32")
         //   3-segment: schema.type.field  → composite field mapping (e.g. "public.users.profile": "UserProfile")
         //
-        // Collect all keys from all queries, detect conflicts, then apply.
+        // Global (YAML) mappings are applied first; query-level mappings must agree or can add
+        // additional fields. Conflicting mappings produce a build error.
+        //
+        // 1-segment keys (field/param name) are query-local and handled during extract_query_types.
 
-        // Key: (schema.type_name, field_name) → (mapped_type, needs_json_wrapper, source_query)
-        let mut merged_fields: std::collections::HashMap<(String, String), (String, bool, String)> =
-            std::collections::HashMap::new();
-        // Key: schema.domain_name → (mapped_type, source_query)
-        let mut merged_aliases: std::collections::HashMap<String, (String, String)> =
-            std::collections::HashMap::new();
+        // Key: (schema.type_name, field_name) → (mapped_type, needs_json_wrapper, source)
+        let mut merged_fields: HashMap<(String, String), (String, bool, String)> = HashMap::new();
+        // Key: schema.domain_name → (mapped_type, source)
+        let mut merged_aliases: HashMap<String, (String, String)> = HashMap::new();
+
+        Self::collect_schema_type_mappings(
+            global_types,
+            "automodel.yml",
+            &mut merged_aliases,
+            &mut merged_fields,
+        )?;
 
         for query in analyzed_queries {
             let Some(ref mappings) = query.definition.types else {
                 continue;
             };
-            for (key, value) in mappings {
-                let parts: Vec<&str> = key.splitn(3, '.').collect();
-                if parts.len() == 2 {
-                    // 2-segment: schema.domain_name → alias override
-                    if let Some((existing_type, existing_source)) = merged_aliases.get(key) {
-                        if existing_type != value {
-                            anyhow::bail!(
-                                "Conflicting type mappings for domain `{}`:\n  \
-                                 - {}: \"{}\"\n  \
-                                 - {}: \"{}\"",
-                                key,
-                                existing_source,
-                                existing_type,
-                                query.definition.name,
-                                value,
-                            );
-                        }
-                    } else {
-                        merged_aliases
-                            .insert(key.clone(), (value.clone(), query.definition.name.clone()));
-                    }
-                } else if parts.len() == 3 {
-                    // 3-segment: schema.type.field → composite field mapping
-                    let composite_key = format!("{}.{}", parts[0], parts[1]);
-                    let field_name = parts[2].to_string();
-
-                    // Parse @json/@native suffix
-                    let (clean_type, needs_wrapper) = if value.ends_with("@json") {
-                        (&value[..value.len() - 5], true)
-                    } else if value.ends_with("@native") {
-                        (&value[..value.len() - 7], false)
-                    } else {
-                        (value.as_str(), true)
-                    };
-
-                    let map_key = (composite_key.clone(), field_name.clone());
-                    if let Some((existing_type, _, existing_source)) = merged_fields.get(&map_key) {
-                        if existing_type != clean_type {
-                            anyhow::bail!(
-                                "Conflicting type mappings for composite field `{}.{}`:\n  \
-                                 - {}: \"{}\"\n  \
-                                 - {}: \"{}\"",
-                                composite_key,
-                                field_name,
-                                existing_source,
-                                existing_type,
-                                query.definition.name,
-                                clean_type,
-                            );
-                        }
-                    } else {
-                        merged_fields.insert(
-                            map_key,
-                            (
-                                clean_type.to_string(),
-                                needs_wrapper,
-                                query.definition.name.clone(),
-                            ),
-                        );
-                    }
-                }
-            }
+            Self::collect_schema_type_mappings(
+                mappings,
+                &query.definition.name,
+                &mut merged_aliases,
+                &mut merged_fields,
+            )?;
         }
 
         // Apply alias mappings (2-segment keys)
@@ -610,6 +598,91 @@ impl AutoModel {
         }
 
         Ok(type_system)
+    }
+
+    /// Collect 2-segment (domain alias) and 3-segment (composite field) type mappings.
+    /// 1-segment keys are ignored here (they are query-local field/param overrides).
+    fn collect_schema_type_mappings(
+        mappings: &HashMap<String, String>,
+        source: &str,
+        merged_aliases: &mut HashMap<String, (String, String)>,
+        merged_fields: &mut HashMap<(String, String), (String, bool, String)>,
+    ) -> Result<()> {
+        for (key, value) in mappings {
+            let parts: Vec<&str> = key.splitn(3, '.').collect();
+            if parts.len() == 1 {
+                // Field/param name mappings stay query-local; skip for TypeSystem.
+                // But reject them when the source is automodel.yml — they have no effect globally.
+                if source == "automodel.yml" {
+                    anyhow::bail!(
+                        "Global type mapping `{}` in automodel.yml uses a 1-segment key. \
+                         Schema-level mappings must be `schema.domain` or `schema.type.field`. \
+                         Put field/parameter overrides (e.g. `profile: \"...\") in query SQL metadata.",
+                        key,
+                    );
+                }
+                continue;
+            }
+            if parts.len() == 2 {
+                // 2-segment: schema.domain_name → alias override
+                if let Some((existing_type, existing_source)) = merged_aliases.get(key) {
+                    if existing_type != value {
+                        anyhow::bail!(
+                            "Conflicting type mappings for domain `{}`:\n  \
+                             - {}: \"{}\"\n  \
+                             - {}: \"{}\"",
+                            key,
+                            existing_source,
+                            existing_type,
+                            source,
+                            value,
+                        );
+                    }
+                } else {
+                    merged_aliases.insert(key.clone(), (value.clone(), source.to_string()));
+                }
+            } else if parts.len() == 3 {
+                // 3-segment: schema.type.field → composite field mapping
+                let composite_key = format!("{}.{}", parts[0], parts[1]);
+                let field_name = parts[2].to_string();
+
+                // Parse @json/@native suffix
+                let (clean_type, needs_wrapper) = if value.ends_with("@json") {
+                    (&value[..value.len() - 5], true)
+                } else if value.ends_with("@native") {
+                    (&value[..value.len() - 7], false)
+                } else {
+                    (value.as_str(), true)
+                };
+
+                let map_key = (composite_key.clone(), field_name.clone());
+                if let Some((existing_type, _, existing_source)) = merged_fields.get(&map_key) {
+                    if existing_type != clean_type {
+                        anyhow::bail!(
+                            "Conflicting type mappings for composite field `{}.{}`:\n  \
+                             - {}: \"{}\"\n  \
+                             - {}: \"{}\"",
+                            composite_key,
+                            field_name,
+                            existing_source,
+                            existing_type,
+                            source,
+                            clean_type,
+                        );
+                    }
+                } else {
+                    merged_fields.insert(
+                        map_key,
+                        (
+                            clean_type.to_string(),
+                            needs_wrapper,
+                            source.to_string(),
+                        ),
+                    );
+                }
+            }
+        }
+        Ok(())
     }
 
     /// PHASE 1: Analyze all queries and extract complete information
@@ -1307,5 +1380,105 @@ impl AutoModel {
                 ));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn automodel_yml_parses_global_types() {
+        let yaml = r#"
+queries_dir: queries
+output_dir: src/generated
+types:
+  public.positive_int: "std::num::NonZeroI32"
+  public.users.profile: "crate::models::UserProfile"
+"#;
+        let config: AutoModelConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(
+            config.types.get("public.positive_int").unwrap(),
+            "std::num::NonZeroI32"
+        );
+        assert_eq!(
+            config.defaults().types.get("public.positive_int").unwrap(),
+            "std::num::NonZeroI32"
+        );
+    }
+
+    #[test]
+    fn global_types_reject_one_segment_keys() {
+        let mut mappings = HashMap::new();
+        mappings.insert(
+            "profile".to_string(),
+            "crate::models::UserProfile".to_string(),
+        );
+        let mut aliases = HashMap::new();
+        let mut fields = HashMap::new();
+        let err = AutoModel::collect_schema_type_mappings(
+            &mappings,
+            "automodel.yml",
+            &mut aliases,
+            &mut fields,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("1-segment"));
+    }
+
+    #[test]
+    fn query_types_allow_one_segment_keys() {
+        let mut mappings = HashMap::new();
+        mappings.insert(
+            "profile".to_string(),
+            "crate::models::UserProfile".to_string(),
+        );
+        mappings.insert(
+            "public.positive_int".to_string(),
+            "std::num::NonZeroI32".to_string(),
+        );
+        let mut aliases = HashMap::new();
+        let mut fields = HashMap::new();
+        AutoModel::collect_schema_type_mappings(
+            &mappings,
+            "insert_product",
+            &mut aliases,
+            &mut fields,
+        )
+        .unwrap();
+        assert_eq!(
+            aliases.get("public.positive_int").unwrap().0,
+            "std::num::NonZeroI32"
+        );
+        assert!(fields.is_empty());
+    }
+
+    #[test]
+    fn conflicting_global_and_query_alias_mappings_error() {
+        let mut global = HashMap::new();
+        global.insert(
+            "public.positive_int".to_string(),
+            "std::num::NonZeroI32".to_string(),
+        );
+        let mut query = HashMap::new();
+        query.insert("public.positive_int".to_string(), "i32".to_string());
+
+        let mut aliases = HashMap::new();
+        let mut fields = HashMap::new();
+        AutoModel::collect_schema_type_mappings(
+            &global,
+            "automodel.yml",
+            &mut aliases,
+            &mut fields,
+        )
+        .unwrap();
+        let err = AutoModel::collect_schema_type_mappings(
+            &query,
+            "insert_product",
+            &mut aliases,
+            &mut fields,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("Conflicting type mappings"));
     }
 }

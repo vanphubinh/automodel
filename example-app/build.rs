@@ -1,5 +1,6 @@
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("cargo:rerun-if-changed=automodel.yml");
     let config = automodel::AutoModelConfig::from_file("automodel.yml")?;
 
     automodel::AutoModel::generate(
