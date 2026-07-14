@@ -739,8 +739,8 @@ fn generate_static_function_body(
                 } else if param_type == "String" {
                     // Use reference for String parameters to avoid move issues
                     body.push_str(&format!(
-                        "    let query = query.bind(&params.{});\n",
-                        clean_name
+                        "    let query = query.bind({});\n",
+                        bind_arg(&format!("params.{clean_name}"), param_type)
                     ));
                 } else if rust_type_info.is_nullable {
                     // For Option types, we can bind directly
@@ -797,7 +797,10 @@ fn generate_static_function_body(
                     }
                 } else if param_type == "String" {
                     // Use reference for String parameters to avoid move issues
-                    body.push_str(&format!("    let query = query.bind(&{});\n", clean_name));
+                    body.push_str(&format!(
+                        "    let query = query.bind({});\n",
+                        bind_arg(&clean_name, param_type)
+                    ));
                 } else {
                     body.push_str(&format!("    let query = query.bind({});\n", clean_name));
                 }
@@ -807,6 +810,19 @@ fn generate_static_function_body(
 
     generate_query_execution(body, query, type_info, return_type);
     Ok(())
+}
+
+/// Build the argument passed to `query.bind(...)`.
+///
+/// Borrow `String` to avoid moving out of borrowed params; bind other types by
+/// value so generated code stays free of clippy `needless_borrows_for_generic_args`
+/// (e.g. `&params.limit` for `i32`).
+fn bind_arg(accessor: &str, rust_type: &str) -> String {
+    if rust_type == "String" {
+        format!("&{accessor}")
+    } else {
+        accessor.to_string()
+    }
 }
 
 /// Generate function body for conditional (dynamic) SQL queries
@@ -988,14 +1004,16 @@ fn generate_conditional_function_body(
                         }
                         body.push_str(&format!("    query = query.bind({}_json);\n", clean_param));
                     } else {
-                        if use_structured_params {
-                            body.push_str(&format!(
-                                "    query = query.bind(&params.{});\n",
-                                clean_param
-                            ));
+                        let param_type = rust_type_info.rust_type();
+                        let accessor = if use_structured_params {
+                            format!("params.{clean_param}")
                         } else {
-                            body.push_str(&format!("    query = query.bind(&{});\n", clean_param));
-                        }
+                            clean_param.clone()
+                        };
+                        body.push_str(&format!(
+                            "    query = query.bind({});\n",
+                            bind_arg(&accessor, param_type)
+                        ));
                     }
                 }
             }
@@ -1059,23 +1077,22 @@ fn generate_conditional_function_body(
                             clean_param
                         ));
                     } else {
+                        let param_type = rust_type_info.rust_type();
                         if use_conditional_diff {
                             // For conditions_type, bind new.field directly
                             body.push_str(&format!(
-                                "        query = query.bind(&new.{});\n",
-                                clean_param
+                                "        query = query.bind({});\n",
+                                bind_arg(&format!("new.{clean_param}"), param_type)
                             ));
                         } else if use_structured_params {
                             // For parameters_type, unwrap from params struct
                             body.push_str(&format!(
-                                "        query = query.bind(params.{}.as_ref().unwrap());\n",
-                                clean_param
+                                "        query = query.bind(params.{clean_param}.as_ref().unwrap());\n",
                             ));
                         } else {
                             // For regular conditional, unwrap the Option
                             body.push_str(&format!(
-                                "        query = query.bind({}.as_ref().unwrap());\n",
-                                clean_param
+                                "        query = query.bind({clean_param}.as_ref().unwrap());\n",
                             ));
                         }
                     }
@@ -1660,6 +1677,15 @@ pub fn generate_code_for_module(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bind_arg_borrows_string_only() {
+        assert_eq!(bind_arg("params.name", "String"), "&params.name");
+        assert_eq!(bind_arg("params.limit", "i32"), "params.limit");
+        assert_eq!(bind_arg("params.include_archived", "bool"), "params.include_archived");
+        assert_eq!(bind_arg("new.age", "i32"), "new.age");
+        assert_eq!(bind_arg("name", "String"), "&name");
+    }
 
     #[test]
     fn format_sql_literal_content_applies_embedded_layout() {
