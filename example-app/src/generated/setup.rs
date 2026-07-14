@@ -18,7 +18,7 @@ pub async fn create_users_table(
     )";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     query.execute(executor).await?;

@@ -70,7 +70,7 @@ pub async fn update_user_social_links_nullable(
         social_links;";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(
@@ -171,13 +171,13 @@ pub async fn insert_user_social_links_structured(
         social_links;";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&params.name);
     let query = query.bind(&params.email);
     let query = query.bind(
-        serde_json::to_value(&params.social_links).map_err(|e| sqlx::Error::Encode(Box::new(e)))?,
+        serde_json::to_value(params.social_links).map_err(|e| sqlx::Error::Encode(Box::new(e)))?,
     );
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
@@ -304,7 +304,7 @@ pub async fn update_user_social_links_diff(
     let _ = param_counter; // Suppress unused assignment warning
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+        tracing::field::display(automodel::format_sql_for_trace(final_sql.as_str())),
     );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
@@ -315,7 +315,7 @@ pub async fn update_user_social_links_diff(
     }
 
     if included_params.contains(&r"social_links") {
-        let social_links_json = serde_json::to_value(&new.social_links)
+        let social_links_json = serde_json::to_value(new.social_links)
             .map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
         query = query.bind(social_links_json);
     }
@@ -442,7 +442,7 @@ pub async fn update_user_social_links_conditional(
     let _ = param_counter; // Suppress unused assignment warning
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+        tracing::field::display(automodel::format_sql_for_trace(final_sql.as_str())),
     );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
@@ -453,7 +453,7 @@ pub async fn update_user_social_links_conditional(
     }
 
     if included_params.contains(&r"social_links") {
-        let social_links_json = serde_json::to_value(&social_links.as_ref().unwrap())
+        let social_links_json = serde_json::to_value(social_links.as_ref().unwrap())
             .map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
         query = query.bind(social_links_json);
     }
@@ -549,7 +549,7 @@ pub async fn insert_users_batch_social_links(
     RETURNING id, name, email, social_links;";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let (name, email, social_links): (Vec<_>, Vec<_>, Vec<_>) = items
@@ -560,7 +560,7 @@ pub async fn insert_users_batch_social_links(
     let query = query.bind(email);
     let social_links_json: Result<Vec<Option<serde_json::Value>>, _> = social_links
         .into_iter()
-        .map(|v| v.map(|inner| serde_json::to_value(&inner)).transpose())
+        .map(|v| v.map(|inner| serde_json::to_value(inner)).transpose())
         .collect();
     let query = query.bind(social_links_json.map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
     let rows = query.fetch_all(executor).await?;
@@ -650,7 +650,7 @@ pub async fn update_user_tags(
         tags;";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let tags_json: Vec<Option<serde_json::Value>> = tags
@@ -720,7 +720,7 @@ pub async fn get_user_tags(
         id = $1;";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(user_id);
@@ -819,7 +819,7 @@ pub async fn insert_user_tags_structured(
         tags;";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&params.name);
@@ -965,7 +965,7 @@ pub async fn update_user_tags_diff(
     let _ = param_counter; // Suppress unused assignment warning
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+        tracing::field::display(automodel::format_sql_for_trace(final_sql.as_str())),
     );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
@@ -1113,7 +1113,7 @@ pub async fn update_user_tags_conditional(
     let _ = param_counter; // Suppress unused assignment warning
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+        tracing::field::display(automodel::format_sql_for_trace(final_sql.as_str())),
     );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
@@ -1236,7 +1236,7 @@ pub async fn insert_users_batch_tags(
     RETURNING id, name, email, tags;";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let (name, email, tags): (Vec<_>, Vec<_>, Vec<_>) = items
@@ -1246,7 +1246,7 @@ pub async fn insert_users_batch_tags(
     let query = query.bind(name);
     let query = query.bind(email);
     let tags_json: Result<Vec<serde_json::Value>, _> =
-        tags.into_iter().map(|v| serde_json::to_value(&v)).collect();
+        tags.into_iter().map(|v| serde_json::to_value(v)).collect();
     let query = query.bind(tags_json.map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
     let rows = query.fetch_all(executor).await?;
     let result: Result<Vec<_>, sqlx::Error> = rows
@@ -1343,7 +1343,7 @@ pub async fn update_user_labels(
         labels;";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let labels_json: Vec<Option<serde_json::Value>> = labels
@@ -1410,7 +1410,7 @@ pub async fn get_user_labels(
         id = $1;";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(user_id);
@@ -1506,7 +1506,7 @@ pub async fn insert_user_labels_structured(
         labels;";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&params.name);
@@ -1649,7 +1649,7 @@ pub async fn update_user_labels_diff(
     let _ = param_counter; // Suppress unused assignment warning
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+        tracing::field::display(automodel::format_sql_for_trace(final_sql.as_str())),
     );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
@@ -1794,7 +1794,7 @@ pub async fn update_user_labels_conditional(
     let _ = param_counter; // Suppress unused assignment warning
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+        tracing::field::display(automodel::format_sql_for_trace(final_sql.as_str())),
     );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
@@ -1913,7 +1913,7 @@ pub async fn insert_users_batch_labels(
     RETURNING id, name, email, labels;";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let (name, email, labels): (Vec<_>, Vec<_>, Vec<_>) = items
@@ -1924,7 +1924,7 @@ pub async fn insert_users_batch_labels(
     let query = query.bind(email);
     let labels_json: Result<Vec<serde_json::Value>, _> = labels
         .into_iter()
-        .map(|v| serde_json::to_value(&v))
+        .map(|v| serde_json::to_value(v))
         .collect();
     let query = query.bind(labels_json.map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
     let rows = query.fetch_all(executor).await?;
@@ -2011,7 +2011,7 @@ pub async fn insert_users_bulk_composite(
     RETURNING id, name, email, social_links";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(items);

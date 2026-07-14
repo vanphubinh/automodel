@@ -67,7 +67,7 @@ pub async fn create_user(
         age";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&name);
@@ -107,7 +107,7 @@ pub async fn update_user_full(
         age";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&params.name);
@@ -192,7 +192,7 @@ pub async fn update_user_partial(
     let _ = param_counter; // Suppress unused assignment warning
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+        tracing::field::display(automodel::format_sql_for_trace(final_sql.as_str())),
     );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
@@ -244,7 +244,7 @@ pub async fn find_user_by_email(
         email = $1";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&email);
@@ -319,7 +319,7 @@ pub async fn update_user_nullable(
     let _ = param_counter; // Suppress unused assignment warning
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+        tracing::field::display(automodel::format_sql_for_trace(final_sql.as_str())),
     );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));

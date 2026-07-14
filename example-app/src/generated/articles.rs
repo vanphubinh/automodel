@@ -61,7 +61,7 @@ pub async fn batch_insert_articles(
     RETURNING id, title, metadata, contributors;";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let (title, metadata, contributors): (Vec<_>, Vec<_>, Vec<_>) = items
@@ -121,7 +121,7 @@ pub async fn get_article_by_id(
         id = $1;";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(id);
@@ -203,7 +203,7 @@ pub async fn batch_insert_articles_scalar_native(
     RETURNING id, title, metadata, contributors;";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let (title, metadata, contributors): (Vec<_>, Vec<_>, Vec<_>) = items

@@ -63,7 +63,7 @@ pub async fn insert_order(
         created_at";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(tenant_id);
@@ -120,7 +120,7 @@ pub async fn get_orders_by_tenant(
         created_at DESC";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(tenant_id);
@@ -187,7 +187,7 @@ pub async fn get_orders_by_product(
         created_at DESC";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&product_name);
@@ -258,7 +258,7 @@ pub async fn get_orders_by_tenant_range(
         created_at DESC";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(min_tenant_id);

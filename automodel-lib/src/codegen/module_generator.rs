@@ -223,7 +223,7 @@ fn generate_tracing_attribute(query: &QueryDefinition, param_names: &[String]) -
 
 fn generate_record_sql_span(body: &mut String, sql_expr: &str) {
     body.push_str(&format!(
-        "    tracing::Span::current().record(\"sql\", tracing::field::display(&automodel::format_sql_for_trace({sql_expr})));\n",
+        "    tracing::Span::current().record(\"sql\", tracing::field::display(automodel::format_sql_for_trace({sql_expr})));\n",
         sql_expr = sql_expr,
     ));
 }
@@ -591,7 +591,7 @@ fn generate_static_function_body(
     let raw_string = generate_embedded_raw_string(converted_sql);
     if query.telemetry.include_sql {
         body.push_str(&format!("    let sql = {raw_string};\n", raw_string = raw_string));
-        generate_record_sql_span(body, "&sql");
+        generate_record_sql_span(body, "sql");
         body.push_str("    let query = sqlx::query(sqlx::AssertSqlSafe(sql));\n");
     } else {
         body.push_str(&format!(
@@ -678,13 +678,13 @@ fn generate_static_function_body(
                         // For optional custom types in arrays, each element is Option<T>
                         // Map each element: None stays None, Some(v) becomes Some(to_value(v))
                         body.push_str(&format!(
-                            "    let {}_json: Result<Vec<Option<serde_json::Value>>, _> = {}.into_iter().map(|v| v.map(|inner| serde_json::to_value(&inner)).transpose()).collect();\n",
+                            "    let {}_json: Result<Vec<Option<serde_json::Value>>, _> = {}.into_iter().map(|v| v.map(|inner| serde_json::to_value(inner)).transpose()).collect();\n",
                             var, var
                         ));
                     } else {
                         // For custom types in arrays, we need to serialize each element
                         body.push_str(&format!(
-                            "    let {}_json: Result<Vec<serde_json::Value>, _> = {}.into_iter().map(|v| serde_json::to_value(&v)).collect();\n",
+                            "    let {}_json: Result<Vec<serde_json::Value>, _> = {}.into_iter().map(|v| serde_json::to_value(v)).collect();\n",
                             var, var
                         ));
                     }
@@ -732,7 +732,7 @@ fn generate_static_function_body(
                     } else {
                         // For custom types, serialize to JSON before binding
                         body.push_str(&format!(
-                            "    let query = query.bind(serde_json::to_value(&params.{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);\n", 
+                            "    let query = query.bind(serde_json::to_value(params.{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);\n", 
                             clean_name
                         ));
                     }
@@ -791,7 +791,7 @@ fn generate_static_function_body(
                     } else {
                         // For custom types, serialize to JSON before binding
                         body.push_str(&format!(
-                            "    let query = query.bind(serde_json::to_value(&{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);\n", 
+                            "    let query = query.bind(serde_json::to_value({}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);\n", 
                             clean_name
                         ));
                     }
@@ -965,7 +965,7 @@ fn generate_conditional_function_body(
     // Ensure param_counter is marked as used to avoid unused assignment warnings
     body.push_str("    let _ = param_counter; // Suppress unused assignment warning\n");
     if query.telemetry.include_sql {
-        generate_record_sql_span(body, "&final_sql");
+        generate_record_sql_span(body, "final_sql.as_str()");
     }
     body.push_str(
         "\n    let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));\n\n",
@@ -997,9 +997,9 @@ fn generate_conditional_function_body(
                             }
                         } else {
                             if use_structured_params {
-                                body.push_str(&format!("    let {}_json = serde_json::to_value(&params.{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
+                                body.push_str(&format!("    let {}_json = serde_json::to_value(params.{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
                             } else {
-                                body.push_str(&format!("    let {}_json = serde_json::to_value(&{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
+                                body.push_str(&format!("    let {}_json = serde_json::to_value({}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
                             }
                         }
                         body.push_str(&format!("    query = query.bind({}_json);\n", clean_param));
@@ -1063,13 +1063,13 @@ fn generate_conditional_function_body(
                         } else {
                             if use_conditional_diff {
                                 // For conditions_type, use new.field directly
-                                body.push_str(&format!("        let {}_json = serde_json::to_value(&new.{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
+                                body.push_str(&format!("        let {}_json = serde_json::to_value(new.{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
                             } else if use_structured_params {
                                 // For parameters_type, unwrap from params struct
-                                body.push_str(&format!("        let {}_json = serde_json::to_value(&params.{}.as_ref().unwrap()).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
+                                body.push_str(&format!("        let {}_json = serde_json::to_value(params.{}.as_ref().unwrap()).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
                             } else {
                                 // For regular conditional, unwrap the Option
-                                body.push_str(&format!("        let {}_json = serde_json::to_value(&{}.as_ref().unwrap()).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
+                                body.push_str(&format!("        let {}_json = serde_json::to_value({}.as_ref().unwrap()).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
                             }
                         }
                         body.push_str(&format!(
@@ -1685,6 +1685,19 @@ mod tests {
         assert_eq!(bind_arg("params.include_archived", "bool"), "params.include_archived");
         assert_eq!(bind_arg("new.age", "i32"), "new.age");
         assert_eq!(bind_arg("name", "String"), "&name");
+    }
+
+    #[test]
+    fn record_sql_span_avoids_needless_borrows() {
+        let mut body = String::new();
+        generate_record_sql_span(&mut body, "sql");
+        assert!(body.contains("display(automodel::format_sql_for_trace(sql))"));
+        assert!(!body.contains("format_sql_for_trace(&sql)"));
+        assert!(!body.contains("display(&automodel::format_sql_for_trace"));
+
+        let mut body = String::new();
+        generate_record_sql_span(&mut body, "final_sql.as_str()");
+        assert!(body.contains("format_sql_for_trace(final_sql.as_str())"));
     }
 
     #[test]

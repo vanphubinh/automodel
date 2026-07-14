@@ -70,14 +70,14 @@ pub async fn insert_user(
         created_at";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&name);
     let query = query.bind(&email);
     let query = query.bind(age);
     let query =
-        query.bind(serde_json::to_value(&profile).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
+        query.bind(serde_json::to_value(profile).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(InsertUserItem {
@@ -152,7 +152,7 @@ pub async fn insert_users_batch(
       )";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let (name, email, age): (Vec<_>, Vec<_>, Vec<_>) = items
@@ -203,7 +203,7 @@ pub async fn get_all_users(
         created_at DESC";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let rows = query.fetch_all(executor).await?;
@@ -353,11 +353,11 @@ pub async fn update_user_profile(
         updated_at";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query =
-        query.bind(serde_json::to_value(&profile).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
+        query.bind(serde_json::to_value(profile).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
     let query = query.bind(user_id);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
@@ -459,7 +459,7 @@ pub async fn find_users_by_name_and_age(
     let _ = param_counter; // Suppress unused assignment warning
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+        tracing::field::display(automodel::format_sql_for_trace(final_sql.as_str())),
     );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
@@ -530,7 +530,7 @@ pub async fn get_recent_users(
         created_at DESC";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(since);
@@ -599,7 +599,7 @@ pub async fn get_active_users_by_age_range(
         AND updated_at > NOW() - INTERVAL '30 days'";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(min_age);
@@ -663,7 +663,7 @@ pub async fn search_users_by_name_pattern(
         name";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&pattern);
@@ -788,7 +788,7 @@ pub async fn search_users_advanced(
     let _ = param_counter; // Suppress unused assignment warning
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+        tracing::field::display(automodel::format_sql_for_trace(final_sql.as_str())),
     );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
@@ -856,7 +856,7 @@ pub async fn get_users_by_status(
         name";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(user_status);
@@ -936,7 +936,7 @@ pub async fn update_user_status(
         status";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(new_status);
@@ -1064,7 +1064,7 @@ pub async fn update_user_fields(
     let _ = param_counter; // Suppress unused assignment warning
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+        tracing::field::display(automodel::format_sql_for_trace(final_sql.as_str())),
     );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
@@ -1214,7 +1214,7 @@ pub async fn update_user_fields_diff(
     let _ = param_counter; // Suppress unused assignment warning
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+        tracing::field::display(automodel::format_sql_for_trace(final_sql.as_str())),
     );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
@@ -1316,7 +1316,7 @@ pub async fn insert_user_structured(
         created_at";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&params.name);
@@ -1356,7 +1356,7 @@ pub async fn get_all_user_statuses(
         status";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let rows = query.fetch_all(executor).await?;
@@ -1405,7 +1405,7 @@ pub async fn get_all_users_with_star(
         created_at DESC";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let rows = query.fetch_all(executor).await?;
@@ -1476,7 +1476,7 @@ pub async fn get_user_by_id_with_star(
         id = $1";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(user_id);
@@ -1549,7 +1549,7 @@ pub async fn get_user_by_id_and_email(
         AND email = $2";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(params.id);
@@ -1588,7 +1588,7 @@ pub async fn update_user_returning_applied(
         true AS applied";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&name);
@@ -1659,7 +1659,7 @@ pub async fn delete_user_by_id_and_email(
         email";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(params.id);
@@ -1693,7 +1693,7 @@ pub async fn get_user_is_recent(
         id = $1";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(id);
@@ -1764,7 +1764,7 @@ pub async fn update_user_contact_info(
         email";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&params.name);
@@ -1891,13 +1891,13 @@ pub async fn update_user_profile_diff(
     let _ = param_counter; // Suppress unused assignment warning
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+        tracing::field::display(automodel::format_sql_for_trace(final_sql.as_str())),
     );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
     let profile_json =
-        serde_json::to_value(&profile).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
+        serde_json::to_value(profile).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
     query = query.bind(profile_json);
     query = query.bind(&user_id);
     if included_params.contains(&r"name") {
@@ -2029,13 +2029,13 @@ pub async fn update_user_metadata_diff(
     let _ = param_counter; // Suppress unused assignment warning
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&final_sql)),
+        tracing::field::display(automodel::format_sql_for_trace(final_sql.as_str())),
     );
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
     let profile_json =
-        serde_json::to_value(&profile).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
+        serde_json::to_value(profile).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
     query = query.bind(profile_json);
     query = query.bind(&user_id);
     if included_params.contains(&r"name") {
@@ -2086,7 +2086,7 @@ pub async fn get_user_summary(
         id = $1";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(user_id);
@@ -2122,7 +2122,7 @@ pub async fn get_user_info_by_email(
         email = $1";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&email);
@@ -2164,7 +2164,7 @@ pub async fn get_all_user_summaries(
         name";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let rows = query.fetch_all(executor).await?;
@@ -2213,7 +2213,7 @@ pub async fn get_user_details(
         id = $1";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(user_id);
@@ -2254,7 +2254,7 @@ pub async fn search_user_details(
         name ILIKE $1";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&pattern);
@@ -2297,7 +2297,7 @@ pub async fn find_user_by_criteria(
         AND email = $2";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(params.id);
@@ -2348,7 +2348,7 @@ pub async fn get_user_simple(
         id = $1";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(user_id);
@@ -2404,7 +2404,7 @@ pub async fn test_custom_derives(
         id = $1";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(params.user_id);
@@ -2444,7 +2444,7 @@ pub async fn get_user_id_only(
         email = $1";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&email);
@@ -2476,7 +2476,7 @@ pub async fn get_user_id_raw(
         email = $1";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&email);
@@ -2550,11 +2550,11 @@ pub async fn update_user_social_links(
         social_links;";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query
-        .bind(serde_json::to_value(&social_links).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
+        .bind(serde_json::to_value(social_links).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
     let query = query.bind(user_id);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
@@ -2606,7 +2606,7 @@ pub async fn get_user_social_links(
         id = $1;";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(user_id);
@@ -2693,13 +2693,13 @@ pub async fn insert_user_with_social_links(
         social_links;";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&name);
     let query = query.bind(&email);
     let query = query
-        .bind(serde_json::to_value(&social_links).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
+        .bind(serde_json::to_value(social_links).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
         Ok(InsertUserWithSocialLinksItem {
@@ -2785,7 +2785,7 @@ pub async fn test_explicit_native_multiunzip(
     RETURNING id, name, age;";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let (names, age): (Vec<_>, Vec<_>) = items
@@ -2868,7 +2868,7 @@ pub async fn test_explicit_native_without_multiunzip(
     RETURNING id, name, age;";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(names);
@@ -2912,7 +2912,7 @@ pub async fn test_nested_row(
         u.id = $1;";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(user_id);
@@ -2998,7 +2998,7 @@ pub async fn test_optional_multiunzip(
     RETURNING id, name, email, age, created_at";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let (name, email, age): (Vec<_>, Vec<_>, Vec<_>) = items
@@ -3092,7 +3092,7 @@ pub async fn test_optional_without_multiunzip(
     RETURNING id, name, email, age, created_at";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(name);

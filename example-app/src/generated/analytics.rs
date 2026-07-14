@@ -67,7 +67,7 @@ pub async fn get_user_activity_summary(
         ru.rank";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let rows = query.fetch_all(executor).await?;
@@ -180,7 +180,7 @@ pub async fn get_hierarchical_user_data(
         uh.name";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let rows = query.fetch_all(executor).await?;
@@ -276,7 +276,7 @@ pub async fn get_user_activity_with_posts(
         u.name";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(since);
@@ -417,7 +417,7 @@ pub async fn get_user_engagement_metrics(
         $2";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(min_engagement_score);
@@ -506,7 +506,7 @@ pub async fn get_time_series_user_registrations(
         period_start DESC";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(start_date);
@@ -592,7 +592,7 @@ pub async fn get_users_with_timezone_info(
         created_at DESC";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let query = query.bind(&user_timezone);
@@ -651,7 +651,7 @@ pub async fn get_user_count_and_avg_age(
         public.users";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let row = query.fetch_one(executor).await?;
@@ -680,7 +680,7 @@ pub async fn get_non_null_count_expression(
         public.users";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let row = query.fetch_one(executor).await?;
@@ -716,7 +716,7 @@ pub async fn get_non_null_multi_fields(
         public.users";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let row = query.fetch_one(executor).await?;
@@ -759,7 +759,7 @@ pub async fn get_non_null_multi_rows(
         public.users";
     tracing::Span::current().record(
         "sql",
-        tracing::field::display(&automodel::format_sql_for_trace(&sql)),
+        tracing::field::display(automodel::format_sql_for_trace(sql)),
     );
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let rows = query.fetch_all(executor).await?;
