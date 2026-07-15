@@ -603,8 +603,8 @@ fn generate_static_function_body(
                     } else {
                         // For custom types, serialize to JSON before binding
                         body.push_str(&format!(
-                            "    let query = query.bind(serde_json::to_value(&params.{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);\n", 
-                            clean_name
+                            "    let query = query.bind({}.map_err(|e| sqlx::Error::Encode(Box::new(e)))?);\n",
+                            json_to_value_expr(&format!("params.{clean_name}"), param_type)
                         ));
                     }
                 } else if param_type == "String" {
@@ -694,6 +694,30 @@ fn bind_arg(accessor: &str, rust_type: &str) -> String {
     } else {
         accessor.to_string()
     }
+}
+
+/// Expression passed to `serde_json::to_value(...)`.
+///
+/// Borrow non-Copy types (e.g. `Vec<_>`, `String`) so we don't move out of
+/// `&params`. Pass Copy-like types by value to avoid clippy
+/// `needless_borrows_for_generic_args` (e.g. `&params.party_type` for an enum).
+fn json_to_value_expr(accessor: &str, rust_type: &str) -> String {
+    if rust_type_needs_ref_for_to_value(rust_type) {
+        format!("serde_json::to_value(&{accessor})")
+    } else {
+        format!("serde_json::to_value({accessor})")
+    }
+}
+
+fn rust_type_needs_ref_for_to_value(rust_type: &str) -> bool {
+    rust_type == "String"
+        || rust_type.starts_with("Vec<")
+        || rust_type.starts_with("Option<String>")
+        || rust_type.starts_with("Option<Vec<")
+        || rust_type.starts_with("HashMap<")
+        || rust_type.starts_with("BTreeMap<")
+        || rust_type.starts_with("std::collections::")
+        || rust_type.contains("serde_json::Value")
 }
 
 /// Generate function body for conditional (dynamic) SQL queries
@@ -868,9 +892,20 @@ fn generate_conditional_function_body(
                             }
                         } else {
                             if use_structured_params {
-                                body.push_str(&format!("    let {}_json = serde_json::to_value(&params.{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
+                                body.push_str(&format!(
+                                    "    let {}_json = {}.map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n",
+                                    clean_param,
+                                    json_to_value_expr(
+                                        &format!("params.{clean_param}"),
+                                        rust_type_info.rust_type(),
+                                    )
+                                ));
                             } else {
-                                body.push_str(&format!("    let {}_json = serde_json::to_value({}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
+                                body.push_str(&format!(
+                                    "    let {}_json = {}.map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n",
+                                    clean_param,
+                                    json_to_value_expr(&clean_param, rust_type_info.rust_type())
+                                ));
                             }
                         }
                         body.push_str(&format!("    query = query.bind({}_json);\n", clean_param));
@@ -934,7 +969,14 @@ fn generate_conditional_function_body(
                         } else {
                             if use_conditional_diff {
                                 // For conditions_type, use new.field directly
-                                body.push_str(&format!("        let {}_json = serde_json::to_value(&new.{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
+                                body.push_str(&format!(
+                                    "        let {}_json = {}.map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n",
+                                    clean_param,
+                                    json_to_value_expr(
+                                        &format!("new.{clean_param}"),
+                                        rust_type_info.rust_type(),
+                                    )
+                                ));
                             } else if use_structured_params {
                                 // For parameters_type, unwrap from params struct
                                 body.push_str(&format!("        let {}_json = serde_json::to_value(params.{}.as_ref().unwrap()).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
@@ -1511,6 +1553,22 @@ mod tests {
         assert_eq!(bind_arg("params.include_archived", "bool"), "params.include_archived");
         assert_eq!(bind_arg("new.age", "i32"), "new.age");
         assert_eq!(bind_arg("name", "String"), "&name");
+    }
+
+    #[test]
+    fn json_to_value_expr_borrows_non_copy_only() {
+        assert_eq!(
+            json_to_value_expr("params.social_links", "Vec<crate::models::UserSocialLink>"),
+            "serde_json::to_value(&params.social_links)"
+        );
+        assert_eq!(
+            json_to_value_expr("params.party_type", "crate::domain::party::PartyType"),
+            "serde_json::to_value(params.party_type)"
+        );
+        assert_eq!(
+            json_to_value_expr("new.social_links", "Vec<crate::models::UserSocialLink>"),
+            "serde_json::to_value(&new.social_links)"
+        );
     }
 
     #[test]
