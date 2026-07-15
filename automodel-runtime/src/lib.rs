@@ -3,12 +3,29 @@
 //! Generated bounded-context crates depend on this crate instead of inlining
 //! identical error definitions into every `persistence/mod.rs`.
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ErrorConstraintInfo {
-    /// Name of the violated constraint
+    /// Name of the violated constraint, or empty if the driver did not report one.
     pub constraint_name: String,
+    /// Table associated with the constraint, or empty if the driver did not report one.
     pub table_name: String,
     pub kind: ErrorConstraintKind,
+}
+
+impl std::fmt::Display for ErrorConstraintInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let constraint = if self.constraint_name.is_empty() {
+            "<unknown>"
+        } else {
+            self.constraint_name.as_str()
+        };
+        let table = if self.table_name.is_empty() {
+            "<unknown>"
+        } else {
+            self.table_name.as_str()
+        };
+        write!(f, "{constraint} on table {table} ({})", self.kind)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +66,31 @@ pub enum Error<C: TryFrom<ErrorConstraintInfo>> {
     PoolTimeout,
 
     InternalError(String, sqlx::Error),
+}
+
+impl<C: TryFrom<ErrorConstraintInfo>> Error<C> {
+    pub fn is_row_not_found(&self) -> bool {
+        matches!(self, Self::RowNotFound)
+    }
+
+    pub fn is_pool_timeout(&self) -> bool {
+        matches!(self, Self::PoolTimeout)
+    }
+
+    /// Typed constraint variant when the violation was recognized for this query.
+    pub fn constraint(&self) -> Option<&C> {
+        match self {
+            Self::ConstraintViolation(Some(c), _) => Some(c),
+            _ => None,
+        }
+    }
+
+    pub fn constraint_info(&self) -> Option<&ErrorConstraintInfo> {
+        match self {
+            Self::ConstraintViolation(_, info) => Some(info),
+            _ => None,
+        }
+    }
 }
 
 impl<C: TryFrom<ErrorConstraintInfo>> From<sqlx::Error> for Error<C> {
@@ -124,13 +166,11 @@ where
         match self {
             Error::ConstraintViolation(constraint, info) => {
                 if let Some(c) = constraint {
-                    write!(f, "Constraint violation: {c:?}")
+                    // Prefer Display when generated constraint enums implement it;
+                    // Debug still works for older generated code.
+                    write!(f, "Constraint violation: {c:?} ({info})")
                 } else {
-                    write!(
-                        f,
-                        "Unknown constraint violation: {} on table {}",
-                        info.constraint_name, info.table_name
-                    )
+                    write!(f, "Unknown constraint violation: {info}")
                 }
             }
             Error::RowNotFound => write!(f, "Row not found"),
@@ -161,8 +201,21 @@ pub enum ErrorReadOnly {
     RowNotFound,
     /// System under stress, timeout
     PoolTimeout,
+    /// A constraint violation was reported in a read-only query context.
+    /// This should not occur for pure SELECT queries; retained for conversion safety.
+    UnexpectedConstraintViolation(ErrorConstraintInfo),
 
     InternalError(String, sqlx::Error),
+}
+
+impl ErrorReadOnly {
+    pub fn is_row_not_found(&self) -> bool {
+        matches!(self, Self::RowNotFound)
+    }
+
+    pub fn is_pool_timeout(&self) -> bool {
+        matches!(self, Self::PoolTimeout)
+    }
 }
 
 impl From<sqlx::Error> for ErrorReadOnly {
@@ -176,6 +229,9 @@ impl From<ErrorReadOnly> for Error<ErrorConstraintInfo> {
         match value {
             ErrorReadOnly::RowNotFound => Self::RowNotFound,
             ErrorReadOnly::PoolTimeout => Self::PoolTimeout,
+            ErrorReadOnly::UnexpectedConstraintViolation(info) => {
+                Self::ConstraintViolation(info.clone().try_into().ok(), info)
+            }
             ErrorReadOnly::InternalError(msg, err) => Self::InternalError(msg, err),
         }
     }
@@ -187,13 +243,7 @@ impl From<Error<ErrorConstraintInfo>> for ErrorReadOnly {
             Error::RowNotFound => Self::RowNotFound,
             Error::PoolTimeout => Self::PoolTimeout,
             Error::InternalError(msg, err) => Self::InternalError(msg, err),
-            Error::ConstraintViolation(c, info) => Self::InternalError(
-                "Constraint violation in read-only query".to_string(),
-                sqlx::Error::Protocol(format!(
-                    "Constraint violation in read-only query: constraint={}, table={}, parsed={c:?}",
-                    info.constraint_name, info.table_name
-                )),
-            ),
+            Error::ConstraintViolation(_, info) => Self::UnexpectedConstraintViolation(info),
         }
     }
 }
@@ -203,6 +253,9 @@ impl std::fmt::Display for ErrorReadOnly {
         match self {
             ErrorReadOnly::RowNotFound => write!(f, "Row not found"),
             ErrorReadOnly::PoolTimeout => write!(f, "Pool timeout"),
+            ErrorReadOnly::UnexpectedConstraintViolation(info) => {
+                write!(f, "Unexpected constraint violation in read-only query: {info}")
+            }
             ErrorReadOnly::InternalError(msg, err) => {
                 write!(f, "Internal error: {msg}, caused by: {err}")
             }
@@ -215,6 +268,68 @@ impl std::error::Error for ErrorReadOnly {
         match self {
             Self::InternalError(_, err) => Some(err),
             _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for ErrorConstraintKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UniqueViolation => write!(f, "unique violation"),
+            Self::ForeignKeyViolation => write!(f, "foreign key violation"),
+            Self::NotNullViolation => write!(f, "not null violation"),
+            Self::CheckViolation => write!(f, "check violation"),
+            Self::Other => write!(f, "other constraint violation"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn constraint_info_display_handles_missing_names() {
+        let info = ErrorConstraintInfo {
+            constraint_name: String::new(),
+            table_name: String::new(),
+            kind: ErrorConstraintKind::UniqueViolation,
+        };
+        assert_eq!(
+            info.to_string(),
+            "<unknown> on table <unknown> (unique violation)"
+        );
+    }
+
+    #[test]
+    fn error_helpers_and_display() {
+        let info = ErrorConstraintInfo {
+            constraint_name: "users_email_key".into(),
+            table_name: "users".into(),
+            kind: ErrorConstraintKind::UniqueViolation,
+        };
+        let err = Error::<ErrorConstraintInfo>::ConstraintViolation(Some(info.clone()), info);
+        assert!(!err.is_pool_timeout());
+        assert!(!err.is_row_not_found());
+        assert!(err.constraint().is_some());
+        assert!(err.to_string().contains("users_email_key"));
+        assert!(err.to_string().contains("unique violation"));
+    }
+
+    #[test]
+    fn read_only_preserves_unexpected_constraint() {
+        let info = ErrorConstraintInfo {
+            constraint_name: "users_pkey".into(),
+            table_name: "users".into(),
+            kind: ErrorConstraintKind::UniqueViolation,
+        };
+        let err: ErrorReadOnly =
+            Error::<ErrorConstraintInfo>::ConstraintViolation(None, info.clone()).into();
+        match err {
+            ErrorReadOnly::UnexpectedConstraintViolation(got) => {
+                assert_eq!(got, info);
+            }
+            other => panic!("unexpected variant: {other:?}"),
         }
     }
 }

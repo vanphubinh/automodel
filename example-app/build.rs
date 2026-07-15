@@ -3,7 +3,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=automodel.yml");
     let config = automodel::AutoModelConfig::from_file("automodel.yml")?;
 
-    automodel::AutoModel::generate(
+    Ok(automodel::AutoModel::generate(
         || {
             if std::env::var("CI").is_err() {
                 std::env::var("AUTOMODEL_DATABASE_URL").map_err(|_| {
@@ -22,5 +22,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.defaults(),
         false,
     )
-    .await
+    .await?)
 }

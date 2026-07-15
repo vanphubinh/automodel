@@ -262,7 +262,7 @@ impl AutoModel {
     /// use automodel::AutoModel;
     ///
     /// #[tokio::main]
-    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// async fn main() -> anyhow::Result<()> {
     ///     AutoModel::generate(|| {
     ///         if std::env::var("CI").is_err() {
     ///             std::env::var("AUTOMODEL_DATABASE_URL").map_err(|_| {
@@ -283,9 +283,9 @@ impl AutoModel {
         output_dir: &str,
         defaults: crate::DefaultsConfig,
         force: bool,
-    ) -> Result<(), Box<dyn std::error::Error>>
+    ) -> Result<()>
     where
-        F: FnOnce() -> Result<String, String>,
+        F: FnOnce() -> std::result::Result<String, String>,
     {
         use sha2::{Digest, Sha256};
         use std::fs;
@@ -374,7 +374,7 @@ impl AutoModel {
 
         let database_url = database_url_cb().map_err(|e| {
             println!("cargo:error={}", e);
-            std::io::Error::new(std::io::ErrorKind::NotConnected, e)
+            anyhow::anyhow!(e)
         })?;
 
         let automodel = AutoModel::new(queries_dir, defaults).await?;
@@ -527,22 +527,38 @@ impl AutoModel {
         datetime_crate: DateTimeCrate,
         global_types: &HashMap<String, String>,
     ) -> Result<rust_type::TypeSystem> {
+        use anyhow::Context;
+
         let mut type_system = rust_type::TypeSystem::new(datetime_crate);
 
         for query in analyzed_queries {
+            let query_name = &query.definition.name;
             let statement = &query.type_info.statement;
             for param_type in statement.params() {
-                let _ = type_system.insert(param_type);
+                type_system.insert(param_type).with_context(|| {
+                    format!(
+                        "Unsupported parameter type in query '{query_name}': {}.{}",
+                        param_type.schema(),
+                        param_type.name()
+                    )
+                })?;
             }
             for column in statement.columns() {
-                let _ = type_system.insert(column.type_());
+                let col_type = column.type_();
+                type_system.insert(col_type).with_context(|| {
+                    format!(
+                        "Unsupported column type '{}' in query '{query_name}': {}.{}",
+                        column.name(),
+                        col_type.schema(),
+                        col_type.name()
+                    )
+                })?;
             }
         }
 
-        type_system
-            .resolve_nullability(client)
-            .await
-            .unwrap_or_else(|e| eprintln!("Warning: failed to resolve field nullability: {}", e));
+        type_system.resolve_nullability(client).await.map_err(|e| {
+            anyhow::anyhow!("Failed to resolve field nullability from PostgreSQL catalogs: {e}")
+        })?;
 
         // Apply custom type mappings from automodel.yml `types:` and query-level `types:`.
         //

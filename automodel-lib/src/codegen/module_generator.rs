@@ -115,7 +115,24 @@ pub fn generate_query_constraint_enum(
     code.push_str("            _ => Err(()),\n");
     code.push_str("        }\n");
     code.push_str("    }\n");
-    code.push_str("}\n");
+    code.push_str("}\n\n");
+
+    // Display prints the Postgres constraint name for readable Error messages.
+    code.push_str(&format!("impl std::fmt::Display for {} {{\n", enum_name));
+    code.push_str("    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {\n");
+    code.push_str("        match self {\n");
+    for constraint in &unique_constraints {
+        let variant_name = to_pascal_case(&constraint.name);
+        code.push_str(&format!(
+            "            Self::{} => write!(f, \"{}\"),\n",
+            variant_name, constraint.name
+        ));
+    }
+    code.push_str("        }\n");
+    code.push_str("    }\n");
+    code.push_str("}\n\n");
+
+    code.push_str(&format!("impl std::error::Error for {} {{}}\n", enum_name));
 
     code
 }
@@ -1714,5 +1731,18 @@ mod tests {
         let raw = generate_embedded_raw_string("SELECT 1");
         assert!(raw.starts_with("r\""));
         assert!(raw.ends_with('"'));
+    }
+
+    #[test]
+    fn generate_query_constraint_enum_includes_display_and_error() {
+        let constraints = vec![crate::types_extractor::ConstraintInfo {
+            name: "users_email_key".to_string(),
+            table_name: "users".to_string(),
+            constraint_type: "u".to_string(),
+        }];
+        let code = generate_query_constraint_enum("InsertUserConstraints", &constraints, &[]);
+        assert!(code.contains("impl std::fmt::Display for InsertUserConstraints"));
+        assert!(code.contains("Self::UsersEmailKey => write!(f, \"users_email_key\")"));
+        assert!(code.contains("impl std::error::Error for InsertUserConstraints"));
     }
 }

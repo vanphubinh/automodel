@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use automodel::*;
 use clap::{Arg, ArgMatches, Command};
 
@@ -81,7 +81,7 @@ async fn generate_command(matches: &ArgMatches) -> Result<()> {
         force,
     )
     .await
-    .map_err(|e| anyhow::anyhow!("Code generation failed: {}", e))?;
+    .context("Code generation failed")?;
 
     println!("✓ Code generation complete!");
 

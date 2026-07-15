@@ -6,6 +6,7 @@ use tokio_postgres::types::Type as PgType;
 use crate::datetime_crate::DateTimeCrate;
 use crate::utils::{schema_to_module_name, to_pascal_case, to_snake_case};
 
+#[derive(Debug)]
 pub struct UnsupportedTypeError {
     pub schema: String,
     pub name: String,
@@ -20,6 +21,8 @@ impl std::fmt::Display for UnsupportedTypeError {
         )
     }
 }
+
+impl std::error::Error for UnsupportedTypeError {}
 pub trait RustName {
     fn rust_name(&self, datetime_crate: DateTimeCrate) -> Result<String, UnsupportedTypeError>;
 }
@@ -206,7 +209,7 @@ impl TypeSystem {
     pub async fn resolve_nullability(
         &mut self,
         client: &tokio_postgres::Client,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         // Collect OIDs for all struct types
         let struct_oids: Vec<u32> = self
             .types

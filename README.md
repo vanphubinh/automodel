@@ -48,7 +48,7 @@ tokio = { version = "1.0", features = ["rt"] }
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=automodel.yml");
     let config = automodel::AutoModelConfig::from_file("automodel.yml")?;
-    automodel::AutoModel::generate(
+    Ok(automodel::AutoModel::generate(
         || {
             if std::env::var("CI").is_err() {
                 std::env::var("AUTOMODEL_DATABASE_URL").map_err(|_| {
@@ -67,7 +67,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.defaults(),
         false,
     )
-    .await
+    .await?)
 }
 ```
 
@@ -228,7 +228,7 @@ types:
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-changed=automodel.yml");
     let config = automodel::AutoModelConfig::from_file("automodel.yml")?;
-    automodel::AutoModel::generate(
+    Ok(automodel::AutoModel::generate(
         || {
             if std::env::var("CI").is_err() {
                 std::env::var("AUTOMODEL_DATABASE_URL").map_err(|_| {
@@ -247,7 +247,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.defaults(),
         false,
     )
-    .await
+    .await?)
 }
 ```
 
@@ -1912,20 +1912,17 @@ AutoModel generates two types of error enums:
 
 ### ErrorReadOnly - For Read-Only Queries
 
-All SELECT queries return `ErrorReadOnly`, a simple error enum without constraint violation variants:
+All SELECT queries return `ErrorReadOnly`, a simple error enum without expected constraint violation variants:
 
-**Generated Code:**
+**From `automodel-runtime`:**
 ```rust
 #[derive(Debug)]
 pub enum ErrorReadOnly {
-    Database(sqlx::Error),
     RowNotFound,
-}
-
-impl From<sqlx::Error> for ErrorReadOnly {
-    fn from(err: sqlx::Error) -> Self {
-        ErrorReadOnly::Database(err)
-    }
+    PoolTimeout,
+    /// Should not occur for pure SELECT queries; retained for conversion safety.
+    UnexpectedConstraintViolation(ErrorConstraintInfo),
+    InternalError(String, sqlx::Error),
 }
 ```
 
@@ -2001,6 +1998,18 @@ impl TryFrom<ErrorConstraintInfo> for InsertUserConstraints {
         }
     }
 }
+
+impl std::fmt::Display for InsertUserConstraints {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UsersPkey => write!(f, "users_pkey"),
+            Self::UsersEmailKey => write!(f, "users_email_key"),
+            // ...
+        }
+    }
+}
+
+impl std::error::Error for InsertUserConstraints {}
 ```
 
 The generic `Error<C>` type handles constraint violations gracefully:
