@@ -67,10 +67,6 @@ pub struct DefaultsConfig {
     /// - Time: uses the time crate
     #[serde(default)]
     pub datetime_crate: DateTimeCrate,
-    /// Crate path used in generated code for shared persistence error types.
-    /// Defaults to `automodel_runtime`.
-    #[serde(default = "default_runtime_crate")]
-    pub runtime_crate: String,
     /// Global schema-level type mappings (domain aliases and composite fields).
     /// Prefer these over repeating the same mappings in every SQL file.
     ///
@@ -91,14 +87,9 @@ impl Default for DefaultsConfig {
             derives: DefaultsDerivesConfig::default(),
             multiunzip_crate: MultiunzipCrate::default(),
             datetime_crate: DateTimeCrate::default(),
-            runtime_crate: default_runtime_crate(),
             types: HashMap::new(),
         }
     }
-}
-
-fn default_runtime_crate() -> String {
-    "automodel_runtime".to_string()
 }
 
 /// Default configuration for telemetry and analysis
@@ -128,10 +119,6 @@ pub struct DefaultsDerivesConfig {
     /// Defaults to empty vec (Debug is always added)
     #[serde(default)]
     pub conditions_type: Vec<String>,
-    /// Derive traits for error constraint enums
-    /// Defaults to empty vec (Debug is always added)
-    #[serde(default)]
-    pub error_type: Vec<String>,
 }
 
 /// Top-level configuration file structure for AutoModel
@@ -153,11 +140,8 @@ pub struct DefaultsDerivesConfig {
 ///   return_type: [Clone]
 ///   parameters_type: [Clone]
 ///   conditions_type: [Clone]
-///   error_type: [Clone]
 ///
 /// multiunzip_crate: itertools
-///
-/// runtime_crate: automodel_runtime
 ///
 /// types:
 ///   public.positive_int: "std::num::NonZeroI32"
@@ -186,9 +170,6 @@ pub struct AutoModelConfig {
     /// Crate to use for PostgreSQL date/time type mappings in generated code
     #[serde(default)]
     pub datetime_crate: DateTimeCrate,
-    /// Crate path used in generated code for shared persistence error types
-    #[serde(default = "default_runtime_crate")]
-    pub runtime_crate: String,
     /// Global schema-level type mappings shared across all queries.
     /// See [`DefaultsConfig::types`] for supported key formats.
     #[serde(default)]
@@ -220,7 +201,6 @@ impl AutoModelConfig {
             derives: self.derives.clone(),
             multiunzip_crate: self.multiunzip_crate.clone(),
             datetime_crate: self.datetime_crate,
-            runtime_crate: self.runtime_crate.clone(),
             types: self.types.clone(),
         }
     }
@@ -500,8 +480,7 @@ impl AutoModel {
 
         // Create the main mod.rs file
         let mod_file = output_path.join("mod.rs");
-        let mut mod_content =
-            generate_root_module(&modules, source_hash, &self.defaults.runtime_crate);
+        let mut mod_content = generate_root_module(&modules, source_hash);
         mod_content.push_str("pub mod types;\n");
         fs::write(&mod_file, &mod_content)?;
 
@@ -731,7 +710,6 @@ impl AutoModel {
                     query.clone(),
                     type_info,
                     analysis_result.is_mutation,
-                    analysis_result.constraints,
                     analysis_result.performance_analysis,
                     analysis_result.explain_params,
                 );
@@ -770,37 +748,9 @@ impl AutoModel {
         });
 
         if is_obvious_mutation {
-            // This is clearly a mutation - extract constraints
-            // Use first variant (base query) for constraint extraction
-            let (converted_sql, _param_names, _label) = &query.sql_variants[0];
-            let constraints = match crate::types_extractor::prepare_analysis_statement(
-                client,
-                converted_sql,
-            )
-            .await
-            {
-                Ok(statement) => {
-                    match extract_constraints_from_statement(client, &statement, &query.sql).await {
-                        Ok(constraints) => constraints,
-                        Err(_e) => {
-                            // Silently skip constraint extraction errors
-                            Vec::new()
-                        }
-                    }
-                }
-                Err(e) => {
-                    println!(
-                        "cargo:info=Failed to prepare statement for constraint extraction for query '{}': {}",
-                        query.name, e
-                    );
-                    Vec::new()
-                }
-            };
-
             return Ok(QueryAnalysisResult {
                 is_mutation: true,
                 performance_analysis: None,
-                constraints,
                 explain_params: Vec::new(),
             });
         }
@@ -854,7 +804,6 @@ impl AutoModel {
                 Ok(QueryAnalysisResult {
                     is_mutation: false,
                     performance_analysis: performance,
-                    constraints: Vec::new(),
                     explain_params,
                 })
             }
@@ -864,7 +813,6 @@ impl AutoModel {
                 Ok(QueryAnalysisResult {
                     is_mutation: true,
                     performance_analysis: None,
-                    constraints: Vec::new(),
                     explain_params,
                 })
             }

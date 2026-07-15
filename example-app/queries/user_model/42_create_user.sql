@@ -2,7 +2,6 @@
 --    description: Insert a new user and return as UserModel
 --    expect: exactly_one
 --    return_type: UserModel
---    error_type: UserContentConstraints
 -- @end
 
 INSERT INTO public.users (name, email, age) 

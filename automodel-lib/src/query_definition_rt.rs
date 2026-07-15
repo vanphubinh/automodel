@@ -1,7 +1,7 @@
 /// Structures for holding complete query analysis results from Phase 1
 /// This separates query analysis (DB interaction) from code generation
 use crate::query_definition::QueryDefinition;
-use crate::types_extractor::{ConstraintInfo, QueryTypeInfo};
+use crate::types_extractor::QueryTypeInfo;
 
 /// Pre-computed EXPLAIN query parameters for a single query variant
 #[derive(Debug, Clone)]
@@ -14,7 +14,7 @@ pub struct ExplainParams {
 }
 
 /// Result of analyzing a query with EXPLAIN
-/// Contains mutation detection, performance analysis, constraints, and pre-computed EXPLAIN params
+/// Contains mutation detection, performance analysis, and pre-computed EXPLAIN params
 #[derive(Debug, Clone)]
 pub struct QueryAnalysisResult {
     /// Whether this query is a mutation (INSERT/UPDATE/DELETE)
@@ -22,9 +22,6 @@ pub struct QueryAnalysisResult {
 
     /// Performance analysis results (only for queries with ensure_indexes enabled)
     pub performance_analysis: Option<PerformanceAnalysis>,
-
-    /// Constraint information for mutation queries
-    pub constraints: Vec<ConstraintInfo>,
 
     /// Pre-computed EXPLAIN query parameters for each variant
     /// None if variant has no parameters
@@ -45,10 +42,6 @@ pub struct QueryDefinitionRuntime {
     /// Whether this query is a mutation (INSERT/UPDATE/DELETE)
     /// Determined by running EXPLAIN - if EXPLAIN fails, assume mutation
     pub is_mutation: bool,
-
-    /// Constraint information for mutation queries
-    /// Empty for read-only queries
-    pub constraints: Vec<ConstraintInfo>,
 
     /// Query execution plan analysis results (for ensure_indexes feature)
     pub performance_analysis: Option<PerformanceAnalysis>,
@@ -84,7 +77,6 @@ impl QueryDefinitionRuntime {
         definition: QueryDefinition,
         type_info: QueryTypeInfo,
         is_mutation: bool,
-        constraints: Vec<ConstraintInfo>,
         performance_analysis: Option<PerformanceAnalysis>,
         explain_params: Vec<Option<ExplainParams>>,
     ) -> Self {
@@ -92,7 +84,6 @@ impl QueryDefinitionRuntime {
             definition,
             type_info,
             is_mutation,
-            constraints,
             performance_analysis,
             explain_params,
         }

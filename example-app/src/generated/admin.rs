@@ -10,7 +10,7 @@ use sqlx::Row;
 #[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_current_time(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
-) -> Result<Option<jiff_sqlx::Timestamp>, super::ErrorReadOnly> {
+) -> Result<Option<jiff_sqlx::Timestamp>, sqlx::Error> {
     let sql = r"
     SELECT
         NOW() as current_time";
@@ -30,7 +30,7 @@ pub async fn get_current_time(
 #[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_version(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
-) -> Result<Option<String>, super::ErrorReadOnly> {
+) -> Result<Option<String>, sqlx::Error> {
     let sql = r"
     SELECT
         version() as pg_version";
@@ -41,30 +41,7 @@ pub async fn get_version(
     let query = sqlx::query(sqlx::AssertSqlSafe(sql));
     let row = query.fetch_one(executor).await?;
     Ok(row.try_get::<Option<String>, _>("pg_version")?)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum InsertAllTypesTestConstraints {
-    /// Constraint: all_types_test_pkey on table all_types_test
-    AllTypesTestPkey,
-    /// Constraint: all_types_test_id_not_null on table all_types_test
-    AllTypesTestIdNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for InsertAllTypesTestConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "all_types_test_pkey" => Ok(Self::AllTypesTestPkey),
-            "all_types_test_id_not_null" => Ok(Self::AllTypesTestIdNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-/// Insert a row with all PostgreSQL types
+}/// Insert a row with all PostgreSQL types
 #[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn insert_all_types_test(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
@@ -108,7 +85,7 @@ pub async fn insert_all_types_test(
     float8_array_col: Vec<f64>,
     int4_range_array_col: Vec<sqlx::postgres::types::PgRange<i32>>,
     date_range_array_col: Vec<sqlx::postgres::types::PgRange<time::Date>>,
-) -> Result<i32, super::Error<InsertAllTypesTestConstraints>> {
+) -> Result<i32, sqlx::Error> {
     let sql = r"
     INSERT INTO
         public.all_types_test (
@@ -236,7 +213,7 @@ pub struct GetAllTypesTestItem {
 pub async fn get_all_types_test(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     id: i32,
-) -> Result<GetAllTypesTestItem, super::ErrorReadOnly> {
+) -> Result<GetAllTypesTestItem, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -358,5 +335,5 @@ pub async fn get_all_types_test(
             created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
         })
     })();
-    result.map_err(Into::into)
+    result
 }

@@ -10,13 +10,13 @@ Database access in Rust typically falls into two camps: **ORMs** (Diesel, SeaORM
 queries/users/get_user.sql  →  src/generated/users.rs  (checked into git)
 ```
 
-1. **Human or AI can read everything.** Generated structs, function signatures, error enums, and type aliases — all corresponding to the actual database schema, including constraints exposed as structured Rust enums — are ordinary `.rs` files sitting in your repo. An LLM can inspect them, reason about types, and produce correct calling code on the first try — no PostgreSQL agent, no database connection, no special tooling required.
+1. **Human or AI can read everything.** Generated structs, function signatures, and type aliases — all corresponding to the actual database schema — are ordinary `.rs` files sitting in your repo. An LLM can inspect them, reason about types, and produce correct calling code on the first try — no PostgreSQL agent, no database connection, no special tooling required.
 2. **Plain SQL stays plain SQL.** Your queries are `.sql` files with full syntax highlighting. There is no query builder to learn, no expression DSL. Any valid PostgreSQL query works — window functions, CTEs, recursive queries, lateral joins, subqueries, aggregations, `UNNEST` batch inserts, partitioned tables, domain types, composite types, conditional clauses — all features of SQL, with no restrictions.
 3. **Build-time code generation, not compile-time magic.** `build.rs` connects to the database once, extracts types from prepared statements, and writes `.rs` files — the whole step takes seconds, not the minutes of a full application compile. After that, builds are fully offline. CI can verify that generated code is up-to-date without a live database.
 4. **Diff-friendly and reviewable.** Because the generated code is committed, pull request reviewers (human or AI) see exactly what changed — a renamed field, a new column, a constraint added. Nothing is hidden inside macro expansion.
 5. **Built-in query analytics.** During code generation, AutoModel runs `EXPLAIN` on every query. Every generated function includes the query plan in its doc comments, and a warnings file is committed to the repo flagging sequential scans (missing indexes) and multi-partition access on partitioned tables. Warnings are surfaced during build time and visible at review time — reviewers (human or AI) catch performance problems before they reach production. Analysis can be opted out per query.
 6. **Feature-rich control over generated code.** Struct reuse and deduplication across queries. Diff-based conditional updates for the load → transform → save pattern. Custom struct naming for cleaner, domain-specific APIs. Automated `multiunzip` support combined with `UNNEST` for batch inserts. Strongly typed mappings for `json`/`jsonb` columns. Full support for composite types and whole-record column insertion and selection — and much more.
-7. **Less code to write, review, and test.** The glue between SQL and Rust — structs, parameter binding, error enums, type conversions — is an entire class of code that no human needs to write, review, or maintain. It is machine-generated from your SQL and the database schema. Reviewers focus on the `.sql` file and the business logic that calls it. This directly translates to faster development cycles: adding a new query is a single `.sql` file, and you have a strongly typed Rust function to call on the next build.
+7. **Less code to write, review, and test.** The glue between SQL and Rust — structs, parameter binding, type conversions — is an entire class of code that no human needs to write, review, or maintain. It is machine-generated from your SQL and the database schema. Reviewers focus on the `.sql` file and the business logic that calls it. This directly translates to faster development cycles: adding a new query is a single `.sql` file, and you have a strongly typed Rust function to call on the next build.
 
 The result: a workflow where SQL is the source of truth, types are real files, every tool in the ecosystem — IDE, AI, CI, code review — can see the full picture, and development moves faster because an entire layer of boilerplate is eliminated.
 
@@ -34,10 +34,10 @@ This is a Cargo workspace with three main components:
 
 ```toml
 [dependencies]
-automodel = "0.9"
+automodel = "0.12"
 
 [build-dependencies]  
-automodel = "0.9"
+automodel = "0.12"
 tokio = { version = "1.0", features = ["rt"] }
 ```
 
@@ -87,7 +87,6 @@ derives:
   return_type: [Clone]
   parameters_type: [Clone]
   conditions_type: [Clone]
-  error_type: [Clone]
 
 multiunzip_crate: itertools
 ```
@@ -214,7 +213,6 @@ derives:
   return_type: [Clone]
   parameters_type: [Clone]
   conditions_type: [Clone]
-  error_type: [Clone]
 
 multiunzip_crate: itertools
 
@@ -300,7 +298,6 @@ If no metadata is provided, sensible defaults are used.
 --    conditions_type: false    # Use old/new struct for conditional queries
 --    parameters_type: false    # Group all parameters into one struct
 --    return_type: "UserInfo"   # Custom return type name
---    error_type: "UserError"   # Custom error type name
 --    conditions_type_derives:  # Additional derives for conditions struct
 --      - serde::Serialize
 --    parameters_type_derives:  # Additional derives for parameters struct
@@ -308,8 +305,6 @@ If no metadata is provided, sensible defaults are used.
 --    return_type_derives:      # Additional derives for return struct
 --      - serde::Serialize
 --      - PartialEq
---    error_type_derives:       # Additional derives for error enum
---      - serde::Serialize
 -- @end
 
 SELECT id, name FROM users WHERE id = #{id}
@@ -321,19 +316,19 @@ Controls how the query is executed and what it returns:
 
 ```sql
 -- @automodel
---    expect: exactly_one    # fetch_one() -> Result<T, Error> - Fails if 0 or >1 rows
+--    expect: exactly_one    # fetch_one() -> Result<T, sqlx::Error> - Fails if 0 or >1 rows
 -- @end
 
 -- @automodel
---    expect: possible_one   # fetch_optional() -> Result<Option<T>, Error> - 0 or 1 row
+--    expect: possible_one   # fetch_optional() -> Result<Option<T>, sqlx::Error> - 0 or 1 row
 -- @end
 
 -- @automodel
---    expect: at_least_one   # fetch_all() -> Result<Vec<T>, Error> - Fails if 0 rows
+--    expect: at_least_one   # fetch_all() -> Result<Vec<T>, sqlx::Error> - Fails if 0 rows
 -- @end
 
 -- @automodel
---    expect: multiple       # fetch_all() -> Result<Vec<T>, Error> - 0 or more rows (default for collections)
+--    expect: multiple       # fetch_all() -> Result<Vec<T>, sqlx::Error> - 0 or more rows (default for collections)
 -- @end
 ```
 
@@ -456,8 +451,6 @@ Generated (with override):
 ```rust
 pub type PositiveInt = std::num::NonZeroI32;
 ```
-
-Domain CHECK constraints are also included in error type enums for mutation queries (e.g., `PositiveIntCheck`, `EmailAddressCheck`).
 
 **Where to put type mappings:**
 
@@ -777,7 +770,7 @@ pub async fn find_users_complex(
     name_pattern: String,        // Required parameter
     min_age: Option<i32>,        // Optional parameter
     since: Option<chrono::DateTime<chrono::Utc>>  // Optional parameter
-) -> Result<Vec<FindUsersComplexItem>, super::ErrorReadOnly>
+) -> Result<Vec<FindUsersComplexItem>, sqlx::Error>
 ```
 
 ### Best Practices
@@ -834,7 +827,7 @@ update_user_fields(executor, user_id, Some("Janet".to_string()), Some("janet@exa
 
 ## Struct Configuration and Reuse
 
-AutoModel provides four powerful configuration options that allow you to customize how structs and error types are generated and reused across queries: `parameters_type`, `conditions_type`, `return_type`, and `error_type`. These options enable you to eliminate code duplication, improve type safety, and create cleaner APIs.
+AutoModel provides three powerful configuration options that allow you to customize how structs are generated and reused across queries: `parameters_type`, `conditions_type`, and `return_type`. These options enable you to eliminate code duplication, improve type safety, and create cleaner APIs.
 
 ### Overview
 
@@ -843,9 +836,8 @@ AutoModel provides four powerful configuration options that allow you to customi
 | `parameters_type` | Group query parameters into a struct | `false` | `true` or struct name | `{QueryName}Params` struct |
 | `conditions_type` | Diff-based conditional parameters | `false` | `true` or struct name | `{QueryName}Params` struct with old/new comparison |
 | `return_type` | Custom name for return type struct | auto | struct name or omit | Custom named or `{QueryName}Item` struct |
-| `error_type` | Custom name for error constraint enum (mutations only) | auto | error type name or omit | Custom named or `{QueryName}Constraints` enum |
 
-Any structure or error type generated can be referenced by other queries. AutoModel validates at build time that the types are compatible and constraints match exactly.
+Any structure generated can be referenced by other queries. AutoModel validates at build time that the types are compatible and fields match exactly.
 
 ### parameters_type: Structured Parameters
 
@@ -877,7 +869,7 @@ pub struct InsertUserStructuredParams {
 pub async fn insert_user_structured(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     params: &InsertUserStructuredParams
-) -> Result<i32, super::Error<InsertUserStructuredConstraints>>
+) -> Result<i32, sqlx::Error>
 ```
 
 **Usage:**
@@ -947,7 +939,7 @@ pub async fn update_user_fields_diff(
     old: &UpdateUserFieldsDiffParams,
     new: &UpdateUserFieldsDiffParams,
     user_id: i32
-) -> Result<(), super::Error<UpdateUserFieldsDiffConstraints>>
+) -> Result<(), sqlx::Error>
 ```
 
 **Usage:**
@@ -1052,7 +1044,7 @@ pub struct UserSummary {
 pub async fn get_user_summary(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     user_id: i32
-) -> Result<UserSummary, super::ErrorReadOnly>
+) -> Result<UserSummary, sqlx::Error>
 ```
 
 **Struct Reuse:**
@@ -1142,7 +1134,6 @@ let defaults = automodel::DefaultsConfig {
         return_type: vec!["Clone".to_string()],
         parameters_type: vec!["Clone".to_string()],
         conditions_type: vec!["Clone".to_string()],
-        error_type: vec!["Clone".to_string()],
     },
 };
 ```
@@ -1181,7 +1172,6 @@ Note: `Clone` comes from global defaults, `serde` traits and `PartialEq`/`Eq` fr
 - `conditions_type_derives` - For conditions struct (used with `conditions_type`)
 - `parameters_type_derives` - For parameters struct (used with `parameters_type`)  
 - `return_type_derives` - For return type struct
-- `error_type_derives` - For constraint error enum
 
 **Trait Merging:**
 - Global defaults are applied first
@@ -1298,10 +1288,10 @@ pub struct PartialUpdateUserParams {
     pub email: String,
 }
 
-pub async fn get_user_summary(...) -> Result<UserSummary, super::ErrorReadOnly>
-pub async fn search_users(...) -> Result<Vec<UserSummary>, super::ErrorReadOnly>
-pub async fn update_user_contact(..., params: &UserSummary) -> Result<(), super::Error<UpdateUserContactConstraints>>
-pub async fn partial_update_user(..., old: &PartialUpdateUserParams, new: &PartialUpdateUserParams, ...) -> Result<(), super::Error<PartialUpdateUserConstraints>>
+pub async fn get_user_summary(...) -> Result<UserSummary, sqlx::Error>
+pub async fn search_users(...) -> Result<Vec<UserSummary>, sqlx::Error>
+pub async fn update_user_contact(..., params: &UserSummary) -> Result<(), sqlx::Error>
+pub async fn partial_update_user(..., old: &PartialUpdateUserParams, new: &PartialUpdateUserParams, ...) -> Result<(), sqlx::Error>
 ```
 
 ### Notes
@@ -1420,7 +1410,7 @@ pub async fn insert_users(
     names: Vec<String>,
     emails: Vec<String>,
     ages: Vec<Option<i32>>  // Elements can be NULL
-) -> Result<Vec<InsertUsersItem>, super::Error<InsertUsersConstraints>>
+) -> Result<Vec<InsertUsersItem>, sqlx::Error>
 ```
 
 **With multiunzip:**
@@ -1461,7 +1451,7 @@ Generated function signature:
 pub async fn insert_users_batch(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     items: Vec<InsertUsersBatchRecord>  // Single parameter instead of multiple arrays
-) -> Result<Vec<InsertUsersBatchItem>, super::Error<InsertUsersBatchConstraints>>
+) -> Result<Vec<InsertUsersBatchItem>, sqlx::Error>
 ```
 
 Internal implementation:
@@ -1683,7 +1673,7 @@ pub struct UserWithLinksInput {
 pub async fn insert_users_bulk_composite(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     items: Vec<UserWithLinksInput>,
-) -> Result<Vec<InsertUsersBulkCompositeItem>, super::Error<InsertUsersBulkCompositeConstraints>>
+) -> Result<Vec<InsertUsersBulkCompositeItem>, sqlx::Error>
 ```
 
 **Step 3: Use in Rust code:**
@@ -1899,220 +1889,30 @@ cargo check -p automodel-lib
 cargo check -p automodel-cli
 ```
 
-## Error Handling and Custom Error Types
+## Error Handling
 
-AutoModel provides sophisticated error handling with automatic constraint extraction and type-safe error types. Different types of queries return different error types based on whether they can violate database constraints.
+All generated query functions return `Result<T, sqlx::Error>`. Database errors — including constraint violations, not-null failures, unique key conflicts, and foreign key errors — surface as `sqlx::Error::Database(_)`.
 
-### Error Type Overview
+Map or log these errors at the application boundary. To inspect which constraint failed, use `DatabaseError::constraint()` on the underlying database error:
 
-AutoModel generates two types of error enums:
-
-1. **`ErrorReadOnly`** - For SELECT queries that cannot violate constraints
-2. **`Error<C>`** - For mutation queries (INSERT, UPDATE, DELETE) with constraint tracking
-
-### ErrorReadOnly - For Read-Only Queries
-
-All SELECT queries return `ErrorReadOnly`, a simple error enum without expected constraint violation variants:
-
-**From `automodel-runtime`:**
 ```rust
-#[derive(Debug)]
-pub enum ErrorReadOnly {
-    RowNotFound,
-    PoolTimeout,
-    /// Should not occur for pure SELECT queries; retained for conversion safety.
-    UnexpectedConstraintViolation(ErrorConstraintInfo),
-    InternalError(String, sqlx::Error),
-}
-```
-
-**Example Usage:**
-
-`queries/users/get_user_by_id.sql`:
-```sql
--- @automodel
---    expect: exactly_one
--- @end
-
-SELECT id, name, email FROM users WHERE id = #{user_id}
-```
-
-**Generated function:**
-```rust
-pub async fn get_user_by_id(
-    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
-    user_id: i32
-) -> Result<GetUserByIdItem, super::ErrorReadOnly>  // Returns ErrorReadOnly
-```
-
-### Error<C> - For Mutation Queries
-
-Mutation queries (INSERT, UPDATE, DELETE) return `Error<C>` where `C` is a query-specific constraint enum. This provides type-safe handling of constraint violations.
-
-### Automatic Constraint Extraction
-
-AutoModel automatically extracts all constraints from your PostgreSQL database for each table referenced in mutation queries. This happens at build time by querying the PostgreSQL system catalogs.
-
-**Extracted Constraint Information:**
-- **Unique constraints** - Including primary keys and unique indexes
-- **Foreign key constraints** - With referenced table and column information
-- **Check constraints** - With constraint expression
-- **NOT NULL constraints** - For columns that cannot be null
-- **Domain check constraints** - CHECK constraints from domain types used by table columns
-
-**Example:**
-For a users table with:
-```sql
-CREATE TABLE users (
-    id SERIAL PRIMARY KEY,
-    email TEXT UNIQUE NOT NULL,
-    age INT CHECK (age >= 0),
-    organization_id INT REFERENCES organizations(id)
-);
-```
-
-AutoModel generates:
-```rust
-#[derive(Debug)]
-pub enum InsertUserConstraints {
-    UsersPkey,                    // PRIMARY KEY constraint
-    UsersEmailKey,                // UNIQUE constraint on email
-    UsersAgeCheck,                // CHECK constraint on age
-    UsersOrganizationIdFkey,      // FOREIGN KEY to organizations
-    UsersIdNotNull,               // NOT NULL constraint on id
-    UsersEmailNotNull,            // NOT NULL constraint on email
-}
-
-impl TryFrom<ErrorConstraintInfo> for InsertUserConstraints {
-    type Error = ();
-    
-    fn try_from(info: ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_pkey" => Ok(InsertUserConstraints::UsersPkey),
-            "users_email_key" => Ok(InsertUserConstraints::UsersEmailKey),
-            "users_age_check" => Ok(InsertUserConstraints::UsersAgeCheck),
-            "users_organization_id_fkey" => Ok(InsertUserConstraints::UsersOrganizationIdFkey),
-            "users_id_not_null" => Ok(InsertUserConstraints::UsersIdNotNull),
-            "users_email_not_null" => Ok(InsertUserConstraints::UsersEmailNotNull),
-            _ => Err(()),  // Unknown constraints return error instead of panicking
-        }
+if let sqlx::Error::Database(db_err) = &err {
+    if let Some(constraint) = db_err.constraint() {
+        // e.g. "users_email_key"
     }
 }
-
-impl std::fmt::Display for InsertUserConstraints {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UsersPkey => write!(f, "users_pkey"),
-            Self::UsersEmailKey => write!(f, "users_email_key"),
-            // ...
-        }
-    }
-}
-
-impl std::error::Error for InsertUserConstraints {}
 ```
 
-The generic `Error<C>` type handles constraint violations gracefully:
+**Example generated signature:**
+
 ```rust
-pub enum Error<C: TryFrom<ErrorConstraintInfo>> {
-    /// Contains Some(C) when constraint is recognized, None for unknown constraints
-    /// The ErrorConstraintInfo always contains the raw constraint details from PostgreSQL
-    ConstraintViolation(Option<C>, ErrorConstraintInfo),
-    RowNotFound,
-    PoolTimeout,
-    InternalError(String, sqlx::Error),
-}
-```
-
-### Custom Error Type Names with `error_type`
-
-By default, AutoModel generates error type names based on the query name (e.g., `InsertUserConstraints`). You can customize this using the `error_type` configuration option.
-
-**Basic Usage:**
-
-`queries/users/insert_user.sql`:
-```sql
--- @automodel
---    error_type: "UserError"  # Custom name instead of InsertUserConstraints
--- @end
-
-INSERT INTO users (email, name, age) 
-VALUES (#{email}, #{name}, #{age}) 
-RETURNING id
-```
-
-**Generated Code:**
-```rust
-#[derive(Debug)]
-pub enum UserError {
-    UsersPkey,
-    UsersEmailKey,
-    UsersAgeCheck,
-    // ... other constraints
-}
-
-impl TryFrom<ErrorConstraintInfo> for UserError {
-    type Error = ();
-    fn try_from(info: ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        // ... conversion logic
-    }
-}
-
 pub async fn insert_user(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     email: String,
     name: String,
     age: i32
-) -> Result<i32, super::Error<UserError>>  // Uses custom UserError
+) -> Result<i32, sqlx::Error>
 ```
-
-### Error Type Reuse
-
-Multiple queries that operate on the same table(s) can reuse the same error type. AutoModel validates at build time that the constraints match exactly.
-
-**Example:**
-
-`queries/users/insert_user.sql`:
-```sql
--- @automodel
---    error_type: "UserError"  # First query generates the error type
--- @end
-
-INSERT INTO users (email, name, age) 
-VALUES (#{email}, #{name}, #{age}) 
-RETURNING id
-```
-
-`queries/users/update_user_email.sql`:
-```sql
--- @automodel
---    error_type: "UserError"  # Reuses UserError - constraints must match
--- @end
-
-UPDATE users SET email = #{email} 
-WHERE id = #{user_id} 
-RETURNING id
-```
-
-`queries/users/upsert_user.sql`:
-```sql
--- @automodel
---    error_type: "UserError"  # Reuses UserError
--- @end
-
-INSERT INTO users (email, name, age) 
-VALUES (#{email}, #{name}, #{age})
-ON CONFLICT (email) 
-DO UPDATE SET name = EXCLUDED.name, age = EXCLUDED.age
-RETURNING id
-```
-
-**Build-Time Validation:**
-
-AutoModel ensures that when you reuse an error type:
-1. The referenced error type exists (defined by a previous query)
-2. The constraints extracted for the current query exactly match the constraints in the reused type
-3. Both queries reference the same table(s)
 
 ## Supported PostgreSQL Types
 

@@ -3,42 +3,6 @@
 
 use sqlx::Row;
 
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum UserContentConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for UserContentConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct UserModel {
     pub id: i32,
@@ -54,7 +18,7 @@ pub async fn create_user(
     name: String,
     email: String,
     age: Option<i32>,
-) -> Result<UserModel, super::Error<UserContentConstraints>> {
+) -> Result<UserModel, sqlx::Error> {
     let sql = r"
     INSERT INTO
         public.users (name, email, age)
@@ -82,15 +46,13 @@ pub async fn create_user(
             age: row.try_get::<Option<i32>, _>("age")?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Full update of user - reuses UserModel for both parameters and return type
+    result
+}/// Full update of user - reuses UserModel for both parameters and return type
 #[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn update_user_full(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     params: &UserModel,
-) -> Result<UserModel, super::Error<UserContentConstraints>> {
+) -> Result<UserModel, sqlx::Error> {
     let sql = r"
     UPDATE
         public.users
@@ -123,17 +85,15 @@ pub async fn update_user_full(
             age: row.try_get::<Option<i32>, _>("age")?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Partial update using diff-based comparison - auto-generates params struct for old/new comparison
+    result
+}/// Partial update using diff-based comparison - auto-generates params struct for old/new comparison
 #[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn update_user_partial(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     old: &UserModel,
     new: &UserModel,
     id: i32,
-) -> Result<UserModel, super::Error<UserContentConstraints>> {
+) -> Result<UserModel, sqlx::Error> {
     let mut final_sql = r"
     UPDATE
         public.users
@@ -197,7 +157,7 @@ pub async fn update_user_partial(
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
-    query = query.bind(&id);
+    query = query.bind(id);
     if included_params.contains(&r"name") {
         query = query.bind(&new.name);
     }
@@ -207,7 +167,7 @@ pub async fn update_user_partial(
     }
 
     if included_params.contains(&r"age") {
-        query = query.bind(&new.age);
+        query = query.bind(new.age);
     }
 
     let row = query.fetch_one(executor).await?;
@@ -219,7 +179,7 @@ pub async fn update_user_partial(
             age: row.try_get::<Option<i32>, _>("age")?,
         })
     })();
-    result.map_err(Into::into)
+    result
 }
 
 /// Select user by email - returns UserModel
@@ -231,7 +191,7 @@ pub async fn update_user_partial(
 pub async fn find_user_by_email(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     email: String,
-) -> Result<Option<UserModel>, super::ErrorReadOnly> {
+) -> Result<Option<UserModel>, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -259,20 +219,18 @@ pub async fn find_user_by_email(
                     age: row.try_get::<Option<i32>, _>("age")?,
                 })
             })();
-            result.map(Some).map_err(Into::into)
+            result.map(Some)
         }
         None => Ok(None),
     }
-}
-
-/// Update user with optional-nullable age - demonstrates ?? suffix for Option<Option<T>>
+}/// Update user with optional-nullable age - demonstrates ?? suffix for Option<Option<T>>
 #[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn update_user_nullable(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     name: Option<String>,
     age: Option<Option<i32>>,
     id: i32,
-) -> Result<UserModel, super::Error<UserContentConstraints>> {
+) -> Result<UserModel, sqlx::Error> {
     let mut final_sql = r"
     UPDATE
         public.users
@@ -324,7 +282,7 @@ pub async fn update_user_nullable(
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
-    query = query.bind(&id);
+    query = query.bind(id);
     if included_params.contains(&r"name") {
         query = query.bind(name.as_ref().unwrap());
     }
@@ -342,5 +300,5 @@ pub async fn update_user_nullable(
             age: row.try_get::<Option<i32>, _>("age")?,
         })
     })();
-    result.map_err(Into::into)
+    result
 }

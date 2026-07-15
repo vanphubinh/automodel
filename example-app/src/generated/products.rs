@@ -3,42 +3,6 @@
 
 use sqlx::Row;
 
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum InsertProductConstraints {
-    /// Constraint: products_pkey on table products
-    ProductsPkey,
-    /// Constraint: products_id_not_null on table products
-    ProductsIdNotNull,
-    /// Constraint: products_name_not_null on table products
-    ProductsNameNotNull,
-    /// Constraint: products_price_not_null on table products
-    ProductsPriceNotNull,
-    /// Constraint: products_contact_email_not_null on table products
-    ProductsContactEmailNotNull,
-    /// Constraint: email_address_check on table products
-    EmailAddressCheck,
-    /// Constraint: positive_int_check on table products
-    PositiveIntCheck,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for InsertProductConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "products_pkey" => Ok(Self::ProductsPkey),
-            "products_id_not_null" => Ok(Self::ProductsIdNotNull),
-            "products_name_not_null" => Ok(Self::ProductsNameNotNull),
-            "products_price_not_null" => Ok(Self::ProductsPriceNotNull),
-            "products_contact_email_not_null" => Ok(Self::ProductsContactEmailNotNull),
-            "email_address_check" => Ok(Self::EmailAddressCheck),
-            "positive_int_check" => Ok(Self::PositiveIntCheck),
-            _ => Err(()),
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct InsertProductItem {
     pub id: i32,
@@ -54,7 +18,7 @@ pub async fn insert_product(
     name: String,
     price: super::types::public::PositiveInt,
     contact_email: super::types::public::EmailAddress,
-) -> Result<InsertProductItem, super::Error<InsertProductConstraints>> {
+) -> Result<InsertProductItem, sqlx::Error> {
     let sql = r"
     INSERT INTO
         public.products (name, price, contact_email)
@@ -82,7 +46,7 @@ pub async fn insert_product(
             contact_email: row.try_get::<super::types::public::EmailAddress, _>("contact_email")?,
         })
     })();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -101,7 +65,7 @@ pub struct GetAllProductsItem {
 #[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_all_products(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
-) -> Result<GetAllProductsItem, super::ErrorReadOnly> {
+) -> Result<GetAllProductsItem, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -124,5 +88,5 @@ pub async fn get_all_products(
             contact_email: row.try_get::<super::types::public::EmailAddress, _>("contact_email")?,
         })
     })();
-    result.map_err(Into::into)
+    result
 }

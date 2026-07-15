@@ -11,7 +11,7 @@ use crate::types_extractor::{parse_parameter_names_from_sql, QueryTypeInfo};
 use crate::utils::{to_pascal_case, to_snake_case};
 use anyhow::Result;
 
-pub fn generate_root_module(modules: &Vec<String>, source_hash: u64, runtime_crate: &str) -> String {
+pub fn generate_root_module(modules: &Vec<String>, source_hash: u64) -> String {
     let mut mod_content = String::new();
 
     // Add hash comment at the top for consistency with build-time generation
@@ -34,107 +34,7 @@ pub fn generate_root_module(modules: &Vec<String>, source_hash: u64, runtime_cra
         mod_content.push('\n');
     }
 
-    mod_content.push_str(&generate_runtime_error_reexports(runtime_crate));
-
     mod_content
-}
-
-/// Re-export shared persistence error types from the runtime crate.
-pub fn generate_runtime_error_reexports(runtime_crate: &str) -> String {
-    format!(
-        "pub use {runtime_crate}::{{Error, ErrorConstraintInfo, ErrorReadOnly}};\n"
-    )
-}
-
-/// Generate per-query constraint enum with TryFrom<ErrorConstraintInfo> implementation
-pub fn generate_query_constraint_enum(
-    enum_name: &str,
-    constraints: &[crate::types_extractor::ConstraintInfo],
-    custom_derives: &[String],
-) -> String {
-    use std::collections::HashSet;
-
-    let mut code = String::new();
-
-    // Deduplicate constraints by name
-    let mut seen_constraints: HashSet<String> = HashSet::new();
-    let mut unique_constraints = Vec::new();
-    for constraint in constraints {
-        if !seen_constraints.contains(&constraint.name) {
-            seen_constraints.insert(constraint.name.clone());
-            unique_constraints.push(constraint);
-        }
-    }
-
-    code.push_str(&format!(
-        "/// Constraint violations specific to this query\n"
-    ));
-
-    // Build derive attribute with Debug as default plus custom derives
-    let mut all_derives = vec!["Debug".to_string()];
-    all_derives.extend(custom_derives.iter().cloned());
-
-    // Remove duplicates while preserving order
-    let mut seen = HashSet::new();
-    all_derives.retain(|d| seen.insert(d.clone()));
-
-    code.push_str(&format!("#[derive({})]\n", all_derives.join(", ")));
-    code.push_str(&format!("pub enum {} {{\n", enum_name));
-
-    // Generate a variant for each unique constraint
-    for constraint in &unique_constraints {
-        let variant_name = to_pascal_case(&constraint.name);
-        code.push_str(&format!(
-            "    /// Constraint: {} on table {}\n",
-            constraint.name, constraint.table_name
-        ));
-        code.push_str(&format!("    {},\n", variant_name));
-    }
-
-    code.push_str("}\n\n");
-
-    // Generate TryFrom<ErrorConstraintInfo> implementation
-    code.push_str(&format!(
-        "impl TryFrom<super::ErrorConstraintInfo> for {} {{\n",
-        enum_name
-    ));
-    code.push_str("    type Error = ();\n\n");
-    code.push_str(
-        "    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {\n",
-    );
-    code.push_str("        match info.constraint_name.as_str() {\n");
-
-    for constraint in &unique_constraints {
-        let variant_name = to_pascal_case(&constraint.name);
-        code.push_str(&format!(
-            "            \"{}\" => Ok(Self::{}),\n",
-            constraint.name, variant_name
-        ));
-    }
-
-    code.push_str("            _ => Err(()),\n");
-    code.push_str("        }\n");
-    code.push_str("    }\n");
-    code.push_str("}\n\n");
-
-    // Display prints the Postgres constraint name for readable Error messages.
-    code.push_str(&format!("impl std::fmt::Display for {} {{\n", enum_name));
-    code.push_str("    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {\n");
-    code.push_str("        match self {\n");
-    for constraint in &unique_constraints {
-        let variant_name = to_pascal_case(&constraint.name);
-        code.push_str(&format!(
-            "            Self::{} => write!(f, \"{}\"),\n",
-            variant_name, constraint.name
-        ));
-    }
-    code.push_str("        }\n");
-    code.push_str("    }\n");
-    code.push_str("}\n\n");
-
-    code.push_str(&format!("impl std::error::Error for {} {{}}\n", enum_name));
-
-    code
 }
 
 /// Remove statistics from EXPLAIN plan lines to make output stable
@@ -289,36 +189,10 @@ pub fn generate_function_code_without_enums(
     query: &QueryDefinition,
     type_info: &QueryTypeInfo,
     emitted_struct_names: &mut std::collections::HashSet<String>,
-    constraints: &[crate::types_extractor::ConstraintInfo],
     performance_analysis: &Option<crate::query_definition_rt::PerformanceAnalysis>,
     defaults: &crate::DefaultsConfig,
 ) -> Result<String> {
     let mut code = String::new();
-
-    // Generate per-query constraint enum if there are constraints
-    let constraint_enum_name = if !constraints.is_empty() {
-        // Determine the enum name from error_type config or use default
-        let enum_name = if let Some(ref custom_name) = query.error_type {
-            custom_name.to_string()
-        } else {
-            format!("{}Constraints", to_pascal_case(&query.name))
-        };
-
-        // Only generate the enum if it hasn't been emitted yet
-        if !emitted_struct_names.contains(&enum_name) {
-            code.push_str(&generate_query_constraint_enum(
-                &enum_name,
-                constraints,
-                &query.error_type_derives,
-            ));
-            code.push('\n');
-            emitted_struct_names.insert(enum_name.clone());
-        }
-
-        Some(enum_name)
-    } else {
-        None
-    };
 
     // Extract clean parameter names directly from the SQL for function signature
     let original_param_names = parse_parameter_names_from_sql(&query.sql);
@@ -499,37 +373,17 @@ pub fn generate_function_code_without_enums(
     };
 
     let return_type = if type_info.output_types.is_empty() {
-        let error_type = if let Some(ref enum_name) = constraint_enum_name {
-            format!("super::Error<{enum_name}>")
-        } else {
-            "super::ErrorReadOnly".to_string()
-        };
-        format!("Result<(), {error_type}>")
+        "Result<(), sqlx::Error>".to_string()
     } else {
         match query.expect {
             ExpectedResult::ExactlyOne => {
-                let error_type = if let Some(ref enum_name) = constraint_enum_name {
-                    format!("super::Error<{enum_name}>")
-                } else {
-                    "super::ErrorReadOnly".to_string()
-                };
-                format!("Result<{base_return_type}, {error_type}>")
+                format!("Result<{base_return_type}, sqlx::Error>")
             }
             ExpectedResult::PossibleOne => {
-                let error_type = if let Some(ref enum_name) = constraint_enum_name {
-                    format!("super::Error<{enum_name}>")
-                } else {
-                    "super::ErrorReadOnly".to_string()
-                };
-                format!("Result<Option<{base_return_type}>, {error_type}>")
+                format!("Result<Option<{base_return_type}>, sqlx::Error>")
             }
             ExpectedResult::AtLeastOne | ExpectedResult::Multiple => {
-                let error_type = if let Some(ref enum_name) = constraint_enum_name {
-                    format!("super::Error<{enum_name}>")
-                } else {
-                    "super::ErrorReadOnly".to_string()
-                };
-                format!("Result<Vec<{base_return_type}>, {error_type}>")
+                format!("Result<Vec<{base_return_type}>, sqlx::Error>")
             }
         }
     };
@@ -749,7 +603,7 @@ fn generate_static_function_body(
                     } else {
                         // For custom types, serialize to JSON before binding
                         body.push_str(&format!(
-                            "    let query = query.bind(serde_json::to_value(params.{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);\n", 
+                            "    let query = query.bind(serde_json::to_value(&params.{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?);\n", 
                             clean_name
                         ));
                     }
@@ -1014,7 +868,7 @@ fn generate_conditional_function_body(
                             }
                         } else {
                             if use_structured_params {
-                                body.push_str(&format!("    let {}_json = serde_json::to_value(params.{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
+                                body.push_str(&format!("    let {}_json = serde_json::to_value(&params.{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
                             } else {
                                 body.push_str(&format!("    let {}_json = serde_json::to_value({}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
                             }
@@ -1080,7 +934,7 @@ fn generate_conditional_function_body(
                         } else {
                             if use_conditional_diff {
                                 // For conditions_type, use new.field directly
-                                body.push_str(&format!("        let {}_json = serde_json::to_value(new.{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
+                                body.push_str(&format!("        let {}_json = serde_json::to_value(&new.{}).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
                             } else if use_structured_params {
                                 // For parameters_type, unwrap from params struct
                                 body.push_str(&format!("        let {}_json = serde_json::to_value(params.{}.as_ref().unwrap()).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;\n", clean_param, clean_param));
@@ -1130,9 +984,6 @@ fn generate_query_execution(
     type_info: &QueryTypeInfo,
     return_type: &str,
 ) {
-    // Always use .map_err(Into::into) since both Error<C> and ErrorReadOnly have From<sqlx::Error>
-    let map_err_suffix = ".map_err(Into::into)";
-
     if type_info.output_types.is_empty() {
         // For queries that don't return data (INSERT, UPDATE, DELETE)
         body.push_str("    query.execute(executor).await?;\n");
@@ -1164,7 +1015,7 @@ fn generate_query_execution(
             ExpectedResult::AtLeastOne => {
                 body.push_str("    let rows = query.fetch_all(executor).await?;\n");
                 body.push_str("    if rows.is_empty() {\n");
-                body.push_str("        return Err(sqlx::Error::RowNotFound.into());\n");
+                body.push_str("        return Err(sqlx::Error::RowNotFound);\n");
                 body.push_str("    }\n");
                 body.push_str(
                     "    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {\n",
@@ -1173,7 +1024,7 @@ fn generate_query_execution(
                     generate_sqlx_value_extraction(&type_info.output_types[0], 0);
                 body.push_str(&format!("        Ok({})\n", value_extraction));
                 body.push_str("    }).collect();\n");
-                body.push_str(&format!("    result{}\n", map_err_suffix));
+                body.push_str("    result\n");
             }
             ExpectedResult::Multiple => {
                 body.push_str("    let rows = query.fetch_all(executor).await?;\n");
@@ -1184,7 +1035,7 @@ fn generate_query_execution(
                     generate_sqlx_value_extraction(&type_info.output_types[0], 0);
                 body.push_str(&format!("        Ok({})\n", value_extraction));
                 body.push_str("    }).collect();\n");
-                body.push_str(&format!("    result{}\n", map_err_suffix));
+                body.push_str("    result\n");
             }
         }
     } else {
@@ -1197,7 +1048,7 @@ fn generate_query_execution(
                     generate_sqlx_struct_creation(return_type, &type_info.output_types);
                 body.push_str(&format!("        Ok({})\n", struct_creation));
                 body.push_str("    })();\n");
-                body.push_str(&format!("    result{}\n", map_err_suffix));
+                body.push_str("    result\n");
             }
             ExpectedResult::PossibleOne => {
                 body.push_str("    let row = query.fetch_optional(executor).await?;\n");
@@ -1208,7 +1059,7 @@ fn generate_query_execution(
                     generate_sqlx_struct_creation(return_type, &type_info.output_types);
                 body.push_str(&format!("                Ok({})\n", struct_creation));
                 body.push_str("            })();\n");
-                body.push_str(&format!("            result.map(Some){}\n", map_err_suffix));
+                body.push_str("            result.map(Some)\n");
                 body.push_str("        },\n");
                 body.push_str("        None => Ok(None),\n");
                 body.push_str("    }\n");
@@ -1216,7 +1067,7 @@ fn generate_query_execution(
             ExpectedResult::AtLeastOne => {
                 body.push_str("    let rows = query.fetch_all(executor).await?;\n");
                 body.push_str("    if rows.is_empty() {\n");
-                body.push_str("        return Err(sqlx::Error::RowNotFound.into());\n");
+                body.push_str("        return Err(sqlx::Error::RowNotFound);\n");
                 body.push_str("    }\n");
                 body.push_str(
                     "    let result: Result<Vec<_>, sqlx::Error> = rows.iter().map(|row| {\n",
@@ -1225,7 +1076,7 @@ fn generate_query_execution(
                     generate_sqlx_struct_creation(return_type, &type_info.output_types);
                 body.push_str(&format!("        Ok({})\n", struct_creation));
                 body.push_str("    }).collect();\n");
-                body.push_str(&format!("    result{}\n", map_err_suffix));
+                body.push_str("    result\n");
             }
             ExpectedResult::Multiple => {
                 body.push_str("    let rows = query.fetch_all(executor).await?;\n");
@@ -1236,7 +1087,7 @@ fn generate_query_execution(
                     generate_sqlx_struct_creation(return_type, &type_info.output_types);
                 body.push_str(&format!("        Ok({})\n", struct_creation));
                 body.push_str("    }).collect();\n");
-                body.push_str(&format!("    result{}\n", map_err_suffix));
+                body.push_str("    result\n");
             }
         }
     }
@@ -1632,47 +1483,6 @@ pub fn generate_code_for_module(
         }
     }
 
-    // Track constraint enums
-    let mut generated_constraint_enums: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
-
-    for analyzed in &module_queries {
-        let query = &analyzed.definition;
-        let constraints = &analyzed.constraints;
-
-        if let Some(ref enum_name) = query.error_type {
-            let expected_constraints: Vec<String> =
-                constraints.iter().map(|c| c.name.clone()).collect();
-
-            if let Some(existing_constraints) = generated_constraint_enums.get(enum_name) {
-                if existing_constraints.len() != expected_constraints.len() {
-                    anyhow::bail!(
-                        "Query '{}' error_type '{}' constraint count mismatch",
-                        query.name,
-                        enum_name
-                    );
-                }
-                for expected_constraint in &expected_constraints {
-                    if !existing_constraints.contains(expected_constraint) {
-                        anyhow::bail!(
-                            "Query '{}' error_type '{}' missing constraint '{}'",
-                            query.name,
-                            enum_name,
-                            expected_constraint
-                        );
-                    }
-                }
-            } else {
-                generated_constraint_enums.insert(enum_name.to_string(), expected_constraints);
-            }
-        } else if !constraints.is_empty() {
-            let enum_name = format!("{}Constraints", to_pascal_case(&query.name));
-            let expected_constraints: Vec<String> =
-                constraints.iter().map(|c| c.name.clone()).collect();
-            generated_constraint_enums.insert(enum_name, expected_constraints);
-        }
-    }
-
     // Generate functions
     let mut emitted_struct_names = std::collections::HashSet::new();
     for analyzed in &module_queries {
@@ -1680,7 +1490,6 @@ pub fn generate_code_for_module(
             &analyzed.definition,
             &analyzed.type_info,
             &mut emitted_struct_names,
-            &analyzed.constraints,
             &analyzed.performance_analysis,
             defaults,
         )?;
@@ -1731,18 +1540,5 @@ mod tests {
         let raw = generate_embedded_raw_string("SELECT 1");
         assert!(raw.starts_with("r\""));
         assert!(raw.ends_with('"'));
-    }
-
-    #[test]
-    fn generate_query_constraint_enum_includes_display_and_error() {
-        let constraints = vec![crate::types_extractor::ConstraintInfo {
-            name: "users_email_key".to_string(),
-            table_name: "users".to_string(),
-            constraint_type: "u".to_string(),
-        }];
-        let code = generate_query_constraint_enum("InsertUserConstraints", &constraints, &[]);
-        assert!(code.contains("impl std::fmt::Display for InsertUserConstraints"));
-        assert!(code.contains("Self::UsersEmailKey => write!(f, \"users_email_key\")"));
-        assert!(code.contains("impl std::error::Error for InsertUserConstraints"));
     }
 }

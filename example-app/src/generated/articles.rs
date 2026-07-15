@@ -3,30 +3,6 @@
 
 use sqlx::Row;
 
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum BatchInsertArticlesConstraints {
-    /// Constraint: articles_pkey on table articles
-    ArticlesPkey,
-    /// Constraint: articles_id_not_null on table articles
-    ArticlesIdNotNull,
-    /// Constraint: articles_title_not_null on table articles
-    ArticlesTitleNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for BatchInsertArticlesConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "articles_pkey" => Ok(Self::ArticlesPkey),
-            "articles_id_not_null" => Ok(Self::ArticlesIdNotNull),
-            "articles_title_not_null" => Ok(Self::ArticlesTitleNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct BatchInsertArticlesRecord {
     pub title: String,
@@ -47,7 +23,7 @@ pub struct BatchInsertArticlesItem {
 pub async fn batch_insert_articles(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     items: Vec<BatchInsertArticlesRecord>,
-) -> Result<Vec<BatchInsertArticlesItem>, super::Error<BatchInsertArticlesConstraints>> {
+) -> Result<Vec<BatchInsertArticlesItem>, sqlx::Error> {
     use itertools::Itertools;
     let sql = r"
     INSERT INTO
@@ -88,7 +64,7 @@ pub async fn batch_insert_articles(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -108,7 +84,7 @@ pub struct GetArticleByIdItem {
 pub async fn get_article_by_id(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     id: i32,
-) -> Result<GetArticleByIdItem, super::ErrorReadOnly> {
+) -> Result<GetArticleByIdItem, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -139,34 +115,8 @@ pub async fn get_article_by_id(
                 )?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum BatchInsertArticlesScalarNativeConstraints {
-    /// Constraint: articles_pkey on table articles
-    ArticlesPkey,
-    /// Constraint: articles_id_not_null on table articles
-    ArticlesIdNotNull,
-    /// Constraint: articles_title_not_null on table articles
-    ArticlesTitleNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for BatchInsertArticlesScalarNativeConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "articles_pkey" => Ok(Self::ArticlesPkey),
-            "articles_id_not_null" => Ok(Self::ArticlesIdNotNull),
-            "articles_title_not_null" => Ok(Self::ArticlesTitleNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct BatchInsertArticlesScalarNativeRecord {
     pub title: String,
     pub metadata: Option<sqlx::types::Json<crate::models::ArticleMetadata>>,
@@ -188,7 +138,7 @@ pub async fn batch_insert_articles_scalar_native(
     items: Vec<BatchInsertArticlesScalarNativeRecord>,
 ) -> Result<
     Vec<BatchInsertArticlesScalarNativeItem>,
-    super::Error<BatchInsertArticlesScalarNativeConstraints>,
+    sqlx::Error,
 > {
     use itertools::Itertools;
     let sql = r"
@@ -230,5 +180,5 @@ pub async fn batch_insert_articles_scalar_native(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }

@@ -3,30 +3,6 @@
 
 use sqlx::Row;
 
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum InsertWidgetsBulkConstraints {
-    /// Constraint: widgets_pkey on table widgets
-    WidgetsPkey,
-    /// Constraint: widgets_id_not_null on table widgets
-    WidgetsIdNotNull,
-    /// Constraint: widgets_name_not_null on table widgets
-    WidgetsNameNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for InsertWidgetsBulkConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "widgets_pkey" => Ok(Self::WidgetsPkey),
-            "widgets_id_not_null" => Ok(Self::WidgetsIdNotNull),
-            "widgets_name_not_null" => Ok(Self::WidgetsNameNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct InsertWidgetsBulkItem {
     pub id: i32,
@@ -40,7 +16,7 @@ pub struct InsertWidgetsBulkItem {
 pub async fn insert_widgets_bulk(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     items: Vec<super::types::public::Widgets>,
-) -> Result<Vec<InsertWidgetsBulkItem>, super::Error<InsertWidgetsBulkConstraints>> {
+) -> Result<Vec<InsertWidgetsBulkItem>, sqlx::Error> {
     let sql = r"
     INSERT INTO
         public.widgets (name, weight, metadata)
@@ -66,34 +42,8 @@ pub async fn insert_widgets_bulk(
             })
         })
         .collect();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum InsertWidgetsCustomTypeConstraints {
-    /// Constraint: widgets_pkey on table widgets
-    WidgetsPkey,
-    /// Constraint: widgets_id_not_null on table widgets
-    WidgetsIdNotNull,
-    /// Constraint: widgets_name_not_null on table widgets
-    WidgetsNameNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for InsertWidgetsCustomTypeConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "widgets_pkey" => Ok(Self::WidgetsPkey),
-            "widgets_id_not_null" => Ok(Self::WidgetsIdNotNull),
-            "widgets_name_not_null" => Ok(Self::WidgetsNameNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct InsertWidgetsCustomTypeItem {
     pub id: i32,
     pub name: String,
@@ -106,7 +56,7 @@ pub struct InsertWidgetsCustomTypeItem {
 pub async fn insert_widgets_custom_type(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     items: Vec<super::types::public::WidgetInput>,
-) -> Result<Vec<InsertWidgetsCustomTypeItem>, super::Error<InsertWidgetsCustomTypeConstraints>> {
+) -> Result<Vec<InsertWidgetsCustomTypeItem>, sqlx::Error> {
     let sql = r"
     INSERT INTO
         public.widgets (name, weight, metadata)
@@ -132,7 +82,7 @@ pub async fn insert_widgets_custom_type(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -151,7 +101,7 @@ pub struct GetAllWidgetsItem {
 #[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_all_widgets(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
-) -> Result<Vec<GetAllWidgetsItem>, super::ErrorReadOnly> {
+) -> Result<Vec<GetAllWidgetsItem>, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -182,34 +132,8 @@ pub async fn get_all_widgets(
             })
         })
         .collect();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum InsertWidgetSingleConstraints {
-    /// Constraint: widgets_pkey on table widgets
-    WidgetsPkey,
-    /// Constraint: widgets_id_not_null on table widgets
-    WidgetsIdNotNull,
-    /// Constraint: widgets_name_not_null on table widgets
-    WidgetsNameNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for InsertWidgetSingleConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "widgets_pkey" => Ok(Self::WidgetsPkey),
-            "widgets_id_not_null" => Ok(Self::WidgetsIdNotNull),
-            "widgets_name_not_null" => Ok(Self::WidgetsNameNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct InsertWidgetSingleItem {
     pub id: i32,
     pub name: String,
@@ -222,7 +146,7 @@ pub struct InsertWidgetSingleItem {
 pub async fn insert_widget_single(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     item: super::types::public::WidgetInput,
-) -> Result<InsertWidgetSingleItem, super::Error<InsertWidgetSingleConstraints>> {
+) -> Result<InsertWidgetSingleItem, sqlx::Error> {
     let sql = r"
     INSERT INTO
         public.widgets (name, weight, metadata)
@@ -244,5 +168,5 @@ pub async fn insert_widget_single(
             metadata: row.try_get::<Option<super::types::public::WidgetMetadata>, _>("metadata")?,
         })
     })();
-    result.map_err(Into::into)
+    result
 }

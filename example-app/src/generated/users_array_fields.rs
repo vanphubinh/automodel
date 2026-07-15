@@ -3,42 +3,6 @@
 
 use sqlx::Row;
 
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum UpdateUserSocialLinksNullableConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for UpdateUserSocialLinksNullableConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct UpdateUserSocialLinksNullableItem {
     pub id: i32,
@@ -53,7 +17,7 @@ pub async fn update_user_social_links_nullable(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     social_links: Option<Vec<crate::models::UserSocialLink>>,
     user_id: i32,
-) -> Result<UpdateUserSocialLinksNullableItem, super::Error<UpdateUserSocialLinksNullableConstraints>>
+) -> Result<UpdateUserSocialLinksNullableItem, sqlx::Error>
 {
     let sql = r"
     UPDATE
@@ -96,46 +60,8 @@ pub async fn update_user_social_links_nullable(
                 .transpose()?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum InsertUserSocialLinksStructuredConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for InsertUserSocialLinksStructuredConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct InsertUserSocialLinksStructuredParams {
     pub name: String,
     pub email: String,
@@ -157,7 +83,7 @@ pub async fn insert_user_social_links_structured(
     params: &InsertUserSocialLinksStructuredParams,
 ) -> Result<
     InsertUserSocialLinksStructuredItem,
-    super::Error<InsertUserSocialLinksStructuredConstraints>,
+    sqlx::Error,
 > {
     let sql = r"
     INSERT INTO
@@ -177,7 +103,7 @@ pub async fn insert_user_social_links_structured(
     let query = query.bind(&params.name);
     let query = query.bind(&params.email);
     let query = query.bind(
-        serde_json::to_value(params.social_links).map_err(|e| sqlx::Error::Encode(Box::new(e)))?,
+        serde_json::to_value(&params.social_links).map_err(|e| sqlx::Error::Encode(Box::new(e)))?,
     );
     let row = query.fetch_one(executor).await?;
     let result: Result<_, sqlx::Error> = (|| {
@@ -194,46 +120,8 @@ pub async fn insert_user_social_links_structured(
                 .transpose()?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum UpdateUserSocialLinksDiffConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for UpdateUserSocialLinksDiffConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
+    result
+}#[derive(Debug, Clone, PartialEq)]
 pub struct UpdateUserSocialLinksDiffParams {
     pub name: String,
     pub social_links: Vec<crate::models::UserSocialLink>,
@@ -254,7 +142,7 @@ pub async fn update_user_social_links_diff(
     old: &UpdateUserSocialLinksDiffParams,
     new: &UpdateUserSocialLinksDiffParams,
     user_id: i32,
-) -> Result<UpdateUserSocialLinksDiffItem, super::Error<UpdateUserSocialLinksDiffConstraints>> {
+) -> Result<UpdateUserSocialLinksDiffItem, sqlx::Error> {
     let mut final_sql = r"
     UPDATE
         public.users
@@ -309,14 +197,14 @@ pub async fn update_user_social_links_diff(
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
-    query = query.bind(&user_id);
+    query = query.bind(user_id);
     if included_params.contains(&r"name") {
         query = query.bind(&new.name);
     }
 
     if included_params.contains(&r"social_links") {
-        let social_links_json = serde_json::to_value(new.social_links)
-            .map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
+        let social_links_json =
+            serde_json::to_value(&new.social_links).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
         query = query.bind(social_links_json);
     }
 
@@ -335,46 +223,8 @@ pub async fn update_user_social_links_diff(
                 .transpose()?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum UpdateUserSocialLinksConditionalConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for UpdateUserSocialLinksConditionalConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct UpdateUserSocialLinksConditionalItem {
     pub id: i32,
     pub name: String,
@@ -391,7 +241,7 @@ pub async fn update_user_social_links_conditional(
     user_id: i32,
 ) -> Result<
     UpdateUserSocialLinksConditionalItem,
-    super::Error<UpdateUserSocialLinksConditionalConstraints>,
+    sqlx::Error,
 > {
     let mut final_sql = r"
     UPDATE
@@ -447,7 +297,7 @@ pub async fn update_user_social_links_conditional(
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
-    query = query.bind(&user_id);
+    query = query.bind(user_id);
     if included_params.contains(&r"name") {
         query = query.bind(name.as_ref().unwrap());
     }
@@ -473,46 +323,8 @@ pub async fn update_user_social_links_conditional(
                 .transpose()?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum InsertUsersBatchSocialLinksConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for InsertUsersBatchSocialLinksConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct InsertUsersBatchSocialLinksRecord {
     pub name: String,
     pub email: String,
@@ -534,7 +346,7 @@ pub async fn insert_users_batch_social_links(
     items: Vec<InsertUsersBatchSocialLinksRecord>,
 ) -> Result<
     Vec<InsertUsersBatchSocialLinksItem>,
-    super::Error<InsertUsersBatchSocialLinksConstraints>,
+    sqlx::Error,
 > {
     use itertools::Itertools;
     let sql = r"
@@ -581,46 +393,8 @@ pub async fn insert_users_batch_social_links(
             })
         })
         .collect();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum UpdateUserTagsConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for UpdateUserTagsConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct UpdateUserTagsItem {
     pub id: i32,
     pub name: String,
@@ -634,7 +408,7 @@ pub async fn update_user_tags(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     tags: Vec<Option<crate::models::UserTag>>,
     user_id: i32,
-) -> Result<UpdateUserTagsItem, super::Error<UpdateUserTagsConstraints>> {
+) -> Result<UpdateUserTagsItem, sqlx::Error> {
     let sql = r"
     UPDATE
         public.users
@@ -687,7 +461,7 @@ pub async fn update_user_tags(
                 .transpose()?,
         })
     })();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -707,7 +481,7 @@ pub struct GetUserTagsItem {
 pub async fn get_user_tags(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     user_id: i32,
-) -> Result<GetUserTagsItem, super::ErrorReadOnly> {
+) -> Result<GetUserTagsItem, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -747,46 +521,8 @@ pub async fn get_user_tags(
                 .transpose()?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum InsertUserTagsStructuredConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for InsertUserTagsStructuredConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct InsertUserTagsStructuredParams {
     pub name: String,
     pub email: String,
@@ -806,7 +542,7 @@ pub struct InsertUserTagsStructuredItem {
 pub async fn insert_user_tags_structured(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     params: &InsertUserTagsStructuredParams,
-) -> Result<InsertUserTagsStructuredItem, super::Error<InsertUserTagsStructuredConstraints>> {
+) -> Result<InsertUserTagsStructuredItem, sqlx::Error> {
     let sql = r"
     INSERT INTO
         public.users (name, email, status, tags)
@@ -858,46 +594,8 @@ pub async fn insert_user_tags_structured(
                 .transpose()?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum UpdateUserTagsDiffConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for UpdateUserTagsDiffConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
+    result
+}#[derive(Debug, Clone, PartialEq)]
 pub struct UpdateUserTagsDiffParams {
     pub name: String,
     pub tags: Vec<Option<crate::models::UserTag>>,
@@ -918,7 +616,7 @@ pub async fn update_user_tags_diff(
     old: &UpdateUserTagsDiffParams,
     new: &UpdateUserTagsDiffParams,
     user_id: i32,
-) -> Result<UpdateUserTagsDiffItem, super::Error<UpdateUserTagsDiffConstraints>> {
+) -> Result<UpdateUserTagsDiffItem, sqlx::Error> {
     let mut final_sql = r"
     UPDATE
         public.users
@@ -970,7 +668,7 @@ pub async fn update_user_tags_diff(
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
-    query = query.bind(&user_id);
+    query = query.bind(user_id);
     if included_params.contains(&r"name") {
         query = query.bind(&new.name);
     }
@@ -1012,46 +710,8 @@ pub async fn update_user_tags_diff(
                 .transpose()?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum UpdateUserTagsConditionalConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for UpdateUserTagsConditionalConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct UpdateUserTagsConditionalItem {
     pub id: i32,
     pub name: String,
@@ -1066,7 +726,7 @@ pub async fn update_user_tags_conditional(
     name: Option<String>,
     tags: Option<Vec<Option<crate::models::UserTag>>>,
     user_id: i32,
-) -> Result<UpdateUserTagsConditionalItem, super::Error<UpdateUserTagsConditionalConstraints>> {
+) -> Result<UpdateUserTagsConditionalItem, sqlx::Error> {
     let mut final_sql = r"
     UPDATE
         public.users
@@ -1118,7 +778,7 @@ pub async fn update_user_tags_conditional(
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
-    query = query.bind(&user_id);
+    query = query.bind(user_id);
     if included_params.contains(&r"name") {
         query = query.bind(name.as_ref().unwrap());
     }
@@ -1161,46 +821,8 @@ pub async fn update_user_tags_conditional(
                 .transpose()?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum InsertUsersBatchTagsConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for InsertUsersBatchTagsConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct InsertUsersBatchTagsRecord {
     pub name: String,
     pub email: String,
@@ -1220,7 +842,7 @@ pub struct InsertUsersBatchTagsItem {
 pub async fn insert_users_batch_tags(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     items: Vec<InsertUsersBatchTagsRecord>,
-) -> Result<Vec<InsertUsersBatchTagsItem>, super::Error<InsertUsersBatchTagsConstraints>> {
+) -> Result<Vec<InsertUsersBatchTagsItem>, sqlx::Error> {
     use itertools::Itertools;
     let sql = r"
     INSERT INTO
@@ -1274,46 +896,8 @@ pub async fn insert_users_batch_tags(
             })
         })
         .collect();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum UpdateUserLabelsConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for UpdateUserLabelsConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct UpdateUserLabelsItem {
     pub id: i32,
     pub name: String,
@@ -1327,7 +911,7 @@ pub async fn update_user_labels(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     labels: Vec<Option<crate::models::UserTag>>,
     user_id: i32,
-) -> Result<UpdateUserLabelsItem, super::Error<UpdateUserLabelsConstraints>> {
+) -> Result<UpdateUserLabelsItem, sqlx::Error> {
     let sql = r"
     UPDATE
         public.users
@@ -1377,7 +961,7 @@ pub async fn update_user_labels(
                 .collect::<Result<Vec<_>, _>>()?,
         })
     })();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -1397,7 +981,7 @@ pub struct GetUserLabelsItem {
 pub async fn get_user_labels(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     user_id: i32,
-) -> Result<GetUserLabelsItem, super::ErrorReadOnly> {
+) -> Result<GetUserLabelsItem, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -1434,46 +1018,8 @@ pub async fn get_user_labels(
                 .collect::<Result<Vec<_>, _>>()?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum InsertUserLabelsStructuredConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for InsertUserLabelsStructuredConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct InsertUserLabelsStructuredParams {
     pub name: String,
     pub email: String,
@@ -1493,7 +1039,7 @@ pub struct InsertUserLabelsStructuredItem {
 pub async fn insert_user_labels_structured(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     params: &InsertUserLabelsStructuredParams,
-) -> Result<InsertUserLabelsStructuredItem, super::Error<InsertUserLabelsStructuredConstraints>> {
+) -> Result<InsertUserLabelsStructuredItem, sqlx::Error> {
     let sql = r"
     INSERT INTO
         public.users (name, email, status, labels)
@@ -1542,46 +1088,8 @@ pub async fn insert_user_labels_structured(
                 .collect::<Result<Vec<_>, _>>()?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum UpdateUserLabelsDiffConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for UpdateUserLabelsDiffConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
+    result
+}#[derive(Debug, Clone, PartialEq)]
 pub struct UpdateUserLabelsDiffParams {
     pub name: String,
     pub labels: Vec<Option<crate::models::UserTag>>,
@@ -1602,7 +1110,7 @@ pub async fn update_user_labels_diff(
     old: &UpdateUserLabelsDiffParams,
     new: &UpdateUserLabelsDiffParams,
     user_id: i32,
-) -> Result<UpdateUserLabelsDiffItem, super::Error<UpdateUserLabelsDiffConstraints>> {
+) -> Result<UpdateUserLabelsDiffItem, sqlx::Error> {
     let mut final_sql = r"
     UPDATE
         public.users
@@ -1654,7 +1162,7 @@ pub async fn update_user_labels_diff(
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
-    query = query.bind(&user_id);
+    query = query.bind(user_id);
     if included_params.contains(&r"name") {
         query = query.bind(&new.name);
     }
@@ -1693,46 +1201,8 @@ pub async fn update_user_labels_diff(
                 .collect::<Result<Vec<_>, _>>()?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum UpdateUserLabelsConditionalConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for UpdateUserLabelsConditionalConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct UpdateUserLabelsConditionalItem {
     pub id: i32,
     pub name: String,
@@ -1747,7 +1217,7 @@ pub async fn update_user_labels_conditional(
     name: Option<String>,
     labels: Option<Vec<Option<crate::models::UserTag>>>,
     user_id: i32,
-) -> Result<UpdateUserLabelsConditionalItem, super::Error<UpdateUserLabelsConditionalConstraints>> {
+) -> Result<UpdateUserLabelsConditionalItem, sqlx::Error> {
     let mut final_sql = r"
     UPDATE
         public.users
@@ -1799,7 +1269,7 @@ pub async fn update_user_labels_conditional(
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
-    query = query.bind(&user_id);
+    query = query.bind(user_id);
     if included_params.contains(&r"name") {
         query = query.bind(name.as_ref().unwrap());
     }
@@ -1839,46 +1309,8 @@ pub async fn update_user_labels_conditional(
                 .collect::<Result<Vec<_>, _>>()?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum InsertUsersBatchLabelsConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for InsertUsersBatchLabelsConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct InsertUsersBatchLabelsRecord {
     pub name: String,
     pub email: String,
@@ -1898,7 +1330,7 @@ pub struct InsertUsersBatchLabelsItem {
 pub async fn insert_users_batch_labels(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     items: Vec<InsertUsersBatchLabelsRecord>,
-) -> Result<Vec<InsertUsersBatchLabelsItem>, super::Error<InsertUsersBatchLabelsConstraints>> {
+) -> Result<Vec<InsertUsersBatchLabelsItem>, sqlx::Error> {
     use itertools::Itertools;
     let sql = r"
     INSERT INTO
@@ -1950,46 +1382,8 @@ pub async fn insert_users_batch_labels(
             })
         })
         .collect();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum InsertUsersBulkCompositeConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for InsertUsersBulkCompositeConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct InsertUsersBulkCompositeItem {
     pub id: i32,
     pub name: String,
@@ -2002,7 +1396,7 @@ pub struct InsertUsersBulkCompositeItem {
 pub async fn insert_users_bulk_composite(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     items: Vec<super::types::public::UserWithLinksInput>,
-) -> Result<Vec<InsertUsersBulkCompositeItem>, super::Error<InsertUsersBulkCompositeConstraints>> {
+) -> Result<Vec<InsertUsersBulkCompositeItem>, sqlx::Error> {
     let sql = r"
     INSERT INTO
         public.users (name, email, social_links)
@@ -2033,5 +1427,5 @@ pub async fn insert_users_bulk_composite(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }

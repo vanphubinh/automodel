@@ -143,11 +143,8 @@ async fn test_explicit_native_multiunzip() {
         .await
         .unwrap_err();
     assert!(
-        matches!(
-            err,
-            example_app::generated::Error::ConstraintViolation(_, _)
-        ),
-        "expected NotNull constraint violation, got: {:?}",
+        matches!(err, sqlx::Error::Database(_)),
+        "expected database constraint violation, got: {:?}",
         err
     );
 }
@@ -164,11 +161,8 @@ async fn test_explicit_native_without_multiunzip() {
     .await
     .unwrap_err();
     assert!(
-        matches!(
-            err,
-            example_app::generated::Error::ConstraintViolation(_, _)
-        ),
-        "expected NotNull constraint violation, got: {:?}",
+        matches!(err, sqlx::Error::Database(_)),
+        "expected database constraint violation, got: {:?}",
         err
     );
 }

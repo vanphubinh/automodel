@@ -3,42 +3,6 @@
 
 use sqlx::Row;
 
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum InsertUserConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for InsertUserConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct InsertUserItem {
     pub id: i32,
@@ -56,7 +20,7 @@ pub async fn insert_user(
     email: String,
     age: i32,
     profile: crate::models::UserProfile,
-) -> Result<InsertUserItem, super::Error<InsertUserConstraints>> {
+) -> Result<InsertUserItem, sqlx::Error> {
     let sql = r"
     INSERT INTO
         public.users (name, email, age, profile)
@@ -88,46 +52,8 @@ pub async fn insert_user(
             created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum InsertUsersBatchConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for InsertUsersBatchConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct InsertUsersBatchRecord {
     pub name: String,
     pub email: String,
@@ -139,7 +65,7 @@ pub struct InsertUsersBatchRecord {
 pub async fn insert_users_batch(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     items: Vec<InsertUsersBatchRecord>,
-) -> Result<(), super::Error<InsertUsersBatchConstraints>> {
+) -> Result<(), sqlx::Error> {
     use itertools::Itertools;
     let sql = r"
     INSERT INTO
@@ -187,7 +113,7 @@ pub struct GetAllUsersItem {
 #[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_all_users(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
-) -> Result<Vec<GetAllUsersItem>, super::ErrorReadOnly> {
+) -> Result<Vec<GetAllUsersItem>, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -227,7 +153,7 @@ pub async fn get_all_users(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -246,7 +172,7 @@ pub struct FindUserByEmailItem {
 pub async fn find_user_by_email(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     email: String,
-) -> Result<Option<FindUserByEmailItem>, super::ErrorReadOnly> {
+) -> Result<Option<FindUserByEmailItem>, sqlx::Error> {
     let query = sqlx::query(
         r"
     SELECT
@@ -277,49 +203,11 @@ pub async fn find_user_by_email(
                     updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
                 })
             })();
-            result.map(Some).map_err(Into::into)
+            result.map(Some)
         }
         None => Ok(None),
     }
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum UpdateUserProfileConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for UpdateUserProfileConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+}#[derive(Debug, Clone)]
 pub struct UpdateUserProfileItem {
     pub id: i32,
     pub name: String,
@@ -335,7 +223,7 @@ pub async fn update_user_profile(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     profile: crate::models::UserProfile,
     user_id: i32,
-) -> Result<UpdateUserProfileItem, super::Error<UpdateUserProfileConstraints>> {
+) -> Result<UpdateUserProfileItem, sqlx::Error> {
     let sql = r"
     UPDATE
         public.users
@@ -376,7 +264,7 @@ pub async fn update_user_profile(
             updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
         })
     })();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -409,7 +297,7 @@ pub async fn find_users_by_name_and_age(
     min_age: Option<i32>,
     name_exact: String,
     max_age: Option<i32>,
-) -> Result<Vec<FindUsersByNameAndAgeItem>, super::ErrorReadOnly> {
+) -> Result<Vec<FindUsersByNameAndAgeItem>, sqlx::Error> {
     let mut final_sql = r"
     SELECT
         id,
@@ -486,7 +374,7 @@ pub async fn find_users_by_name_and_age(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -512,7 +400,7 @@ pub struct GetRecentUsersItem {
 pub async fn get_recent_users(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     since: jiff_sqlx::Timestamp,
-) -> Result<Vec<GetRecentUsersItem>, super::ErrorReadOnly> {
+) -> Result<Vec<GetRecentUsersItem>, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -536,7 +424,7 @@ pub async fn get_recent_users(
     let query = query.bind(since);
     let rows = query.fetch_all(executor).await?;
     if rows.is_empty() {
-        return Err(sqlx::Error::RowNotFound.into());
+        return Err(sqlx::Error::RowNotFound);
     }
     let result: Result<Vec<_>, sqlx::Error> = rows
         .iter()
@@ -558,7 +446,7 @@ pub async fn get_recent_users(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -582,7 +470,7 @@ pub async fn get_active_users_by_age_range(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     min_age: i32,
     max_age: i32,
-) -> Result<Vec<GetActiveUsersByAgeRangeItem>, super::ErrorReadOnly> {
+) -> Result<Vec<GetActiveUsersByAgeRangeItem>, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -606,7 +494,7 @@ pub async fn get_active_users_by_age_range(
     let query = query.bind(max_age);
     let rows = query.fetch_all(executor).await?;
     if rows.is_empty() {
-        return Err(sqlx::Error::RowNotFound.into());
+        return Err(sqlx::Error::RowNotFound);
     }
     let result: Result<Vec<_>, sqlx::Error> = rows
         .iter()
@@ -627,7 +515,7 @@ pub async fn get_active_users_by_age_range(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -649,7 +537,7 @@ pub struct SearchUsersByNamePatternItem {
 pub async fn search_users_by_name_pattern(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     pattern: String,
-) -> Result<Vec<SearchUsersByNamePatternItem>, super::ErrorReadOnly> {
+) -> Result<Vec<SearchUsersByNamePatternItem>, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -669,7 +557,7 @@ pub async fn search_users_by_name_pattern(
     let query = query.bind(&pattern);
     let rows = query.fetch_all(executor).await?;
     if rows.is_empty() {
-        return Err(sqlx::Error::RowNotFound.into());
+        return Err(sqlx::Error::RowNotFound);
     }
     let result: Result<Vec<_>, sqlx::Error> = rows
         .iter()
@@ -681,7 +569,7 @@ pub async fn search_users_by_name_pattern(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -724,7 +612,7 @@ pub async fn search_users_advanced(
     name_pattern: Option<String>,
     min_age: Option<i32>,
     since: Option<jiff_sqlx::Timestamp>,
-) -> Result<Vec<SearchUsersAdvancedItem>, super::ErrorReadOnly> {
+) -> Result<Vec<SearchUsersAdvancedItem>, sqlx::Error> {
     let mut final_sql = r"
     SELECT
         id,
@@ -818,7 +706,7 @@ pub async fn search_users_advanced(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -841,7 +729,7 @@ pub struct GetUsersByStatusItem {
 pub async fn get_users_by_status(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     user_status: super::types::public::UserStatus,
-) -> Result<Vec<GetUsersByStatusItem>, super::ErrorReadOnly> {
+) -> Result<Vec<GetUsersByStatusItem>, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -872,46 +760,8 @@ pub async fn get_users_by_status(
             })
         })
         .collect();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum UpdateUserStatusConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for UpdateUserStatusConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct UpdateUserStatusItem {
     pub id: i32,
     pub status: Option<super::types::public::UserStatus>,
@@ -923,7 +773,7 @@ pub async fn update_user_status(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     new_status: super::types::public::UserStatus,
     user_id: i32,
-) -> Result<UpdateUserStatusItem, super::Error<UpdateUserStatusConstraints>> {
+) -> Result<UpdateUserStatusItem, sqlx::Error> {
     let sql = r"
     UPDATE
         public.users
@@ -948,46 +798,8 @@ pub async fn update_user_status(
             status: row.try_get::<Option<super::types::public::UserStatus>, _>("status")?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum UpdateUserFieldsConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for UpdateUserFieldsConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct UpdateUserFieldsItem {
     pub id: i32,
     pub name: String,
@@ -1004,7 +816,7 @@ pub async fn update_user_fields(
     email: Option<String>,
     age: Option<i32>,
     user_id: i32,
-) -> Result<UpdateUserFieldsItem, super::Error<UpdateUserFieldsConstraints>> {
+) -> Result<UpdateUserFieldsItem, sqlx::Error> {
     let mut final_sql = r"
     UPDATE
         public.users
@@ -1069,7 +881,7 @@ pub async fn update_user_fields(
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
-    query = query.bind(&user_id);
+    query = query.bind(user_id);
     if included_params.contains(&r"name") {
         query = query.bind(name.as_ref().unwrap());
     }
@@ -1092,46 +904,8 @@ pub async fn update_user_fields(
             updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum UpdateUserFieldsDiffConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for UpdateUserFieldsDiffConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
+    result
+}#[derive(Debug, Clone, PartialEq)]
 pub struct UpdateUserFieldsDiffParams {
     pub name: String,
     pub email: String,
@@ -1154,7 +928,7 @@ pub async fn update_user_fields_diff(
     old: &UpdateUserFieldsDiffParams,
     new: &UpdateUserFieldsDiffParams,
     user_id: i32,
-) -> Result<UpdateUserFieldsDiffItem, super::Error<UpdateUserFieldsDiffConstraints>> {
+) -> Result<UpdateUserFieldsDiffItem, sqlx::Error> {
     let mut final_sql = r"
     UPDATE
         public.users
@@ -1219,7 +993,7 @@ pub async fn update_user_fields_diff(
 
     let mut query = sqlx::query(sqlx::AssertSqlSafe(final_sql.as_str()));
 
-    query = query.bind(&user_id);
+    query = query.bind(user_id);
     if included_params.contains(&r"name") {
         query = query.bind(&new.name);
     }
@@ -1229,7 +1003,7 @@ pub async fn update_user_fields_diff(
     }
 
     if included_params.contains(&r"age") {
-        query = query.bind(&new.age);
+        query = query.bind(new.age);
     }
 
     let row = query.fetch_one(executor).await?;
@@ -1242,46 +1016,8 @@ pub async fn update_user_fields_diff(
             updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum InsertUserStructuredConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for InsertUserStructuredConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct InsertUserStructuredParams {
     pub name: String,
     pub email: String,
@@ -1302,7 +1038,7 @@ pub struct InsertUserStructuredItem {
 pub async fn insert_user_structured(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     params: &InsertUserStructuredParams,
-) -> Result<InsertUserStructuredItem, super::Error<InsertUserStructuredConstraints>> {
+) -> Result<InsertUserStructuredItem, sqlx::Error> {
     let sql = r"
     INSERT INTO
         public.users (name, email, age)
@@ -1332,7 +1068,7 @@ pub async fn insert_user_structured(
             created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
         })
     })();
-    result.map_err(Into::into)
+    result
 }
 
 /// Get all possible user statuses currently in use
@@ -1346,7 +1082,7 @@ pub async fn insert_user_structured(
 #[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_all_user_statuses(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
-) -> Result<Vec<Option<super::types::public::UserStatus>>, super::ErrorReadOnly> {
+) -> Result<Vec<Option<super::types::public::UserStatus>>, sqlx::Error> {
     let sql = r"
     SELECT
         DISTINCT status
@@ -1364,7 +1100,7 @@ pub async fn get_all_user_statuses(
         .iter()
         .map(|row| Ok(row.try_get::<Option<super::types::public::UserStatus>, _>("status")?))
         .collect();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -1395,7 +1131,7 @@ pub struct GetAllUsersWithStarItem {
 #[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_all_users_with_star(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
-) -> Result<Vec<GetAllUsersWithStarItem>, super::ErrorReadOnly> {
+) -> Result<Vec<GetAllUsersWithStarItem>, sqlx::Error> {
     let sql = r"
     SELECT
         *
@@ -1436,7 +1172,7 @@ pub async fn get_all_users_with_star(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -1466,7 +1202,7 @@ pub struct GetUserByIdWithStarItem {
 pub async fn get_user_by_id_with_star(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     user_id: i32,
-) -> Result<Option<GetUserByIdWithStarItem>, super::ErrorReadOnly> {
+) -> Result<Option<GetUserByIdWithStarItem>, sqlx::Error> {
     let sql = r"
     SELECT
         *
@@ -1507,7 +1243,7 @@ pub async fn get_user_by_id_with_star(
                     labels: row.try_get::<Vec<serde_json::Value>, _>("labels")?,
                 })
             })();
-            result.map(Some).map_err(Into::into)
+            result.map(Some)
         }
         None => Ok(None),
     }
@@ -1536,7 +1272,7 @@ pub struct GetUserByIdAndEmailItem {
 pub async fn get_user_by_id_and_email(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     params: &GetUserByIdAndEmailParams,
-) -> Result<Option<GetUserByIdAndEmailItem>, super::ErrorReadOnly> {
+) -> Result<Option<GetUserByIdAndEmailItem>, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -1564,7 +1300,7 @@ pub async fn get_user_by_id_and_email(
                     email: row.try_get::<String, _>("email")?,
                 })
             })();
-            result.map(Some).map_err(Into::into)
+            result.map(Some)
         }
         None => Ok(None),
     }
@@ -1576,7 +1312,7 @@ pub async fn update_user_returning_applied(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     name: String,
     id: i32,
-) -> Result<Option<bool>, super::ErrorReadOnly> {
+) -> Result<Option<bool>, sqlx::Error> {
     let sql = r"
     UPDATE
         public.users
@@ -1598,45 +1334,7 @@ pub async fn update_user_returning_applied(
         Some(row) => Ok(Some(row.try_get::<bool, _>("applied")?)),
         None => Ok(None),
     }
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum DeleteUserByIdAndEmailConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for DeleteUserByIdAndEmailConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+}#[derive(Debug, Clone)]
 pub struct DeleteUserByIdAndEmailItem {
     pub id: i32,
     pub email: String,
@@ -1647,7 +1345,7 @@ pub struct DeleteUserByIdAndEmailItem {
 pub async fn delete_user_by_id_and_email(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     params: &GetUserByIdAndEmailParams,
-) -> Result<DeleteUserByIdAndEmailItem, super::Error<DeleteUserByIdAndEmailConstraints>> {
+) -> Result<DeleteUserByIdAndEmailItem, sqlx::Error> {
     let sql = r"
     DELETE FROM
         public.users
@@ -1671,7 +1369,7 @@ pub async fn delete_user_by_id_and_email(
             email: row.try_get::<String, _>("email")?,
         })
     })();
-    result.map_err(Into::into)
+    result
 }
 
 /// Test non-null override with sqlx-compatible "col!" syntax on comparison expression
@@ -1683,7 +1381,7 @@ pub async fn delete_user_by_id_and_email(
 pub async fn get_user_is_recent(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     id: i32,
-) -> Result<bool, super::ErrorReadOnly> {
+) -> Result<bool, sqlx::Error> {
     let sql = r"
     SELECT
         created_at > now() - interval '1 year' AS is_recent
@@ -1699,45 +1397,7 @@ pub async fn get_user_is_recent(
     let query = query.bind(id);
     let row = query.fetch_one(executor).await?;
     Ok(row.try_get::<bool, _>("is_recent")?)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum UpdateUserContactInfoConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for UpdateUserContactInfoConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+}#[derive(Debug, Clone)]
 pub struct UpdateUserContactInfoItem {
     pub id: i32,
     pub name: String,
@@ -1749,7 +1409,7 @@ pub struct UpdateUserContactInfoItem {
 pub async fn update_user_contact_info(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     params: &GetUserByIdAndEmailItem,
-) -> Result<UpdateUserContactInfoItem, super::Error<UpdateUserContactInfoConstraints>> {
+) -> Result<UpdateUserContactInfoItem, sqlx::Error> {
     let sql = r"
     UPDATE
         public.users
@@ -1778,46 +1438,8 @@ pub async fn update_user_contact_info(
             email: row.try_get::<String, _>("email")?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum UpdateUserProfileDiffConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for UpdateUserProfileDiffConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
+    result
+}#[derive(Debug, Clone, PartialEq)]
 pub struct UpdateUserProfileDiffParams {
     pub name: String,
     pub email: String,
@@ -1840,7 +1462,7 @@ pub async fn update_user_profile_diff(
     new: &UpdateUserProfileDiffParams,
     profile: crate::models::UserProfile,
     user_id: i32,
-) -> Result<UpdateUserProfileDiffItem, super::Error<UpdateUserProfileDiffConstraints>> {
+) -> Result<UpdateUserProfileDiffItem, sqlx::Error> {
     let mut final_sql = r"
     UPDATE
         public.users
@@ -1899,7 +1521,7 @@ pub async fn update_user_profile_diff(
     let profile_json =
         serde_json::to_value(profile).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
     query = query.bind(profile_json);
-    query = query.bind(&user_id);
+    query = query.bind(user_id);
     if included_params.contains(&r"name") {
         query = query.bind(&new.name);
     }
@@ -1924,46 +1546,8 @@ pub async fn update_user_profile_diff(
             updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum UpdateUserMetadataDiffConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for UpdateUserMetadataDiffConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct UpdateUserMetadataDiffItem {
     pub id: i32,
     pub name: String,
@@ -1979,7 +1563,7 @@ pub async fn update_user_metadata_diff(
     new: &UpdateUserProfileDiffParams,
     profile: crate::models::UserProfile,
     user_id: i32,
-) -> Result<UpdateUserMetadataDiffItem, super::Error<UpdateUserMetadataDiffConstraints>> {
+) -> Result<UpdateUserMetadataDiffItem, sqlx::Error> {
     let mut final_sql = r"
     UPDATE
         public.users
@@ -2037,7 +1621,7 @@ pub async fn update_user_metadata_diff(
     let profile_json =
         serde_json::to_value(profile).map_err(|e| sqlx::Error::Encode(Box::new(e)))?;
     query = query.bind(profile_json);
-    query = query.bind(&user_id);
+    query = query.bind(user_id);
     if included_params.contains(&r"name") {
         query = query.bind(&new.name);
     }
@@ -2055,7 +1639,7 @@ pub async fn update_user_metadata_diff(
             updated_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("updated_at")?,
         })
     })();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -2074,7 +1658,7 @@ pub struct UserSummary {
 pub async fn get_user_summary(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     user_id: i32,
-) -> Result<UserSummary, super::ErrorReadOnly> {
+) -> Result<UserSummary, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -2098,7 +1682,7 @@ pub async fn get_user_summary(
             email: row.try_get::<String, _>("email")?,
         })
     })();
-    result.map_err(Into::into)
+    result
 }
 
 /// Get user info by email - reuses UserSummary return struct
@@ -2110,7 +1694,7 @@ pub async fn get_user_summary(
 pub async fn get_user_info_by_email(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     email: String,
-) -> Result<Option<UserSummary>, super::ErrorReadOnly> {
+) -> Result<Option<UserSummary>, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -2136,7 +1720,7 @@ pub async fn get_user_info_by_email(
                     email: row.try_get::<String, _>("email")?,
                 })
             })();
-            result.map(Some).map_err(Into::into)
+            result.map(Some)
         }
         None => Ok(None),
     }
@@ -2152,7 +1736,7 @@ pub async fn get_user_info_by_email(
 #[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_all_user_summaries(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
-) -> Result<Vec<UserSummary>, super::ErrorReadOnly> {
+) -> Result<Vec<UserSummary>, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -2178,7 +1762,7 @@ pub async fn get_all_user_summaries(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -2199,7 +1783,7 @@ pub struct UserDetails {
 pub async fn get_user_details(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     user_id: i32,
-) -> Result<UserDetails, super::ErrorReadOnly> {
+) -> Result<UserDetails, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -2227,7 +1811,7 @@ pub async fn get_user_details(
             created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
         })
     })();
-    result.map_err(Into::into)
+    result
 }
 
 /// Search user details - reuses UserDetails return struct
@@ -2240,7 +1824,7 @@ pub async fn get_user_details(
 pub async fn search_user_details(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     pattern: String,
-) -> Result<Vec<UserDetails>, super::ErrorReadOnly> {
+) -> Result<Vec<UserDetails>, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -2271,7 +1855,7 @@ pub async fn search_user_details(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }
 
 /// Find user by criteria - uses GetUserByIdAndEmailParams for params and UserSummary for return
@@ -2284,7 +1868,7 @@ pub async fn search_user_details(
 pub async fn find_user_by_criteria(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     params: &GetUserByIdAndEmailParams,
-) -> Result<Option<UserSummary>, super::ErrorReadOnly> {
+) -> Result<Option<UserSummary>, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -2312,7 +1896,7 @@ pub async fn find_user_by_criteria(
                     email: row.try_get::<String, _>("email")?,
                 })
             })();
-            result.map(Some).map_err(Into::into)
+            result.map(Some)
         }
         None => Ok(None),
     }
@@ -2335,7 +1919,7 @@ pub struct GetUserSimpleItem {
 pub async fn get_user_simple(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     user_id: i32,
-) -> Result<Option<GetUserSimpleItem>, super::ErrorReadOnly> {
+) -> Result<Option<GetUserSimpleItem>, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -2363,7 +1947,7 @@ pub async fn get_user_simple(
                     created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
                 })
             })();
-            result.map(Some).map_err(Into::into)
+            result.map(Some)
         }
         None => Ok(None),
     }
@@ -2391,7 +1975,7 @@ pub struct UserWithCustomDerives {
 pub async fn test_custom_derives(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     params: &TestCustomDerivesParams,
-) -> Result<UserWithCustomDerives, super::ErrorReadOnly> {
+) -> Result<UserWithCustomDerives, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -2417,7 +2001,7 @@ pub async fn test_custom_derives(
             age: row.try_get::<Option<i32>, _>("age")?,
         })
     })();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -2434,7 +2018,7 @@ pub struct UserId {
 pub async fn get_user_id_only(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     email: String,
-) -> Result<UserId, super::ErrorReadOnly> {
+) -> Result<UserId, sqlx::Error> {
     let sql = r"
     SELECT
         id
@@ -2454,7 +2038,7 @@ pub async fn get_user_id_only(
             id: row.try_get::<i32, _>("id")?,
         })
     })();
-    result.map_err(Into::into)
+    result
 }
 
 /// Test single column without return_type - should return raw i32
@@ -2466,7 +2050,7 @@ pub async fn get_user_id_only(
 pub async fn get_user_id_raw(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     email: String,
-) -> Result<i32, super::ErrorReadOnly> {
+) -> Result<i32, sqlx::Error> {
     let sql = r"
     SELECT
         id
@@ -2482,45 +2066,7 @@ pub async fn get_user_id_raw(
     let query = query.bind(&email);
     let row = query.fetch_one(executor).await?;
     Ok(row.try_get::<i32, _>("id")?)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum UpdateUserSocialLinksConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for UpdateUserSocialLinksConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+}#[derive(Debug, Clone)]
 pub struct UpdateUserSocialLinksItem {
     pub id: i32,
     pub name: String,
@@ -2534,7 +2080,7 @@ pub async fn update_user_social_links(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     social_links: Vec<crate::models::UserSocialLink>,
     user_id: i32,
-) -> Result<UpdateUserSocialLinksItem, super::Error<UpdateUserSocialLinksConstraints>> {
+) -> Result<UpdateUserSocialLinksItem, sqlx::Error> {
     let sql = r"
     UPDATE
         public.users
@@ -2571,7 +2117,7 @@ pub async fn update_user_social_links(
                 .transpose()?,
         })
     })();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -2592,7 +2138,7 @@ pub struct GetUserSocialLinksItem {
 pub async fn get_user_social_links(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     user_id: i32,
-) -> Result<GetUserSocialLinksItem, super::ErrorReadOnly> {
+) -> Result<GetUserSocialLinksItem, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -2626,46 +2172,8 @@ pub async fn get_user_social_links(
             created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum InsertUserWithSocialLinksConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for InsertUserWithSocialLinksConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct InsertUserWithSocialLinksItem {
     pub id: i32,
     pub name: String,
@@ -2680,7 +2188,7 @@ pub async fn insert_user_with_social_links(
     name: String,
     email: String,
     social_links: Vec<crate::models::UserSocialLink>,
-) -> Result<InsertUserWithSocialLinksItem, super::Error<InsertUserWithSocialLinksConstraints>> {
+) -> Result<InsertUserWithSocialLinksItem, sqlx::Error> {
     let sql = r"
     INSERT INTO
         public.users (name, email, status, social_links)
@@ -2715,46 +2223,8 @@ pub async fn insert_user_with_social_links(
                 .transpose()?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum TestExplicitNativeMultiunzipConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for TestExplicitNativeMultiunzipConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct TestExplicitNativeMultiunzipRecord {
     pub names: String,
     pub age: Option<i32>,
@@ -2772,7 +2242,7 @@ pub struct TestExplicitNativeMultiunzipItem {
 pub async fn test_explicit_native_multiunzip(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     items: Vec<TestExplicitNativeMultiunzipRecord>,
-) -> Result<TestExplicitNativeMultiunzipItem, super::Error<TestExplicitNativeMultiunzipConstraints>>
+) -> Result<TestExplicitNativeMultiunzipItem, sqlx::Error>
 {
     use itertools::Itertools;
     let sql = r"
@@ -2802,46 +2272,8 @@ pub async fn test_explicit_native_multiunzip(
             age: row.try_get::<Option<i32>, _>("age")?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum TestExplicitNativeWithoutMultiunzipConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for TestExplicitNativeWithoutMultiunzipConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct TestExplicitNativeWithoutMultiunzipItem {
     pub id: i32,
     pub name: String,
@@ -2856,7 +2288,7 @@ pub async fn test_explicit_native_without_multiunzip(
     age: Vec<Option<i32>>,
 ) -> Result<
     TestExplicitNativeWithoutMultiunzipItem,
-    super::Error<TestExplicitNativeWithoutMultiunzipConstraints>,
+    sqlx::Error,
 > {
     let sql = r"
     INSERT INTO
@@ -2881,7 +2313,7 @@ pub async fn test_explicit_native_without_multiunzip(
             age: row.try_get::<Option<i32>, _>("age")?,
         })
     })();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -2900,7 +2332,7 @@ pub struct TestNestedRowItem {
 pub async fn test_nested_row(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     user_id: i32,
-) -> Result<TestNestedRowItem, super::ErrorReadOnly> {
+) -> Result<TestNestedRowItem, sqlx::Error> {
     let sql = r"
     SELECT
         u.id,
@@ -2924,46 +2356,8 @@ pub async fn test_nested_row(
             user_details: row.try_get::<Option<super::types::public::Users>, _>("user_details")?,
         })
     })();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum TestOptionalMultiunzipConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for TestOptionalMultiunzipConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct TestOptionalMultiunzipRecord {
     pub name: String,
     pub email: String,
@@ -2984,7 +2378,7 @@ pub struct TestOptionalMultiunzipItem {
 pub async fn test_optional_multiunzip(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     items: Vec<TestOptionalMultiunzipRecord>,
-) -> Result<Vec<TestOptionalMultiunzipItem>, super::Error<TestOptionalMultiunzipConstraints>> {
+) -> Result<Vec<TestOptionalMultiunzipItem>, sqlx::Error> {
     use itertools::Itertools;
     let sql = r"
     INSERT INTO
@@ -3021,46 +2415,8 @@ pub async fn test_optional_multiunzip(
             })
         })
         .collect();
-    result.map_err(Into::into)
-}
-
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum TestOptionalWithoutMultiunzipConstraints {
-    /// Constraint: users_email_key on table users
-    UsersEmailKey,
-    /// Constraint: users_pkey on table users
-    UsersPkey,
-    /// Constraint: users_referrer_id_fkey on table users
-    UsersReferrerIdFkey,
-    /// Constraint: users_id_not_null on table users
-    UsersIdNotNull,
-    /// Constraint: users_name_not_null on table users
-    UsersNameNotNull,
-    /// Constraint: users_email_not_null on table users
-    UsersEmailNotNull,
-    /// Constraint: users_labels_not_null on table users
-    UsersLabelsNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for TestOptionalWithoutMultiunzipConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "users_email_key" => Ok(Self::UsersEmailKey),
-            "users_pkey" => Ok(Self::UsersPkey),
-            "users_referrer_id_fkey" => Ok(Self::UsersReferrerIdFkey),
-            "users_id_not_null" => Ok(Self::UsersIdNotNull),
-            "users_name_not_null" => Ok(Self::UsersNameNotNull),
-            "users_email_not_null" => Ok(Self::UsersEmailNotNull),
-            "users_labels_not_null" => Ok(Self::UsersLabelsNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+    result
+}#[derive(Debug, Clone)]
 pub struct TestOptionalWithoutMultiunzipItem {
     pub id: i32,
     pub name: String,
@@ -3078,7 +2434,7 @@ pub async fn test_optional_without_multiunzip(
     age: Vec<Option<i32>>,
 ) -> Result<
     Vec<TestOptionalWithoutMultiunzipItem>,
-    super::Error<TestOptionalWithoutMultiunzipConstraints>,
+    sqlx::Error,
 > {
     let sql = r"
     INSERT INTO
@@ -3111,5 +2467,5 @@ pub async fn test_optional_without_multiunzip(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }

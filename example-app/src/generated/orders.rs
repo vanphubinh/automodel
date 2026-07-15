@@ -3,36 +3,6 @@
 
 use sqlx::Row;
 
-/// Constraint violations specific to this query
-#[derive(Debug, Clone)]
-pub enum InsertOrderConstraints {
-    /// Constraint: orders_pkey on table orders
-    OrdersPkey,
-    /// Constraint: orders_id_not_null on table orders
-    OrdersIdNotNull,
-    /// Constraint: orders_tenant_id_not_null on table orders
-    OrdersTenantIdNotNull,
-    /// Constraint: orders_product_name_not_null on table orders
-    OrdersProductNameNotNull,
-    /// Constraint: orders_amount_not_null on table orders
-    OrdersAmountNotNull,
-}
-
-impl TryFrom<super::ErrorConstraintInfo> for InsertOrderConstraints {
-    type Error = ();
-
-    fn try_from(info: super::ErrorConstraintInfo) -> Result<Self, Self::Error> {
-        match info.constraint_name.as_str() {
-            "orders_pkey" => Ok(Self::OrdersPkey),
-            "orders_id_not_null" => Ok(Self::OrdersIdNotNull),
-            "orders_tenant_id_not_null" => Ok(Self::OrdersTenantIdNotNull),
-            "orders_product_name_not_null" => Ok(Self::OrdersProductNameNotNull),
-            "orders_amount_not_null" => Ok(Self::OrdersAmountNotNull),
-            _ => Err(()),
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct InsertOrderItem {
     pub id: i32,
@@ -49,7 +19,7 @@ pub async fn insert_order(
     tenant_id: i32,
     product_name: String,
     amount: rust_decimal::Decimal,
-) -> Result<InsertOrderItem, super::Error<InsertOrderConstraints>> {
+) -> Result<InsertOrderItem, sqlx::Error> {
     let sql = r"
     INSERT INTO
         public.orders (tenant_id, product_name, amount)
@@ -79,7 +49,7 @@ pub async fn insert_order(
             created_at: row.try_get::<Option<jiff_sqlx::Timestamp>, _>("created_at")?,
         })
     })();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -104,7 +74,7 @@ pub struct GetOrdersByTenantItem {
 pub async fn get_orders_by_tenant(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     tenant_id: i32,
-) -> Result<Vec<GetOrdersByTenantItem>, super::ErrorReadOnly> {
+) -> Result<Vec<GetOrdersByTenantItem>, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -137,7 +107,7 @@ pub async fn get_orders_by_tenant(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -171,7 +141,7 @@ pub struct GetOrdersByProductItem {
 pub async fn get_orders_by_product(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     product_name: String,
-) -> Result<Vec<GetOrdersByProductItem>, super::ErrorReadOnly> {
+) -> Result<Vec<GetOrdersByProductItem>, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -204,7 +174,7 @@ pub async fn get_orders_by_product(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -242,7 +212,7 @@ pub struct GetOrdersByTenantRangeItem {
 pub async fn get_orders_by_tenant_range(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     min_tenant_id: i32,
-) -> Result<Vec<GetOrdersByTenantRangeItem>, super::ErrorReadOnly> {
+) -> Result<Vec<GetOrdersByTenantRangeItem>, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -275,5 +245,5 @@ pub async fn get_orders_by_tenant_range(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }

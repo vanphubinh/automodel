@@ -5,7 +5,7 @@
 #[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn create_users_table(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
-) -> Result<(), super::ErrorReadOnly> {
+) -> Result<(), sqlx::Error> {
     let sql = r"
     CREATE TABLE IF NOT EXISTS public.users (
      id SERIAL PRIMARY KEY,

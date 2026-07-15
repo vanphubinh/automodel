@@ -3,7 +3,6 @@
 --    expect: exactly_one
 --    conditions_type: UserModel
 --    return_type: UserModel
---    error_type: UserContentConstraints
 -- @end
 
 UPDATE public.users 

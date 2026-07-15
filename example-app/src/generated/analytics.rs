@@ -35,7 +35,7 @@ pub struct GetUserActivitySummaryItem {
 #[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_user_activity_summary(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
-) -> Result<Vec<GetUserActivitySummaryItem>, super::ErrorReadOnly> {
+) -> Result<Vec<GetUserActivitySummaryItem>, sqlx::Error> {
     let sql = r"
     WITH recent_users AS (
      SELECT id, name, email, created_at,
@@ -86,7 +86,7 @@ pub async fn get_user_activity_summary(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -129,7 +129,7 @@ pub struct GetHierarchicalUserDataItem {
 #[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_hierarchical_user_data(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
-) -> Result<Vec<GetHierarchicalUserDataItem>, super::ErrorReadOnly> {
+) -> Result<Vec<GetHierarchicalUserDataItem>, sqlx::Error> {
     let sql = r"
     WITH RECURSIVE user_hierarchy AS (
      -- Base case: public.users without referrers (or top-level public.users)
@@ -198,7 +198,7 @@ pub async fn get_hierarchical_user_data(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -242,7 +242,7 @@ pub async fn get_user_activity_with_posts(
     since: jiff_sqlx::Timestamp,
     start_date: jiff_sqlx::Timestamp,
     end_date: jiff_sqlx::Timestamp,
-) -> Result<Vec<GetUserActivityWithPostsItem>, super::ErrorReadOnly> {
+) -> Result<Vec<GetUserActivityWithPostsItem>, sqlx::Error> {
     let sql = r"
     SELECT
         u.id as user_id,
@@ -306,7 +306,7 @@ pub async fn get_user_activity_with_posts(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -366,7 +366,7 @@ pub async fn get_user_engagement_metrics(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
     min_engagement_score: i64,
     limit_results: i64,
-) -> Result<Vec<GetUserEngagementMetricsItem>, super::ErrorReadOnly> {
+) -> Result<Vec<GetUserEngagementMetricsItem>, sqlx::Error> {
     let sql = r"
     WITH user_activity AS (
      SELECT 
@@ -447,7 +447,7 @@ pub async fn get_user_engagement_metrics(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -481,7 +481,7 @@ pub async fn get_time_series_user_registrations(
     start_date: jiff_sqlx::Timestamp,
     end_date: jiff_sqlx::Timestamp,
     min_registrations: i64,
-) -> Result<Vec<GetTimeSeriesUserRegistrationsItem>, super::ErrorReadOnly> {
+) -> Result<Vec<GetTimeSeriesUserRegistrationsItem>, sqlx::Error> {
     let sql = r"
     WITH time_series AS (
      SELECT 
@@ -531,7 +531,7 @@ pub async fn get_time_series_user_registrations(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -566,7 +566,7 @@ pub async fn get_users_with_timezone_info(
     end_date: jiff_sqlx::Timestamp,
     min_age_days: rust_decimal::Decimal,
     max_age_days: rust_decimal::Decimal,
-) -> Result<Vec<GetUsersWithTimezoneInfoItem>, super::ErrorReadOnly> {
+) -> Result<Vec<GetUsersWithTimezoneInfoItem>, sqlx::Error> {
     let sql = r"
     SELECT
         id,
@@ -625,7 +625,7 @@ pub async fn get_users_with_timezone_info(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -642,7 +642,7 @@ pub struct GetUserCountAndAvgAgeItem {
 #[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_user_count_and_avg_age(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
-) -> Result<GetUserCountAndAvgAgeItem, super::ErrorReadOnly> {
+) -> Result<GetUserCountAndAvgAgeItem, sqlx::Error> {
     let sql = r"
     SELECT
         COUNT(*) as count,
@@ -661,7 +661,7 @@ pub async fn get_user_count_and_avg_age(
             avg_age: row.try_get::<Option<rust_decimal::Decimal>, _>("avg_age")?,
         })
     })();
-    result.map_err(Into::into)
+    result
 }
 
 /// Test non-null override with native {col!} syntax on count expression
@@ -672,7 +672,7 @@ pub async fn get_user_count_and_avg_age(
 #[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_non_null_count_expression(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
-) -> Result<i64, super::ErrorReadOnly> {
+) -> Result<i64, sqlx::Error> {
     let sql = r"
     SELECT
         count(*) + count(*) AS total
@@ -704,7 +704,7 @@ pub struct GetNonNullMultiFieldsItem {
 #[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_non_null_multi_fields(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
-) -> Result<GetNonNullMultiFieldsItem, super::ErrorReadOnly> {
+) -> Result<GetNonNullMultiFieldsItem, sqlx::Error> {
     let sql = r"
     SELECT
         count(*) AS user_count,
@@ -729,7 +729,7 @@ pub async fn get_non_null_multi_fields(
             greeting: row.try_get::<String, _>("greeting")?,
         })
     })();
-    result.map_err(Into::into)
+    result
 }
 
 #[derive(Debug, Clone)]
@@ -748,7 +748,7 @@ pub struct GetNonNullMultiRowsItem {
 #[tracing::instrument(level = "debug", skip_all, fields(sql = tracing::field::Empty))]
 pub async fn get_non_null_multi_rows(
     executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
-) -> Result<Vec<GetNonNullMultiRowsItem>, super::ErrorReadOnly> {
+) -> Result<Vec<GetNonNullMultiRowsItem>, sqlx::Error> {
     let sql = r"
     SELECT
         id AS user_id,
@@ -774,5 +774,5 @@ pub async fn get_non_null_multi_rows(
             })
         })
         .collect();
-    result.map_err(Into::into)
+    result
 }
