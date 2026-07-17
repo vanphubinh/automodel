@@ -224,6 +224,18 @@ pub fn strip_non_null_column_casts(sql: &str) -> (String, HashSet<String>) {
 use crate::rust_type::{InputParam, OutputColumn, RustName, StructField};
 use crate::utils::to_snake_case;
 
+/// A PostgreSQL domain referenced by a query (via table column catalog metadata).
+///
+/// Prepared statements often expose the domain's base wire type instead of the domain OID,
+/// so these must be registered into [`crate::rust_type::TypeSystem`] explicitly.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ReferencedDomain {
+    pub schema: String,
+    pub name: String,
+    /// Rust type of the domain's base / wire type (e.g. `"String"` for `text`).
+    pub base_type_ref: String,
+}
+
 /// Information about a SQL query's input and output types
 #[derive(Debug, Clone)]
 pub struct QueryTypeInfo {
@@ -231,6 +243,9 @@ pub struct QueryTypeInfo {
     pub input_types: Vec<InputParam>,
     /// Output column types and names
     pub output_types: Vec<OutputColumn>,
+    /// Domains used by output columns (from `pg_attribute` / `pg_type`), even when the
+    /// prepared statement reports only the base wire type.
+    pub referenced_domains: Vec<ReferencedDomain>,
     /// Parsed SQL with conditional blocks (if any)
     pub parsed_sql: Option<ParsedSql>,
     /// The prepared statement, retained for building the TypeSystem
@@ -289,7 +304,7 @@ pub async fn extract_query_types(
     // Extract types
     let input_types =
         extract_input_types(&statement, &param_names, field_type_mappings, datetime_crate)?;
-    let output_types = extract_output_types(
+    let (output_types, referenced_domains) = extract_output_types(
         &client,
         &statement,
         field_type_mappings,
@@ -303,6 +318,7 @@ pub async fn extract_query_types(
     Ok(QueryTypeInfo {
         input_types,
         output_types,
+        referenced_domains,
         parsed_sql: if has_conditionals {
             Some(parsed_sql)
         } else {
@@ -464,8 +480,8 @@ fn extract_input_types(
 /// Per-column metadata resolved from pg_attribute and pg_type system catalogs
 struct ColumnMetadata {
     is_nullable: bool,
-    /// If the column's actual type is a domain, this holds the domain's Rust name
-    domain_type_name: Option<String>,
+    /// If the column's actual type is a domain: (schema, typname)
+    domain: Option<(String, String)>,
 }
 
 /// Get column metadata (nullability and domain type info) by querying PostgreSQL system catalogs
@@ -498,32 +514,27 @@ async fn get_column_metadata(
                 let typname: String = row.get(2);
                 let nspname: String = row.get(3);
 
-                let domain_type_name = if typtype == b'd' as i8 {
-                    // Column uses a domain type — produce its qualified Rust name
-                    Some(qualify_type_for_query_module(&format!(
-                        "super::{}::{}",
-                        crate::utils::schema_to_module_name(&nspname),
-                        crate::utils::to_pascal_case(&typname),
-                    )))
+                let domain = if typtype == b'd' as i8 {
+                    Some((nspname, typname))
                 } else {
                     None
                 };
 
                 ColumnMetadata {
                     is_nullable: !attnotnull,
-                    domain_type_name,
+                    domain,
                 }
             } else {
                 ColumnMetadata {
                     is_nullable: true,
-                    domain_type_name: None,
+                    domain: None,
                 }
             }
         } else {
             // No table/column info available (computed column, function result, etc.)
             ColumnMetadata {
                 is_nullable: true,
-                domain_type_name: None,
+                domain: None,
             }
         };
 
@@ -540,9 +551,11 @@ async fn extract_output_types(
     field_type_mappings: Option<&HashMap<String, String>>,
     non_null_columns: &HashSet<String>,
     datetime_crate: crate::datetime_crate::DateTimeCrate,
-) -> Result<Vec<OutputColumn>> {
+) -> Result<(Vec<OutputColumn>, Vec<ReferencedDomain>)> {
     let columns = statement.columns();
     let mut output_types = Vec::new();
+    let mut referenced_domains = Vec::new();
+    let mut seen_domains = std::collections::HashSet::new();
 
     // Get column metadata (nullability + domain type info)
     let column_metadata = get_column_metadata(client, &columns).await?;
@@ -553,17 +566,40 @@ async fn extract_output_types(
         let is_nullable = meta.map(|m| m.is_nullable).unwrap_or(true);
 
         // Use domain type name if available, otherwise fall back to the base type
-        let base_type_name =
-            if let Some(domain_name) = meta.and_then(|m| m.domain_type_name.clone()) {
-                domain_name
-            } else {
-                qualify_type_for_query_module(
-                    &column
-                        .type_()
-                        .rust_name(datetime_crate)
-                        .map_err(|e| anyhow::anyhow!("{}", e))?,
-                )
+        let base_type_name = if let Some((schema, typname)) = meta.and_then(|m| m.domain.clone()) {
+            // Resolve the domain's base Rust type for TypeSystem alias codegen.
+            // SELECT often reports the base wire type; INSERT/RETURNING may report Domain.
+            let domain_base_ref = match column.type_().kind() {
+                tokio_postgres::types::Kind::Domain(base) => base
+                    .rust_name(datetime_crate)
+                    .map_err(|e| anyhow::anyhow!("{}", e))?,
+                _ => column
+                    .type_()
+                    .rust_name(datetime_crate)
+                    .map_err(|e| anyhow::anyhow!("{}", e))?,
             };
+
+            if seen_domains.insert((schema.clone(), typname.clone())) {
+                referenced_domains.push(ReferencedDomain {
+                    schema: schema.clone(),
+                    name: typname.clone(),
+                    base_type_ref: domain_base_ref,
+                });
+            }
+
+            qualify_type_for_query_module(&format!(
+                "super::{}::{}",
+                crate::utils::schema_to_module_name(&schema),
+                crate::utils::to_pascal_case(&typname),
+            ))
+        } else {
+            qualify_type_for_query_module(
+                &column
+                    .type_()
+                    .rust_name(datetime_crate)
+                    .map_err(|e| anyhow::anyhow!("{}", e))?,
+            )
+        };
 
         // Check if there's a custom type mapping for this field
         let (mapped_type_ref, final_nullable, needs_json_wrapper) = if let Some(mappings) =
@@ -629,7 +665,7 @@ async fn extract_output_types(
         });
     }
 
-    Ok(output_types)
+    Ok((output_types, referenced_domains))
 }
 
 /// Parse SQL to extract meaningful parameter names from named parameters

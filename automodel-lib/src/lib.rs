@@ -533,6 +533,16 @@ impl AutoModel {
                     )
                 })?;
             }
+
+            // Domains discovered via pg_attribute often never appear in statement wire types
+            // (Postgres reports the base type). Register them so types/ aliases are emitted.
+            for domain in &query.type_info.referenced_domains {
+                type_system.ensure_domain_alias(
+                    &domain.schema,
+                    &domain.name,
+                    &domain.base_type_ref,
+                );
+            }
         }
 
         type_system.resolve_nullability(client).await.map_err(|e| {
@@ -549,6 +559,9 @@ impl AutoModel {
         // additional fields. Conflicting mappings produce a build error.
         //
         // 1-segment keys (field/param name) are query-local and handled during extract_query_types.
+        //
+        // Domain alias mappings also register the domain when prepared statements only exposed
+        // the base wire type (so `types:` in automodel.yml still generates types/{schema}.rs).
 
         // Key: (schema.type_name, field_name) → (mapped_type, needs_json_wrapper, source)
         let mut merged_fields: HashMap<(String, String), (String, bool, String)> = HashMap::new();

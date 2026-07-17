@@ -260,10 +260,51 @@ impl TypeSystem {
         Ok(())
     }
 
+    /// Ensure a PostgreSQL domain exists in the type system as a Rust type alias.
+    ///
+    /// Prepared statements often report domain columns/params as their **base** wire type
+    /// (e.g. `text` instead of `party_type`), so [`Self::insert`] may never see the domain.
+    /// Call this when catalog metadata or `types:` config references a domain that must still
+    /// be codegen'd into `types/`.
+    ///
+    /// If the domain is already present, this is a no-op (keeps existing base / mapping).
+    pub fn ensure_domain_alias(&mut self, schema: &str, type_name: &str, base_type_ref: &str) {
+        if self
+            .types
+            .values()
+            .any(|ti| ti.pg_schema == schema && ti.pg_name == type_name)
+        {
+            return;
+        }
+
+        let rust_module = schema_to_module_name(schema);
+        let rust_name = format!("super::{}::{}", rust_module, to_pascal_case(type_name));
+        self.types.insert(
+            rust_name.clone(),
+            TypeInfo {
+                id: 0,
+                pg_name: type_name.to_string(),
+                pg_schema: schema.to_string(),
+                rust_module,
+                rust_name,
+                kind: TypeKind::Alias(AliasInfo {
+                    type_ref: base_type_ref.to_string(),
+                    mapped_type_ref: None,
+                }),
+            },
+        );
+    }
+
     /// Apply a custom type alias override to a domain type.
     ///
     /// Changes the generated `pub type Alias = BaseType;` to use `mapped_type` instead.
+    ///
+    /// If the domain is not yet in the type system (common when Postgres reports only the
+    /// base wire type), it is registered first so `types:` mappings in `automodel.yml` still
+    /// produce `types/{schema}.rs` aliases.
     pub fn apply_alias_mapping(&mut self, schema: &str, type_name: &str, mapped_type: &str) {
+        self.ensure_domain_alias(schema, type_name, mapped_type);
+
         let type_info = self
             .types
             .values_mut()
@@ -304,7 +345,7 @@ impl TypeSystem {
     }
 
     /// Generate type definition files grouped by rust_module, plus a mod.rs.
-    /// Only Enum and Struct kinds produce output; Simple/Array/Range/Alias are skipped.
+    /// Enum, Struct, and Alias kinds produce output; Simple/Array/Range are skipped.
     pub async fn codegen(&self, output_dir: &Path) -> std::io::Result<()> {
         let datetime_crate = self.datetime_crate;
         // Group types by module
@@ -939,5 +980,81 @@ impl TypeInfo {
         let mut seen = std::collections::HashSet::new();
         all_derives.retain(|d| seen.insert(d.clone()));
         format!("#[derive({})]", all_derives.join(", "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_alias_mapping_registers_missing_domain() {
+        let mut type_system = TypeSystem::new(DateTimeCrate::Jiff);
+        type_system.apply_alias_mapping(
+            "public",
+            "party_type",
+            "crate::domain::party::PartyType",
+        );
+
+        let type_info = type_system
+            .types
+            .values()
+            .find(|ti| ti.pg_schema == "public" && ti.pg_name == "party_type")
+            .expect("domain should be registered");
+
+        match &type_info.kind {
+            TypeKind::Alias(alias) => {
+                assert_eq!(
+                    alias.mapped_type_ref.as_deref(),
+                    Some("crate::domain::party::PartyType")
+                );
+            }
+            other => panic!("expected Alias, got {other:?}"),
+        }
+
+        let code = type_info
+            .codegen(&[], DateTimeCrate::Jiff)
+            .expect("alias should codegen");
+        assert!(code.contains("pub type PartyType = crate::domain::party::PartyType;"));
+    }
+
+    #[test]
+    fn ensure_domain_alias_keeps_existing_mapping() {
+        let mut type_system = TypeSystem::new(DateTimeCrate::Jiff);
+        type_system.apply_alias_mapping("public", "party_type", "crate::domain::party::PartyType");
+        type_system.ensure_domain_alias("public", "party_type", "String");
+
+        let type_info = type_system
+            .types
+            .values()
+            .find(|ti| ti.pg_schema == "public" && ti.pg_name == "party_type")
+            .unwrap();
+
+        match &type_info.kind {
+            TypeKind::Alias(alias) => {
+                assert_eq!(
+                    alias.mapped_type_ref.as_deref(),
+                    Some("crate::domain::party::PartyType")
+                );
+            }
+            other => panic!("expected Alias, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ensure_domain_alias_creates_base_alias_without_mapping() {
+        let mut type_system = TypeSystem::new(DateTimeCrate::Jiff);
+        type_system.ensure_domain_alias("public", "party_type", "String");
+
+        let type_info = type_system
+            .types
+            .values()
+            .find(|ti| ti.pg_schema == "public" && ti.pg_name == "party_type")
+            .unwrap();
+
+        let code = type_info
+            .codegen(&[], DateTimeCrate::Jiff)
+            .expect("alias should codegen");
+        assert!(code.contains("pub type PartyType = String;"));
     }
 }
