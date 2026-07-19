@@ -671,9 +671,11 @@ impl AutoModel {
                 }
 
                 Self::apply_wrapper_from_domain_alias(&wrappers, &mut input.field);
+                Self::apply_bind_by_ref_from_domain_alias(type_system, &mut input.field);
             }
             for output in &mut query.type_info.output_types {
                 Self::apply_wrapper_from_domain_alias(&wrappers, &mut output.field);
+                Self::apply_bind_by_ref_from_domain_alias(type_system, &mut output.field);
             }
         }
     }
@@ -691,6 +693,19 @@ impl AutoModel {
             .unwrap_or(field.type_ref.as_str());
         if let Some(&needs_wrapper) = wrappers.get(lookup) {
             field.needs_json_wrapper = needs_wrapper;
+        }
+    }
+
+    fn apply_bind_by_ref_from_domain_alias(
+        type_system: &rust_type::TypeSystem,
+        field: &mut rust_type::StructField,
+    ) {
+        // Params use the alias path (`super::types::…::PartyType`); when that aliases
+        // to String/Vec/…, bind must borrow from `&params`.
+        if let Some(effective) = type_system.domain_alias_effective_type(&field.type_ref) {
+            if rust_type::rust_type_needs_ref_for_bind(effective) {
+                field.bind_by_ref = true;
+            }
         }
     }
 
@@ -1603,6 +1618,7 @@ types:
             is_nullable: false,
             needs_json_wrapper: true, // default for field mapping without suffix
             json_wrapper_explicit: false,
+            bind_by_ref: false,
         };
 
         let wrappers = type_system.domain_alias_wrapper_by_query_path();

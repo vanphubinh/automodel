@@ -476,6 +476,7 @@ fn extract_input_types(
                 is_nullable: is_nullable_value,
                 needs_json_wrapper,
                 json_wrapper_explicit,
+                bind_by_ref: false,
             },
             is_optional,
             is_nullable_element: has_element_nullable,
@@ -674,6 +675,7 @@ async fn extract_output_types(
                 mapped_type_ref,
                 needs_json_wrapper,
                 json_wrapper_explicit,
+                bind_by_ref: false,
             },
         });
     }

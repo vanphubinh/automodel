@@ -376,6 +376,32 @@ impl TypeSystem {
         set
     }
 
+    /// Effective Rust type behind a domain alias query path (`mapped` or base).
+    pub fn domain_alias_effective_type(&self, query_path: &str) -> Option<&str> {
+        for type_info in self.types.values() {
+            let TypeKind::Alias(alias) = &type_info.kind else {
+                continue;
+            };
+            let short_name = type_info
+                .rust_name
+                .strip_prefix(&format!("super::{}::", type_info.rust_module))
+                .unwrap_or(&type_info.rust_name);
+            let path = format!(
+                "super::types::{}::{}",
+                type_info.rust_module, short_name
+            );
+            if path == query_path {
+                return Some(
+                    alias
+                        .mapped_type_ref
+                        .as_deref()
+                        .unwrap_or(alias.type_ref.as_str()),
+                );
+            }
+        }
+        None
+    }
+
     /// Apply a single custom type mapping to a composite type field.
     ///
     /// Finds the composite type by `schema.type_name` and sets `mapped_type_ref`
@@ -588,6 +614,9 @@ pub struct StructField {
     /// True when `@json` / `@native` was set explicitly on a field `types:` mapping.
     /// When false, domain-alias wrapper flags from `automodel.yml` may override the default.
     pub json_wrapper_explicit: bool,
+    /// When true, `query.bind` must borrow this field from `&params` (e.g. String-backed
+    /// domain aliases like `pub type PartyType = String`).
+    pub bind_by_ref: bool,
 }
 
 impl StructField {
@@ -603,8 +632,18 @@ impl StructField {
             is_nullable: false,
             needs_json_wrapper: false,
             json_wrapper_explicit: false,
+            bind_by_ref: false,
         })
     }
+}
+
+/// Types that must be borrowed when binding from `&params` (non-Copy).
+pub fn rust_type_needs_ref_for_bind(rust_type: &str) -> bool {
+    let t = rust_type.trim();
+    t == "String"
+        || t == "serde_json::Value"
+        || t.starts_with("Vec<")
+        || t.starts_with("std::string::String")
 }
 
 impl StructField {
@@ -616,6 +655,11 @@ impl StructField {
     /// The effective Rust type for codegen (mapped type if set, otherwise type_ref)
     pub fn rust_type(&self) -> &str {
         self.mapped_type_ref.as_deref().unwrap_or(&self.type_ref)
+    }
+
+    /// Whether `query.bind` should borrow this value from `&params`.
+    pub fn needs_bind_by_ref(&self) -> bool {
+        self.bind_by_ref || rust_type_needs_ref_for_bind(self.rust_type())
     }
 
     /// Generates a struct field declaration line: `pub field_name: Type,`

@@ -607,23 +607,11 @@ fn generate_static_function_body(
                             json_to_value_expr(&format!("params.{clean_name}"), param_type)
                         ));
                     }
-                } else if param_type == "String" {
-                    // Use reference for String parameters to avoid move issues
+                } else {
+                    // Bind by value for Copy-like types; borrow String / String-backed aliases
                     body.push_str(&format!(
                         "    let query = query.bind({});\n",
-                        bind_arg(&format!("params.{clean_name}"), param_type)
-                    ));
-                } else if rust_type_info.is_nullable {
-                    // For Option types, we can bind directly
-                    body.push_str(&format!(
-                        "    let query = query.bind(params.{});\n",
-                        clean_name
-                    ));
-                } else {
-                    // For Copy types, we can bind directly
-                    body.push_str(&format!(
-                        "    let query = query.bind(params.{});\n",
-                        clean_name
+                        bind_arg(&format!("params.{clean_name}"), rust_type_info)
                     ));
                 }
             }
@@ -638,7 +626,6 @@ fn generate_static_function_body(
                 let clean_name = strip_input_suffix(name);
 
                 let rust_type_info = &type_info.input_types[i];
-                let param_type = rust_type_info.rust_type();
 
                 // Check if this is a custom type that needs JSON serialization
                 if rust_type_info.needs_json_wrapper {
@@ -666,14 +653,11 @@ fn generate_static_function_body(
                             clean_name
                         ));
                     }
-                } else if param_type == "String" {
-                    // Use reference for String parameters to avoid move issues
+                } else {
                     body.push_str(&format!(
                         "    let query = query.bind({});\n",
-                        bind_arg(&clean_name, param_type)
+                        bind_arg(&clean_name, rust_type_info)
                     ));
-                } else {
-                    body.push_str(&format!("    let query = query.bind({});\n", clean_name));
                 }
             }
         }
@@ -685,11 +669,11 @@ fn generate_static_function_body(
 
 /// Build the argument passed to `query.bind(...)`.
 ///
-/// Borrow `String` to avoid moving out of borrowed params; bind other types by
-/// value so generated code stays free of clippy `needless_borrows_for_generic_args`
-/// (e.g. `&params.limit` for `i32`).
-fn bind_arg(accessor: &str, rust_type: &str) -> String {
-    if rust_type == "String" {
+/// Borrow non-Copy values (e.g. `String`, String-backed domain aliases) to avoid
+/// moving out of `&params`. Bind Copy-like types by value to avoid clippy
+/// `needless_borrows_for_generic_args` (e.g. `&params.limit` for `i32`).
+fn bind_arg(accessor: &str, field: &crate::rust_type::StructField) -> String {
+    if field.needs_bind_by_ref() {
         format!("&{accessor}")
     } else {
         accessor.to_string()
@@ -910,7 +894,6 @@ fn generate_conditional_function_body(
                         }
                         body.push_str(&format!("    query = query.bind({}_json);\n", clean_param));
                     } else {
-                        let param_type = rust_type_info.rust_type();
                         let accessor = if use_structured_params {
                             format!("params.{clean_param}")
                         } else {
@@ -918,7 +901,7 @@ fn generate_conditional_function_body(
                         };
                         body.push_str(&format!(
                             "    query = query.bind({});\n",
-                            bind_arg(&accessor, param_type)
+                            bind_arg(&accessor, rust_type_info)
                         ));
                     }
                 }
@@ -990,12 +973,11 @@ fn generate_conditional_function_body(
                             clean_param
                         ));
                     } else {
-                        let param_type = rust_type_info.rust_type();
                         if use_conditional_diff {
                             // For conditions_type, bind new.field directly
                             body.push_str(&format!(
                                 "        query = query.bind({});\n",
-                                bind_arg(&format!("new.{clean_param}"), param_type)
+                                bind_arg(&format!("new.{clean_param}"), rust_type_info)
                             ));
                         } else if use_structured_params {
                             // For parameters_type, unwrap from params struct
@@ -1548,11 +1530,45 @@ mod tests {
 
     #[test]
     fn bind_arg_borrows_string_only() {
-        assert_eq!(bind_arg("params.name", "String"), "&params.name");
-        assert_eq!(bind_arg("params.limit", "i32"), "params.limit");
-        assert_eq!(bind_arg("params.include_archived", "bool"), "params.include_archived");
-        assert_eq!(bind_arg("new.age", "i32"), "new.age");
-        assert_eq!(bind_arg("name", "String"), "&name");
+        let string_field = crate::rust_type::StructField {
+            pg_name: "name".into(),
+            rust_name: "name".into(),
+            type_ref: "String".into(),
+            mapped_type_ref: None,
+            is_nullable: false,
+            needs_json_wrapper: false,
+            json_wrapper_explicit: false,
+            bind_by_ref: false,
+        };
+        let i32_field = crate::rust_type::StructField {
+            pg_name: "limit".into(),
+            rust_name: "limit".into(),
+            type_ref: "i32".into(),
+            mapped_type_ref: None,
+            is_nullable: false,
+            needs_json_wrapper: false,
+            json_wrapper_explicit: false,
+            bind_by_ref: false,
+        };
+        let string_alias = crate::rust_type::StructField {
+            pg_name: "party_type".into(),
+            rust_name: "party_type".into(),
+            type_ref: "super::types::public::PartyType".into(),
+            mapped_type_ref: None,
+            is_nullable: false,
+            needs_json_wrapper: false,
+            json_wrapper_explicit: false,
+            bind_by_ref: true, // String-backed domain alias
+        };
+        assert_eq!(bind_arg("params.name", &string_field), "&params.name");
+        assert_eq!(bind_arg("params.limit", &i32_field), "params.limit");
+        assert_eq!(bind_arg("params.include_archived", &i32_field), "params.include_archived");
+        assert_eq!(bind_arg("new.age", &i32_field), "new.age");
+        assert_eq!(bind_arg("name", &string_field), "&name");
+        assert_eq!(
+            bind_arg("params.party_type", &string_alias),
+            "&params.party_type"
+        );
     }
 
     #[test]
