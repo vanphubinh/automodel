@@ -446,7 +446,7 @@ impl AutoModel {
         client.execute("SET search_path TO ''", &[]).await?;
 
         // PHASE 1: Analyze all queries and collect information
-        let analyzed_queries = self.analyze_all_queries(&client).await?;
+        let mut analyzed_queries = self.analyze_all_queries(&client).await?;
 
         // Build TypeSystem from captured statements (no re-preparation needed)
         let type_system = Self::build_type_system(
@@ -456,6 +456,10 @@ impl AutoModel {
             &self.defaults.types,
         )
         .await?;
+
+        // Apply domain alias @native/@json flags to params/columns without per-field overrides
+        Self::apply_domain_alias_wrappers(&type_system, &mut analyzed_queries);
+
         type_system.codegen(&output_path.join("types")).await?;
 
         // Collect all warnings
@@ -565,8 +569,8 @@ impl AutoModel {
 
         // Key: (schema.type_name, field_name) → (mapped_type, needs_json_wrapper, source)
         let mut merged_fields: HashMap<(String, String), (String, bool, String)> = HashMap::new();
-        // Key: schema.domain_name → (mapped_type, source)
-        let mut merged_aliases: HashMap<String, (String, String)> = HashMap::new();
+        // Key: schema.domain_name → (mapped_type, needs_json_wrapper, source)
+        let mut merged_aliases: HashMap<String, (String, bool, String)> = HashMap::new();
 
         Self::collect_schema_type_mappings(
             global_types,
@@ -588,9 +592,14 @@ impl AutoModel {
         }
 
         // Apply alias mappings (2-segment keys)
-        for (key, (mapped_type, _)) in &merged_aliases {
+        for (key, (mapped_type, needs_json_wrapper, _)) in &merged_aliases {
             let parts: Vec<&str> = key.splitn(2, '.').collect();
-            type_system.apply_alias_mapping(parts[0], parts[1], mapped_type);
+            type_system.apply_alias_mapping(
+                parts[0],
+                parts[1],
+                mapped_type,
+                *needs_json_wrapper,
+            );
         }
 
         // Apply composite field mappings (3-segment keys)
@@ -608,12 +617,89 @@ impl AutoModel {
         Ok(type_system)
     }
 
+    /// Parse a `types:` mapping value, stripping an optional `@json` / `@native` suffix.
+    ///
+    /// Returns `(clean_rust_type, needs_json_wrapper)`.
+    /// - `@json` → JSON wrapper
+    /// - `@native` → native sqlx Encode/Decode
+    /// - no suffix → `default_needs_wrapper` (composite fields default JSON; domains default native)
+    pub(crate) fn parse_type_mapping(
+        value: &str,
+        default_needs_wrapper: bool,
+    ) -> (&str, bool) {
+        let value = value.trim();
+        if let Some(clean) = value.strip_suffix("@json") {
+            (clean, true)
+        } else if let Some(clean) = value.strip_suffix("@native") {
+            (clean, false)
+        } else {
+            (value, default_needs_wrapper)
+        }
+    }
+
+    /// Propagate domain-alias types and `@native`/`@json` flags onto query params/columns.
+    ///
+    /// 1. Inputs that share a name with an output typed as a domain alias inherit that
+    ///    `type_ref` when Postgres only reported the base wire type (common for `WHERE`
+    ///    filters) and the input has no per-field `types:` override.
+    /// 2. Fields whose `type_ref` or `mapped_type_ref` matches a domain alias inherit the
+    ///    alias wrapper flag unless `@json`/`@native` was set explicitly on the field.
+    pub(crate) fn apply_domain_alias_wrappers(
+        type_system: &rust_type::TypeSystem,
+        analyzed_queries: &mut [QueryDefinitionRuntime],
+    ) {
+        let wrappers = type_system.domain_alias_wrapper_by_query_path();
+        let domain_paths = type_system.domain_alias_query_paths();
+        if wrappers.is_empty() && domain_paths.is_empty() {
+            return;
+        }
+
+        for query in analyzed_queries {
+            let domain_outputs: HashMap<String, String> = query
+                .type_info
+                .output_types
+                .iter()
+                .filter(|output| domain_paths.contains(&output.field.type_ref))
+                .map(|output| (output.field.pg_name.clone(), output.field.type_ref.clone()))
+                .collect();
+
+            for input in &mut query.type_info.input_types {
+                if input.field.mapped_type_ref.is_none() {
+                    if let Some(domain_path) = domain_outputs.get(&input.field.pg_name) {
+                        input.field.type_ref = domain_path.clone();
+                    }
+                }
+
+                Self::apply_wrapper_from_domain_alias(&wrappers, &mut input.field);
+            }
+            for output in &mut query.type_info.output_types {
+                Self::apply_wrapper_from_domain_alias(&wrappers, &mut output.field);
+            }
+        }
+    }
+
+    fn apply_wrapper_from_domain_alias(
+        wrappers: &HashMap<String, bool>,
+        field: &mut rust_type::StructField,
+    ) {
+        if field.json_wrapper_explicit {
+            return;
+        }
+        let lookup = field
+            .mapped_type_ref
+            .as_deref()
+            .unwrap_or(field.type_ref.as_str());
+        if let Some(&needs_wrapper) = wrappers.get(lookup) {
+            field.needs_json_wrapper = needs_wrapper;
+        }
+    }
+
     /// Collect 2-segment (domain alias) and 3-segment (composite field) type mappings.
     /// 1-segment keys are ignored here (they are query-local field/param overrides).
     fn collect_schema_type_mappings(
         mappings: &HashMap<String, String>,
         source: &str,
-        merged_aliases: &mut HashMap<String, (String, String)>,
+        merged_aliases: &mut HashMap<String, (String, bool, String)>,
         merged_fields: &mut HashMap<(String, String), (String, bool, String)>,
     ) -> Result<()> {
         for (key, value) in mappings {
@@ -633,35 +719,40 @@ impl AutoModel {
             }
             if parts.len() == 2 {
                 // 2-segment: schema.domain_name → alias override
-                if let Some((existing_type, existing_source)) = merged_aliases.get(key) {
-                    if existing_type != value {
+                // Domains default to native binding (sqlx Type/Encode); use @json to opt into JSON.
+                let (clean_type, needs_wrapper) = Self::parse_type_mapping(value, false);
+                if let Some((existing_type, existing_wrapper, existing_source)) =
+                    merged_aliases.get(key)
+                {
+                    if existing_type != clean_type || *existing_wrapper != needs_wrapper {
                         anyhow::bail!(
                             "Conflicting type mappings for domain `{}`:\n  \
                              - {}: \"{}\"\n  \
                              - {}: \"{}\"",
                             key,
                             existing_source,
-                            existing_type,
+                            if *existing_wrapper {
+                                format!("{existing_type}@json")
+                            } else {
+                                format!("{existing_type}@native")
+                            },
                             source,
                             value,
                         );
                     }
                 } else {
-                    merged_aliases.insert(key.clone(), (value.clone(), source.to_string()));
+                    merged_aliases.insert(
+                        key.clone(),
+                        (clean_type.to_string(), needs_wrapper, source.to_string()),
+                    );
                 }
             } else if parts.len() == 3 {
                 // 3-segment: schema.type.field → composite field mapping
                 let composite_key = format!("{}.{}", parts[0], parts[1]);
                 let field_name = parts[2].to_string();
 
-                // Parse @json/@native suffix
-                let (clean_type, needs_wrapper) = if value.ends_with("@json") {
-                    (&value[..value.len() - 5], true)
-                } else if value.ends_with("@native") {
-                    (&value[..value.len() - 7], false)
-                } else {
-                    (value.as_str(), true)
-                };
+                // Composite / jsonb fields default to JSON wrapping.
+                let (clean_type, needs_wrapper) = Self::parse_type_mapping(value, true);
 
                 let map_key = (composite_key.clone(), field_name.clone());
                 if let Some((existing_type, _, existing_source)) = merged_fields.get(&map_key) {
@@ -1427,7 +1518,101 @@ types:
             aliases.get("public.positive_int").unwrap().0,
             "std::num::NonZeroI32"
         );
+        assert!(!aliases.get("public.positive_int").unwrap().1);
         assert!(fields.is_empty());
+    }
+
+    #[test]
+    fn domain_alias_mapping_strips_native_suffix() {
+        let mut mappings = HashMap::new();
+        mappings.insert(
+            "public.party_type".to_string(),
+            "crate::domain::party::PartyType@native".to_string(),
+        );
+        let mut aliases = HashMap::new();
+        let mut fields = HashMap::new();
+        AutoModel::collect_schema_type_mappings(
+            &mappings,
+            "automodel.yml",
+            &mut aliases,
+            &mut fields,
+        )
+        .unwrap();
+        let (mapped, needs_json, _) = aliases.get("public.party_type").unwrap();
+        assert_eq!(mapped, "crate::domain::party::PartyType");
+        assert!(!needs_json);
+        assert!(!mapped.contains('@'));
+    }
+
+    #[test]
+    fn domain_alias_mapping_json_suffix_sets_wrapper() {
+        let mut mappings = HashMap::new();
+        mappings.insert(
+            "public.party_type".to_string(),
+            "crate::domain::party::PartyType@json".to_string(),
+        );
+        let mut aliases = HashMap::new();
+        let mut fields = HashMap::new();
+        AutoModel::collect_schema_type_mappings(
+            &mappings,
+            "automodel.yml",
+            &mut aliases,
+            &mut fields,
+        )
+        .unwrap();
+        let (mapped, needs_json, _) = aliases.get("public.party_type").unwrap();
+        assert_eq!(mapped, "crate::domain::party::PartyType");
+        assert!(*needs_json);
+    }
+
+    #[test]
+    fn parse_type_mapping_defaults() {
+        assert_eq!(
+            AutoModel::parse_type_mapping("crate::T@native", true),
+            ("crate::T", false)
+        );
+        assert_eq!(
+            AutoModel::parse_type_mapping("crate::T@json", false),
+            ("crate::T", true)
+        );
+        assert_eq!(
+            AutoModel::parse_type_mapping("crate::T", false),
+            ("crate::T", false)
+        );
+        assert_eq!(
+            AutoModel::parse_type_mapping("crate::T", true),
+            ("crate::T", true)
+        );
+    }
+
+    #[test]
+    fn domain_alias_wrapper_overrides_non_explicit_field_mapping() {
+        let mut type_system = rust_type::TypeSystem::new(DateTimeCrate::Jiff);
+        type_system.apply_alias_mapping(
+            "public",
+            "party_type",
+            "crate::domain::party::PartyType",
+            false, // @native
+        );
+
+        let mut field = rust_type::StructField {
+            pg_name: "party_type".to_string(),
+            rust_name: "party_type".to_string(),
+            type_ref: "String".to_string(),
+            mapped_type_ref: Some("super::types::public::PartyType".to_string()),
+            is_nullable: false,
+            needs_json_wrapper: true, // default for field mapping without suffix
+            json_wrapper_explicit: false,
+        };
+
+        let wrappers = type_system.domain_alias_wrapper_by_query_path();
+        AutoModel::apply_wrapper_from_domain_alias(&wrappers, &mut field);
+        assert!(!field.needs_json_wrapper);
+
+        field.needs_json_wrapper = true;
+        field.json_wrapper_explicit = true; // @json on the field
+        AutoModel::apply_wrapper_from_domain_alias(&wrappers, &mut field);
+        assert!(field.needs_json_wrapper);
     }
 
     #[test]

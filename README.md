@@ -362,8 +362,26 @@ By default, custom types use JSON serialization. Control this with suffixes:
 -- @end
 ```
 
+The same suffixes work on **global** domain mappings in `automodel.yml`:
+
+```yaml
+types:
+  # Domain enums with sqlx::Type — prefer @native (default for domains is also native)
+  public.party_type: "crate::domain::party::PartyType@native"
+  # Opt into JSON for a domain only when needed
+  # public.party_type: "crate::domain::party::PartyType@json"
+```
+
+Global domain `@native` / `@json` also applies to query params/columns that use the
+generated domain alias (including per-query mappings like
+`party_type: "super::types::public::PartyType"` without a suffix). Explicit
+`@native` / `@json` on a field mapping still wins. Inputs that share a name with a
+selected domain column inherit that domain type when Postgres only reports the base
+wire type (e.g. `WHERE party_type = #{party_type?}`).
+
 - **`@native`**: Type implements `sqlx::Encode`/`Decode` (or `tokio_postgres::ToSql`/`FromSql`)
-- **`@json`** or no suffix: Uses JSON serialization (requires `serde::Serialize`/`Deserialize`)
+- **`@json`** or no suffix on field/composite mappings: Uses JSON serialization (requires `serde::Serialize`/`Deserialize`)
+- Domain (`schema.domain`) mappings with **no suffix** default to **native** binding (not JSON)
 
 **Composite Type Field Mappings:**
 

@@ -302,8 +302,12 @@ pub async fn extract_query_types(
         })?;
 
     // Extract types
-    let input_types =
-        extract_input_types(&statement, &param_names, field_type_mappings, datetime_crate)?;
+    let input_types = extract_input_types(
+        &statement,
+        &param_names,
+        field_type_mappings,
+        datetime_crate,
+    )?;
     let (output_types, referenced_domains) = extract_output_types(
         &client,
         &statement,
@@ -406,6 +410,7 @@ fn extract_input_types(
 
         let mut is_optional = is_optional_param;
         let mut needs_json_wrapper = false;
+        let mut json_wrapper_explicit = false;
         let mut mapped_type_ref: Option<String> = None;
 
         // Check if there's a custom type mapping for this parameter
@@ -441,13 +446,14 @@ fn extract_input_types(
                 // Check for explicit JSON wrapper control via @json or @native suffix
                 // - Type@json: Force JSON wrapper (for custom types without sqlx traits)
                 // - Type@native: No JSON wrapper (for types implementing sqlx::Encode/Decode)
-                // - Type (no suffix): Default - JSON wrapper enabled
-                let (clean_type, needs_wrapper) = if custom_type.ends_with("@json") {
-                    (&custom_type[..custom_type.len() - 5], true)
+                // - Type (no suffix): Default - JSON wrapper enabled (may be overridden by
+                //   global domain `types:` mappings in automodel.yml)
+                let (clean_type, needs_wrapper, explicit) = if custom_type.ends_with("@json") {
+                    (&custom_type[..custom_type.len() - 5], true, true)
                 } else if custom_type.ends_with("@native") {
-                    (&custom_type[..custom_type.len() - 7], false)
+                    (&custom_type[..custom_type.len() - 7], false, true)
                 } else {
-                    (custom_type.as_str(), true)
+                    (custom_type.as_str(), true, false)
                 };
 
                 mapped_type_ref = Some(if has_element_nullable {
@@ -456,6 +462,7 @@ fn extract_input_types(
                     clean_type.to_string()
                 });
                 needs_json_wrapper = needs_wrapper;
+                json_wrapper_explicit = explicit;
                 is_optional = is_optional_param;
             }
         }
@@ -468,6 +475,7 @@ fn extract_input_types(
                 mapped_type_ref,
                 is_nullable: is_nullable_value,
                 needs_json_wrapper,
+                json_wrapper_explicit,
             },
             is_optional,
             is_nullable_element: has_element_nullable,
@@ -602,48 +610,52 @@ async fn extract_output_types(
         };
 
         // Check if there's a custom type mapping for this field
-        let (mapped_type_ref, final_nullable, needs_json_wrapper) = if let Some(mappings) =
-            field_type_mappings
-        {
-            let custom_type = mappings
-                .iter()
-                .find(|(key, _)| key.ends_with(&format!(".{}", column_name)))
-                .map(|(_, rust_type)| rust_type.clone());
+        let (mapped_type_ref, final_nullable, needs_json_wrapper, json_wrapper_explicit) =
+            if let Some(mappings) = field_type_mappings {
+                let custom_type = mappings
+                    .iter()
+                    .find(|(key, _)| key.ends_with(&format!(".{}", column_name)))
+                    .map(|(_, rust_type)| rust_type.clone());
 
-            if let Some(custom_type) = custom_type {
-                // Reject top-level Option<> in type mappings
-                let stripped = custom_type.trim();
-                let without_suffix = if stripped.ends_with("@json") {
-                    &stripped[..stripped.len() - 5]
-                } else if stripped.ends_with("@native") {
-                    &stripped[..stripped.len() - 7]
-                } else {
-                    stripped
-                };
-                if without_suffix.starts_with("Option<") {
-                    anyhow::bail!(
+                if let Some(custom_type) = custom_type {
+                    // Reject top-level Option<> in type mappings
+                    let stripped = custom_type.trim();
+                    let without_suffix = if stripped.ends_with("@json") {
+                        &stripped[..stripped.len() - 5]
+                    } else if stripped.ends_with("@native") {
+                        &stripped[..stripped.len() - 7]
+                    } else {
+                        stripped
+                    };
+                    if without_suffix.starts_with("Option<") {
+                        anyhow::bail!(
                             "Type mapping for '{}' must not use Option<>. \
                              For output columns, nullability is automatically inferred from the database schema. \
                              For input parameters, use the ?, ??, or [?] suffix annotations in the query.",
                             column_name
                         );
-                }
+                    }
 
-                let (clean_type, needs_wrapper) = if custom_type.ends_with("@json") {
-                    (&custom_type[..custom_type.len() - 5], true)
-                } else if custom_type.ends_with("@native") {
-                    (&custom_type[..custom_type.len() - 7], false)
+                    let (clean_type, needs_wrapper, explicit) = if custom_type.ends_with("@json") {
+                        (&custom_type[..custom_type.len() - 5], true, true)
+                    } else if custom_type.ends_with("@native") {
+                        (&custom_type[..custom_type.len() - 7], false, true)
+                    } else {
+                        (custom_type.as_str(), true, false)
+                    };
+
+                    (
+                        Some(clean_type.to_string()),
+                        is_nullable,
+                        needs_wrapper,
+                        explicit,
+                    )
                 } else {
-                    (custom_type.as_str(), true)
-                };
-
-                (Some(clean_type.to_string()), is_nullable, needs_wrapper)
+                    (None, is_nullable, false, false)
+                }
             } else {
-                (None, is_nullable, false)
-            }
-        } else {
-            (None, is_nullable, false)
-        };
+                (None, is_nullable, false, false)
+            };
 
         let force_non_null = non_null_columns.contains(column_name);
         // Apply non-null override: force_non_null wins over schema-inferred nullability
@@ -661,6 +673,7 @@ async fn extract_output_types(
                 type_ref: base_type_name,
                 mapped_type_ref,
                 needs_json_wrapper,
+                json_wrapper_explicit,
             },
         });
     }

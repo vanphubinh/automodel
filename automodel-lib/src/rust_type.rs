@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::Path;
 use tokio::fs;
 use tokio_postgres::types::Field as PgField;
@@ -290,6 +291,7 @@ impl TypeSystem {
                 kind: TypeKind::Alias(AliasInfo {
                     type_ref: base_type_ref.to_string(),
                     mapped_type_ref: None,
+                    needs_json_wrapper: false,
                 }),
             },
         );
@@ -299,10 +301,20 @@ impl TypeSystem {
     ///
     /// Changes the generated `pub type Alias = BaseType;` to use `mapped_type` instead.
     ///
+    /// `needs_json_wrapper` controls whether query params/columns typed as this domain
+    /// alias are bound via JSON (`true`) or native `sqlx` encode/decode (`false`).
+    /// Use `@native` / `@json` suffixes in `types:` mappings (stripped before this call).
+    ///
     /// If the domain is not yet in the type system (common when Postgres reports only the
     /// base wire type), it is registered first so `types:` mappings in `automodel.yml` still
     /// produce `types/{schema}.rs` aliases.
-    pub fn apply_alias_mapping(&mut self, schema: &str, type_name: &str, mapped_type: &str) {
+    pub fn apply_alias_mapping(
+        &mut self,
+        schema: &str,
+        type_name: &str,
+        mapped_type: &str,
+        needs_json_wrapper: bool,
+    ) {
         self.ensure_domain_alias(schema, type_name, mapped_type);
 
         let type_info = self
@@ -313,8 +325,55 @@ impl TypeSystem {
         if let Some(type_info) = type_info {
             if let TypeKind::Alias(ref mut alias) = type_info.kind {
                 alias.mapped_type_ref = Some(mapped_type.to_string());
+                alias.needs_json_wrapper = needs_json_wrapper;
             }
         }
+    }
+
+    /// Query-module type path (`super::types::{module}::{Name}`) → JSON wrapper flag
+    /// for every domain alias in the type system.
+    ///
+    /// Unmapped domains default to native (`false`). Mapped domains use the flag from
+    /// `types:` (`@native` / `@json` / domain default).
+    pub fn domain_alias_wrapper_by_query_path(&self) -> HashMap<String, bool> {
+        let mut map = HashMap::new();
+        for type_info in self.types.values() {
+            let TypeKind::Alias(alias) = &type_info.kind else {
+                continue;
+            };
+            let short_name = type_info
+                .rust_name
+                .strip_prefix(&format!("super::{}::", type_info.rust_module))
+                .unwrap_or(&type_info.rust_name);
+            let query_path = format!(
+                "super::types::{}::{}",
+                type_info.rust_module, short_name
+            );
+            map.insert(query_path, alias.needs_json_wrapper);
+            if let Some(mapped) = &alias.mapped_type_ref {
+                map.insert(mapped.clone(), alias.needs_json_wrapper);
+            }
+        }
+        map
+    }
+
+    /// All domain-alias query paths (`super::types::{module}::{Name}`).
+    pub fn domain_alias_query_paths(&self) -> std::collections::HashSet<String> {
+        let mut set = std::collections::HashSet::new();
+        for type_info in self.types.values() {
+            let TypeKind::Alias(_) = &type_info.kind else {
+                continue;
+            };
+            let short_name = type_info
+                .rust_name
+                .strip_prefix(&format!("super::{}::", type_info.rust_module))
+                .unwrap_or(&type_info.rust_name);
+            set.insert(format!(
+                "super::types::{}::{}",
+                type_info.rust_module, short_name
+            ));
+        }
+        set
     }
 
     /// Apply a single custom type mapping to a composite type field.
@@ -445,6 +504,7 @@ impl TypeInfo {
                 tokio_postgres::types::Kind::Domain(base_type) => TypeKind::Alias(AliasInfo {
                     type_ref: base_type.rust_name(datetime_crate)?,
                     mapped_type_ref: None,
+                    needs_json_wrapper: false,
                 }),
                 tokio_postgres::types::Kind::Composite(fields) => {
                     let mut struct_fields = Vec::with_capacity(fields.len());
@@ -490,6 +550,9 @@ pub struct AliasInfo {
     pub type_ref: TypeRef,
     /// Custom type override (e.g. "std::num::NonZeroI32") set via `types:` config
     pub mapped_type_ref: Option<TypeRef>,
+    /// When `mapped_type_ref` is set: bind/decode via JSON (`true`) or native sqlx (`false`).
+    /// Set from `@json` / `@native` on domain `types:` mappings (default native for domains).
+    pub needs_json_wrapper: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -522,6 +585,9 @@ pub struct StructField {
     pub is_nullable: bool,
     /// Whether this field needs JSON serialization wrapper (for custom type mappings)
     pub needs_json_wrapper: bool,
+    /// True when `@json` / `@native` was set explicitly on a field `types:` mapping.
+    /// When false, domain-alias wrapper flags from `automodel.yml` may override the default.
+    pub json_wrapper_explicit: bool,
 }
 
 impl StructField {
@@ -536,6 +602,7 @@ impl StructField {
             mapped_type_ref: None,
             is_nullable: false,
             needs_json_wrapper: false,
+            json_wrapper_explicit: false,
         })
     }
 }
@@ -994,6 +1061,7 @@ mod tests {
             "public",
             "party_type",
             "crate::domain::party::PartyType",
+            false,
         );
 
         let type_info = type_system
@@ -1008,6 +1076,7 @@ mod tests {
                     alias.mapped_type_ref.as_deref(),
                     Some("crate::domain::party::PartyType")
                 );
+                assert!(!alias.needs_json_wrapper);
             }
             other => panic!("expected Alias, got {other:?}"),
         }
@@ -1016,12 +1085,34 @@ mod tests {
             .codegen(&[], DateTimeCrate::Jiff)
             .expect("alias should codegen");
         assert!(code.contains("pub type PartyType = crate::domain::party::PartyType;"));
+        assert!(!code.contains("@native"));
+    }
+
+    #[test]
+    fn apply_alias_mapping_strips_are_applied_by_caller_native_flag() {
+        let mut type_system = TypeSystem::new(DateTimeCrate::Jiff);
+        type_system.apply_alias_mapping(
+            "public",
+            "party_type",
+            "crate::domain::party::PartyType",
+            true,
+        );
+        let wrappers = type_system.domain_alias_wrapper_by_query_path();
+        assert_eq!(
+            wrappers.get("super::types::public::PartyType"),
+            Some(&true)
+        );
     }
 
     #[test]
     fn ensure_domain_alias_keeps_existing_mapping() {
         let mut type_system = TypeSystem::new(DateTimeCrate::Jiff);
-        type_system.apply_alias_mapping("public", "party_type", "crate::domain::party::PartyType");
+        type_system.apply_alias_mapping(
+            "public",
+            "party_type",
+            "crate::domain::party::PartyType",
+            false,
+        );
         type_system.ensure_domain_alias("public", "party_type", "String");
 
         let type_info = type_system
